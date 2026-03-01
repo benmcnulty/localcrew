@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import type { CrustyApp } from "./app.ts";
 import { CommandParseError, parseCommand } from "./commands.ts";
-import { getEnvBoolean, getEnvNumber, getEnvString, loadLocalEnv } from "./env.ts";
+import {
+  getEnvBoolean,
+  getEnvNumber,
+  getEnvString,
+  getOptionalEnvString,
+  loadLocalEnv
+} from "./env.ts";
 import { getGuiHtml, getGuiScript, getGuiStyles } from "./gui.ts";
 
 export interface ApiServerHandle {
@@ -30,6 +36,7 @@ interface WorkerRequestMessage {
   method: string;
   url: string;
   bodyText: string;
+  headers?: Record<string, string>;
 }
 
 interface WorkerResponseMessage {
@@ -51,6 +58,7 @@ interface ApiRequest {
   method: string;
   url: URL;
   bodyText: string;
+  headers?: Record<string, string>;
 }
 
 interface ApiResponsePayload {
@@ -73,12 +81,38 @@ function normalizeHudTab(value: string | null): "status" | "queue" | "metrics" |
   return value === "queue" || value === "metrics" || value === "detail" ? value : "status";
 }
 
+function getCorsOrigin(): string {
+  return getEnvString("CRUSTY_API_CORS_ORIGIN", "");
+}
+
+function getApiToken(): string | undefined {
+  return getOptionalEnvString("CRUSTY_API_TOKEN");
+}
+
+function getRequestApiToken(request: ApiRequest): string {
+  const authHeader = request.headers?.authorization ?? request.headers?.Authorization ?? "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  return bearerToken || (request.url.searchParams.get("token") ?? "");
+}
+
+function corsHeaders(): Record<string, string> {
+  const origin = getCorsOrigin();
+  if (!origin) {
+    return {};
+  }
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    "access-control-allow-headers": "content-type, authorization"
+  };
+}
+
 function jsonResponse(status: number, body: unknown): ApiResponsePayload {
   return {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "access-control-allow-origin": "*",
+      ...corsHeaders(),
       "cache-control": "no-store"
     },
     bodyText: `${JSON.stringify(body, null, 2)}\n`
@@ -94,7 +128,7 @@ function textResponse(
     status,
     headers: {
       "content-type": contentType,
-      "access-control-allow-origin": "*",
+      ...corsHeaders(),
       "cache-control": "no-store"
     },
     bodyText
@@ -109,7 +143,34 @@ function parseJsonBody<T>(bodyText: string): T {
   }
 }
 
-async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<ApiResponsePayload> {
+async function buildApiResponse(
+  app: CrustyApp,
+  request: ApiRequest
+): Promise<ApiResponsePayload> {
+  // Handle CORS preflight
+  if (request.method === "OPTIONS") {
+    return {
+      status: 204,
+      headers: {
+        ...corsHeaders(),
+        "cache-control": "no-store"
+      },
+      bodyText: ""
+    };
+  }
+
+  // Authenticate if CRUSTY_API_TOKEN is configured
+  const requiredToken = getApiToken();
+  if (requiredToken) {
+    // Skip auth for static UI assets and health check
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health"];
+    if (!publicPaths.includes(request.url.pathname)) {
+      if (getRequestApiToken(request) !== requiredToken) {
+        return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
+      }
+    }
+  }
+
   if (request.method === "GET" && (request.url.pathname === "/" || request.url.pathname === "/ui")) {
     return textResponse(200, getGuiHtml(), "text/html; charset=utf-8");
   }
@@ -525,7 +586,8 @@ async function startNodeWorkerApi(
           const payload = await buildApiResponse(app, {
             method: message.method,
             url: new URL(message.url, "http://localhost"),
-            bodyText: message.bodyText
+            bodyText: message.bodyText,
+            headers: message.headers
           });
           if (child.connected) {
             child.send({
@@ -646,10 +708,15 @@ function startVirtualApiServer(
     }
 
     try {
+      const reqHeaders: Record<string, string> = {};
+      request.headers.forEach((value, key) => {
+        reqHeaders[key] = value;
+      });
       const payload = await buildApiResponse(app, {
         method: request.method,
         url,
-        bodyText: await request.text()
+        bodyText: await request.text(),
+        headers: reqHeaders
       });
       return buildFetchResponse(payload);
     } catch (error) {
@@ -722,10 +789,17 @@ export async function startApiServer(
         });
         request.on("error", rejectBody);
       });
+      const reqHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(request.headers)) {
+        if (typeof value === "string") {
+          reqHeaders[key] = value;
+        }
+      }
       const payload = await buildApiResponse(app, {
         method: request.method ?? "GET",
         url,
-        bodyText
+        bodyText,
+        headers: reqHeaders
       });
       response.writeHead(payload.status, payload.headers);
       response.end(payload.bodyText);

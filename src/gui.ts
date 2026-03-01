@@ -268,7 +268,8 @@ export function getGuiScript(): string {
   selectedFilePath: "",
   pendingEdit: null,
   pendingWorkflow: null,
-  refreshTimer: null
+  refreshTimer: null,
+  apiToken: ""
 };
 
 const els = {
@@ -315,8 +316,33 @@ const els = {
   filesPanel: document.getElementById("files-panel")
 };
 
+function initializeApiToken() {
+  const url = new URL(window.location.href);
+  const queryToken = url.searchParams.get("token") || "";
+  const storedToken = window.sessionStorage.getItem("crustyApiToken") || "";
+  const token = queryToken || storedToken;
+
+  if (queryToken) {
+    window.sessionStorage.setItem("crustyApiToken", queryToken);
+    url.searchParams.delete("token");
+    window.history.replaceState({}, document.title, url.toString());
+  }
+
+  state.apiToken = token;
+}
+
+function buildApiHeaders(extraHeaders) {
+  const headers = { ...(extraHeaders || {}) };
+  if (state.apiToken) {
+    headers.authorization = "Bearer " + state.apiToken;
+  }
+  return headers;
+}
+
 async function getJson(path) {
-  const response = await fetch(path);
+  const response = await fetch(path, {
+    headers: buildApiHeaders()
+  });
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || "Request failed.");
@@ -327,8 +353,20 @@ async function getJson(path) {
 async function postJson(path, body) {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: buildApiHeaders({ "content-type": "application/json" }),
     body: JSON.stringify(body)
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed.");
+  }
+  return data;
+}
+
+async function deleteJson(path) {
+  const response = await fetch(path, {
+    method: "DELETE",
+    headers: buildApiHeaders()
   });
   const data = await response.json();
   if (!response.ok) {
@@ -444,9 +482,7 @@ function renderResources(resources) {
       removeButton.type = "button";
       removeButton.textContent = "Remove " + resource.alias;
       removeButton.addEventListener("click", async () => {
-        const payload = await fetch("/api/resources?alias=" + encodeURIComponent(resource.alias), {
-          method: "DELETE"
-        }).then((response) => response.json());
+        const payload = await deleteJson("/api/resources?alias=" + encodeURIComponent(resource.alias));
         renderResult(payload);
         renderEdit(null);
         await refreshView();
@@ -561,9 +597,7 @@ async function renderParticipants(participants, resources) {
       removeButton.type = "button";
       removeButton.textContent = "Remove";
       removeButton.addEventListener("click", async () => {
-        const payload = await fetch("/api/participants?alias=" + encodeURIComponent(participant.alias), {
-          method: "DELETE"
-        }).then((response) => response.json());
+        const payload = await deleteJson("/api/participants?alias=" + encodeURIComponent(participant.alias));
         renderResult(payload);
         await refreshView();
       });
@@ -809,6 +843,7 @@ els.workflowForm.addEventListener("submit", async (event) => {
 });
 
 async function start() {
+  initializeApiToken();
   await refreshView();
   state.refreshTimer = window.setInterval(() => {
     refreshView().catch((error) => {

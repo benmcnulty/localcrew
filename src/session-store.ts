@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 
-import { getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths } from "./storage.ts";
 import type {
   AssistantConversationMessage,
   ConversationMessage,
@@ -8,14 +8,7 @@ import type {
   SharedConversationState,
   UserConversationMessage
 } from "./types.ts";
-
-function getEmptyConversation(): SharedConversationState {
-  return {
-    messages: [],
-    compactedUntil: 0,
-    summary: ""
-  };
-}
+import { getEmptyConversation } from "./utils.ts";
 
 function normalizeConversationAlias(alias: string): string {
   return alias.toLowerCase();
@@ -195,7 +188,7 @@ export async function saveSessions(
 ): Promise<void> {
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
-  await writeFile(paths.sessionsPath, `${JSON.stringify(sessions, null, 2)}\n`, "utf8");
+  await atomicWriteFile(paths.sessionsPath, `${JSON.stringify(sessions, null, 2)}\n`);
 }
 
 export async function loadSessions(

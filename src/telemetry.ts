@@ -1,7 +1,16 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 
-import { getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths, withFileLock } from "./storage.ts";
 import type { AuditEvent, TelemetryMetricBucket, TelemetrySummary } from "./types.ts";
+
+/** Maximum audit log size in bytes before rotation (~5 MB). */
+const AUDIT_LOG_MAX_BYTES = 5 * 1024 * 1024;
+/** Number of rotated archive files to keep. */
+const AUDIT_LOG_KEEP_ARCHIVES = 2;
+
+function getAuditLogArchivePath(logPath: string, index: number): string {
+  return logPath.replace(/\.jsonl$/, `.${index}.jsonl`);
+}
 
 function emptyBucket(): TelemetryMetricBucket {
   return {
@@ -100,12 +109,13 @@ export async function appendAuditEvent(
   rootDir = process.cwd()
 ): Promise<AuditEvent> {
   const paths = getStoragePaths(rootDir);
-  await ensureTelemetryLayout(rootDir);
-  const summary = await loadTelemetrySummary(rootDir);
-  const nextEvent: AuditEvent = {
-    ...event,
-    id: summary.lastEventId + 1
-  };
+  return withFileLock(paths.telemetrySummaryPath, async () => {
+    await ensureTelemetryLayout(rootDir);
+    const summary = await loadTelemetrySummary(rootDir);
+    const nextEvent: AuditEvent = {
+      ...event,
+      id: summary.lastEventId + 1
+    };
 
   summary.lastEventId = nextEvent.id;
   summary.updatedAt = nextEvent.timestamp;
@@ -145,9 +155,58 @@ export async function appendAuditEvent(
     ...summary.recent
   ].slice(0, 20);
 
+  await rotateAuditLogIfNeeded(paths.auditLogPath);
   await appendFile(paths.auditLogPath, `${JSON.stringify(nextEvent)}\n`, "utf8");
-  await writeFile(paths.telemetrySummaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  await atomicWriteFile(paths.telemetrySummaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   return nextEvent;
+  });
+}
+
+/**
+ * Rotate the audit log when it exceeds AUDIT_LOG_MAX_BYTES.
+ * Keeps up to AUDIT_LOG_KEEP_ARCHIVES numbered archive files
+ * (audit-log.1.jsonl, audit-log.2.jsonl, etc.).
+ */
+async function rotateAuditLogIfNeeded(logPath: string): Promise<void> {
+  try {
+    const info = await stat(logPath);
+    if (info.size < AUDIT_LOG_MAX_BYTES) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  // Shift existing archives: .2 is deleted, .1 becomes .2, current becomes .1
+  for (let i = AUDIT_LOG_KEEP_ARCHIVES; i >= 1; i--) {
+    const archivePath = getAuditLogArchivePath(logPath, i);
+    if (i === AUDIT_LOG_KEEP_ARCHIVES) {
+      // Delete the oldest archive (overwritten by rename below or just gone)
+      try {
+        const { unlink } = await import("node:fs/promises");
+        await unlink(archivePath);
+      } catch {
+        // File may not exist — that is fine
+      }
+    }
+    if (i > 1) {
+      const olderPath = getAuditLogArchivePath(logPath, i - 1);
+      try {
+        await rename(olderPath, archivePath);
+      } catch {
+        // Source may not exist yet
+      }
+    }
+  }
+
+  // Rotate current log to .1
+  const firstArchive = getAuditLogArchivePath(logPath, 1);
+  try {
+    await rename(logPath, firstArchive);
+    await writeFile(logPath, "", "utf8");
+  } catch {
+    // Best-effort rotation; do not block the caller
+  }
 }
 
 export async function readRecentAuditEvents(
@@ -156,14 +215,30 @@ export async function readRecentAuditEvents(
 ): Promise<AuditEvent[]> {
   const paths = getStoragePaths(rootDir);
   await ensureTelemetryLayout(rootDir);
-  const raw = await readFile(paths.auditLogPath, "utf8");
-  const lines = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
+  const allEvents: AuditEvent[] = [];
 
-  return lines
-    .slice(Math.max(0, lines.length - limit))
-    .map((line) => JSON.parse(line) as AuditEvent)
-    .reverse();
+  for (const candidatePath of [
+    paths.auditLogPath,
+    ...Array.from({ length: AUDIT_LOG_KEEP_ARCHIVES }, (_, index) =>
+      getAuditLogArchivePath(paths.auditLogPath, index + 1)
+    )
+  ]) {
+    try {
+      const raw = await readFile(candidatePath, "utf8");
+      const events = raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as AuditEvent);
+      allEvents.push(...events);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return allEvents
+    .sort((left, right) => right.id - left.id)
+    .slice(0, limit);
 }

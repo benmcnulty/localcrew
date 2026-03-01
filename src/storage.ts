@@ -1,4 +1,7 @@
-import { join, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { rename, writeFile } from "node:fs/promises";
+import { writeFileSync, renameSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 export interface StoragePaths {
   rootDir: string;
@@ -61,4 +64,61 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     agentsDir,
     agentsIndexPath: join(agentsDir, "index.json")
   };
+}
+
+/**
+ * Atomically write a file by writing to a temporary file first, then renaming.
+ * Rename is atomic on most filesystems, preventing corruption on crash/disk-full.
+ */
+export async function atomicWriteFile(
+  filePath: string,
+  content: string,
+  encoding: BufferEncoding = "utf8"
+): Promise<void> {
+  const dir = dirname(filePath);
+  const tmpPath = join(dir, `.tmp-${randomBytes(8).toString("hex")}`);
+  await writeFile(tmpPath, content, encoding);
+  await rename(tmpPath, filePath);
+}
+
+/**
+ * Synchronous atomic write — write to temp file, then rename.
+ */
+export function atomicWriteFileSync(
+  filePath: string,
+  content: string,
+  encoding: BufferEncoding = "utf8"
+): void {
+  const dir = dirname(filePath);
+  const tmpPath = join(dir, `.tmp-${randomBytes(8).toString("hex")}`);
+  writeFileSync(tmpPath, content, encoding);
+  renameSync(tmpPath, filePath);
+}
+
+/**
+ * In-process file-level lock to prevent concurrent reads-then-writes
+ * from racing on the same file. Callers that do load→mutate→save
+ * should wrap the entire sequence in withFileLock().
+ */
+const fileLocks = new Map<string, Promise<void>>();
+
+export async function withFileLock<T>(
+  filePath: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const key = resolve(filePath);
+  while (fileLocks.has(key)) {
+    await fileLocks.get(key);
+  }
+  let releaseLock: () => void;
+  const lockPromise = new Promise<void>((r) => {
+    releaseLock = r;
+  });
+  fileLocks.set(key, lockPromise);
+  try {
+    return await fn();
+  } finally {
+    fileLocks.delete(key);
+    releaseLock!();
+  }
 }

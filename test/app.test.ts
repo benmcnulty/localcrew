@@ -334,6 +334,24 @@ describe("CrustyApp", () => {
     });
   });
 
+  test("reads auto-mode tuning from local env files after app creation", async () => {
+    await withTempDir(async (rootDir) => {
+      await writeFile(
+        join(rootDir, ".env.local"),
+        "CRUSTY_AUTO_PULSE_INTERVAL_MS=4321\nCRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT=3456\n"
+      );
+
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("ok"),
+        speakFn: () => {}
+      });
+
+      expect(app.getAutoPulseIntervalMs()).toBe(4321);
+      expect(app.getAutoSourceDocumentCharLimit()).toBe(3456);
+    });
+  });
+
   test("returns an explore viewer request and reads internal files safely", async () => {
     await withTempDir(async (rootDir) => {
       const app = await CrustyApp.create({ rootDir, speakFn: () => {} });

@@ -1,4 +1,6 @@
+import { getEnvNumber } from "./env.ts";
 import type { ChatMessage, EndpointConfig, OllamaChatResult } from "./types.ts";
+import { ANTHROPIC_VERSION, trimTrailingSlash } from "./utils.ts";
 
 export type FetchFn = typeof fetch;
 
@@ -8,11 +10,8 @@ export interface EndpointModelEntry {
   quantizationLevel?: string;
 }
 
-const ANTHROPIC_VERSION = "2023-06-01";
-const ANTHROPIC_MAX_TOKENS = 2048;
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value.slice(0, -1) : value;
+function getAnthropicMaxTokens(): number {
+  return getEnvNumber("CRUSTY_ANTHROPIC_MAX_TOKENS", 2048);
 }
 
 function formatHttpError(status: number, bodyText: string): string {
@@ -99,7 +98,7 @@ export async function chatWithOllamaDetailed(
       headers,
       body: JSON.stringify({
         model: endpoint.model,
-        max_tokens: ANTHROPIC_MAX_TOKENS,
+        max_tokens: getAnthropicMaxTokens(),
         ...(systemText ? { system: systemText } : {}),
         messages: anthropicMessages
       })
@@ -203,7 +202,7 @@ export async function listOllamaModels(
   apiKeyEnv?: string
 ): Promise<EndpointModelEntry[]> {
   const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : undefined;
-  const headers =
+  const headers: Record<string, string> | undefined =
     apiKey && apiStyle === "anthropic"
       ? {
           "x-api-key": apiKey,

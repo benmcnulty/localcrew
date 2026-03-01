@@ -8,7 +8,6 @@ const pendingResponses = new Map();
 function writeJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
     "cache-control": "no-store"
   });
   response.end(`${JSON.stringify(body, null, 2)}\n`);
@@ -27,12 +26,19 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     const requestId = ++nextRequestId;
     pendingResponses.set(requestId, response);
+    const reqHeaders = {};
+    for (const [key, value] of Object.entries(request.headers)) {
+      if (typeof value === "string") {
+        reqHeaders[key] = value;
+      }
+    }
     process.send({
       type: "request",
       id: requestId,
       method: request.method ?? "GET",
       url: request.url ?? "/",
-      bodyText: Buffer.concat(chunks).toString("utf8")
+      bodyText: Buffer.concat(chunks).toString("utf8"),
+      headers: reqHeaders
     });
   });
   request.on("error", (error) => {
@@ -54,7 +60,6 @@ process.on("message", (message) => {
     pendingResponses.delete(message.id);
     response.writeHead(message.status, message.headers || {
       "content-type": "application/json; charset=utf-8",
-      "access-control-allow-origin": "*",
       "cache-control": "no-store"
     });
     response.end(message.bodyText);
