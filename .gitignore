@@ -6,3 +6,10 @@ node_modules/
 .crusty/
 local-handoff/
 ollama-profile-*.json
+
+# OS artifacts
+.DS_Store
+
+# Log files
+*.log
+firebase-debug.log

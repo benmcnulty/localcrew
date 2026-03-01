@@ -1,30 +1,70 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Build and Test
 
-Core runtime code lives in `src/`. The main CLI entry is `src/index.ts`; orchestration, routing, API, GUI, telemetry, storage, and Wikipedia tooling are split into focused modules such as `src/app.ts`, `src/api-server.ts`, `src/resources.ts`, and `src/wikipedia.ts`. Tests live in `test/` and mirror runtime areas with `*.test.ts` files. Durable seed data belongs in `external-memory/`; local runtime state belongs in ignored paths such as `.crusty/`, `.env`, and `.env.local`. Public docs live in `docs/`.
+```bash
+npm test                    # run full test suite (bun test)
+bun test test/foo.test.ts   # single file
+bunx tsc --noEmit           # type check only
+npm run start               # run CLI + API with Node
+npm run start:bun           # run with Bun runtime
+npm run setup:crusty        # bootstrap primary orchestrator device
+node scripts/setup-agent.js # onboard a secondary agent device
+```
 
-## Build, Test, and Development Commands
+## Architecture
 
-- `npm install` installs the Node-first project dependencies.
-- `npm run setup:crusty` bootstraps the primary device and starts the app.
-- `npm run setup:agent` runs the secondary-device setup flow.
-- `npm run start` starts the CLI and local API/UI with Node.
-- `npm test` runs the test suite through `bun test`.
-- `node scripts/setup-agent.js` is the minimal standalone agent setup path.
+`src/app.ts` (`CrustyApp`) is the orchestration hub — it owns mode state, command dispatch, and chat routing. Keep new logic outside of it when it belongs to a focused module instead.
 
-## Coding Style & Naming Conventions
+Module boundaries (each has a single job; do not mix concerns):
 
-Use TypeScript with ESM imports and explicit `.ts` import suffixes. Follow the existing style: 2-space indentation, double quotes, semicolons, and small focused functions. Keep module names lowercase with hyphens only where already established, and prefer descriptive names like `resource-discovery.ts` over abbreviations. Use command-style naming for scripts (`setup-agent.js`) and `*.test.ts` for tests.
+| Module | Responsibility |
+|---|---|
+| `types.ts` | Type/interface definitions only — no logic |
+| `utils.ts` | Pure functions, no I/O (see shared helpers below) |
+| `storage.ts` | File read/write primitives + `getStoragePaths()` |
+| `commands.ts` | Parse slash-command input → typed `Command` union |
+| `ollama.ts` | HTTP calls to inference endpoints |
+| `messages.ts` | Build prompt message arrays — no I/O |
+| `resources.ts` | Resource CRUD, tier routing, capacity summary |
+| `config.ts` | Load/save participant config from `.crusty/config.json` |
+| `session-store.ts` | Load/save shared conversation transcript |
+| `api-server.ts` | Fork + IPC management for the HTTP child process |
 
-## Testing Guidelines
+Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored local runtime state. Never commit `.crusty/`, `.env`, or `.env.local`.
 
-Tests use `bun:test`. Add or update targeted tests whenever behavior changes in `src/`, especially for command parsing, API behavior, storage, and orchestration flows. Keep tests isolated with temp directories and avoid writing to real local state. Run `npm test` before submitting changes.
+## Code Style
 
-## Commit & Pull Request Guidelines
+- TypeScript ESM with explicit `.ts` suffixes on all local imports: `import { foo } from "./bar.ts"`
+- Node built-ins with `node:` prefix: `import { readFile } from "node:fs/promises"`
+- Use `import type` for type-only imports
+- 2-space indent, double quotes, semicolons, trailing commas on multiline
+- `tsconfig.json`: `NodeNext` module/resolution, `strict: true`, `noEmit: true`
 
-Recent history follows concise conventional commits such as `feat: ...` and `fix(docs): ...`. Keep commits narrowly scoped and imperative. PRs should include a short summary, user-facing impact, test coverage notes, and screenshots only when UI behavior changes.
+## Project Conventions
 
-## Security & Configuration Tips
+**Zero external dependencies** — no `dependencies` or `devDependencies` in `package.json`. Use Node built-ins and Bun's bundled APIs only. Do not add npm packages.
 
-Do not commit `.crusty/`, `.env`, `.env.local`, or local agent memory. Treat `external-memory/` as the committed, portable seed layer and keep machine-specific configuration in ignored local files. When adding provider support, preserve the existing boundary between public-safe repo defaults and install-local secrets.
+**Shared utilities** — before adding a helper, check `src/utils.ts` first:
+- `titleCase` / `capitalize` — string formatting
+- `normalizeAlias(alias)` — trim + strip `@` + lowercase, used for participant aliases
+- `trimTrailingSlash(url)` — strip trailing `/` from base URLs
+- `getEmptyConversation()` — zeroed `SharedConversationState`
+- `getErrorMessage(error)` — safe `unknown` → `string` extraction
+- `ANTHROPIC_VERSION` — `"2023-06-01"` constant for Anthropic headers
+
+**Atomic writes** — all JSON state file writes must go through `atomicWriteFile()` (or `atomicWriteFileSync()`) from `src/storage.ts`. Plain `writeFile` directly on a live state path is a bug.
+
+**Concurrency** — use `withFileLock(filePath, fn)` from `src/storage.ts` when a flow reads, mutates, then writes the same file (e.g., load→update→save on telemetry or resources).
+
+**Provider model** — endpoint API style is `"ollama" | "openai" | "anthropic"` (`EndpointApiStyle`). Resource tiers are `"top" | "mid" | "low"`. Auth is stored as an env var name (`apiKeyEnv`), never the key value.
+
+## Testing
+
+Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Every test touching the filesystem must use the `withTempDir` pattern — create an OS temp dir, pass it as `rootDir` to all storage functions, and clean up in `finally`. Never write to the real `.crusty/`. See `test/core.test.ts` for the canonical pattern.
+
+## Security
+
+- No hardcoded secrets, node addresses, or machine-specific values in source — use ignored env files
+- API authentication uses `CRUSTY_API_TOKEN` (Bearer token); CORS origin is `CRUSTY_API_CORS_ORIGIN`
+- Audit log writes use `withFileLock` to prevent corruption on concurrent appends

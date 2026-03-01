@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install             # install dependencies (Node-first project)
 npm run start           # start the CLI + local API/UI (via Node)
+npm run start:node      # same as above, explicit Node runtime
+npm run start:bun       # start with Bun runtime
 bun run src/index.ts    # start with bun directly
 npm test                # run test suite (uses bun test internally)
 npm run setup:crusty    # bootstrap primary orchestrator device
@@ -20,6 +22,7 @@ bun test test/commands.test.ts
 
 TypeScript type checking (no emit, strict mode):
 ```bash
+# not currently wired into the default validation flow
 bunx tsc --noEmit
 ```
 
