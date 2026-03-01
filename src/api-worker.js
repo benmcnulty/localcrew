@@ -15,22 +15,28 @@ function writeJson(response, statusCode, body) {
 }
 
 const server = createServer((request, response) => {
-  if (request.method !== "GET") {
-    writeJson(response, 405, { error: "Method not allowed." });
-    return;
-  }
-
   if (!process.send) {
     writeJson(response, 500, { error: "IPC channel unavailable." });
     return;
   }
 
-  const requestId = ++nextRequestId;
-  pendingResponses.set(requestId, response);
-  process.send({
-    type: "request",
-    id: requestId,
-    url: request.url ?? "/"
+  const chunks = [];
+  request.on("data", (chunk) => {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  request.on("end", () => {
+    const requestId = ++nextRequestId;
+    pendingResponses.set(requestId, response);
+    process.send({
+      type: "request",
+      id: requestId,
+      method: request.method ?? "GET",
+      url: request.url ?? "/",
+      bodyText: Buffer.concat(chunks).toString("utf8")
+    });
+  });
+  request.on("error", (error) => {
+    writeJson(response, 500, { error: error.message });
   });
 });
 
@@ -46,7 +52,12 @@ process.on("message", (message) => {
     }
 
     pendingResponses.delete(message.id);
-    writeJson(response, message.status, message.body);
+    response.writeHead(message.status, message.headers || {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store"
+    });
+    response.end(message.bodyText);
     return;
   }
 

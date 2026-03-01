@@ -27,12 +27,14 @@
 Environment variables provided by the shell take precedence over values loaded from `.env` and `.env.local`.
 
 The durable external system memory lives in the committed `external-memory/` directory. Local internal memory, queue state, agent memory, and telemetry stay under ignored `.crusty/`.
+The external dropbox folders live under `external-memory/inbox`, `external-memory/active`, and `external-memory/outbox`; their contents are intentionally local and untracked.
 
 ## Running
 
 - `bun run src/index.ts`
 - `node src/index.ts`
 - `bun test`
+- open `/ui` from the printed local API URL for the browser prototype
 
 ## Support Scripts
 
@@ -57,4 +59,5 @@ Run `scripts/ollama-optimize-linux.sh` to benchmark a local node and write `olla
 - `/status`
 - `/hud`
 - `/explore`
+- `/login` placeholder for the future remote auth flow
 - `/agent list`

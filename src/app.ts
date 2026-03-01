@@ -33,6 +33,17 @@ import {
   readInternalFile
 } from "./internal-files.ts";
 import {
+  clearDropboxState,
+  ensureDropboxLayout,
+  getDropboxPaths,
+  getDropboxSnapshot,
+  ingestNextInboxDocument,
+  moveActiveDocumentToOutbox,
+  readActiveDropboxDocument,
+  writeInboxDocument,
+  writeGeneratedDropboxDocument
+} from "./dropbox.ts";
+import {
   buildAgentChatMessages,
   buildAutoTaskMessages,
   buildChatMessages,
@@ -89,6 +100,7 @@ const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
 const AGENT_COMPACT_MESSAGE_LIMIT = 10;
 const AUTO_PULSE_INTERVAL_MS = 1500;
+const AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
 function titleCase(value: string): string {
   if (!value) {
@@ -179,6 +191,11 @@ function parseQueuedTasks(content: string): {
     requestedResource?: string;
     requestedModel?: string;
   }>;
+  fileWrites: Array<{
+    stage: "active" | "outbox";
+    filename: string;
+    content: string;
+  }>;
 } {
   const replyLines: string[] = [];
   const queuedTasks: Array<{
@@ -187,8 +204,26 @@ function parseQueuedTasks(content: string): {
     requestedResource?: string;
     requestedModel?: string;
   }> = [];
+  const fileWrites: Array<{
+    stage: "active" | "outbox";
+    filename: string;
+    content: string;
+  }> = [];
 
-  for (const line of content.split("\n")) {
+  const writePattern =
+    /(?:^|\n)WRITE\[(active|outbox)\]\[([^\]\n]+)\]\n([\s\S]*?)\nENDWRITE(?=\n|$)/gi;
+  let workingContent = content;
+  let writeMatch: RegExpExecArray | null;
+  while ((writeMatch = writePattern.exec(content)) !== null) {
+    fileWrites.push({
+      stage: writeMatch[1].toLowerCase() as "active" | "outbox",
+      filename: writeMatch[2].trim(),
+      content: writeMatch[3].trimEnd()
+    });
+    workingContent = workingContent.replace(writeMatch[0], "\n");
+  }
+
+  for (const line of workingContent.split("\n")) {
     const match = line
       .trim()
       .match(/^QUEUE\[(high|medium|low)\](?:\[(air|vic|min|pav)\])?(?:\[([^\]]+)\])?:\s*(.+)$/i);
@@ -207,7 +242,8 @@ function parseQueuedTasks(content: string): {
 
   return {
     replyText: replyLines.join("\n").trim(),
-    queuedTasks
+    queuedTasks,
+    fileWrites
   };
 }
 
@@ -300,6 +336,17 @@ function buildPrompt(
   }
 }
 
+function truncateForPrompt(content: string, limit: number): { text: string; truncated: boolean } {
+  if (content.length <= limit) {
+    return { text: content, truncated: false };
+  }
+
+  return {
+    text: `${content.slice(0, limit)}\n\n[truncated by Crusty after ${limit} characters]`,
+    truncated: true
+  };
+}
+
 function getAgentCreationQuestions(): WorkflowQuestion[] {
   return [
     { key: "name", prompt: "Agent name> " },
@@ -388,6 +435,7 @@ export class CrustyApp {
     ]);
 
     const app = new CrustyApp(config, sessions, systemState, { ...options, rootDir });
+    await ensureDropboxLayout(rootDir);
     await app.syncSystemFiles();
     return app;
   }
@@ -418,10 +466,11 @@ export class CrustyApp {
   }
 
   async getStatusLines(): Promise<string[]> {
-    const [agents, internalFiles, telemetry] = await Promise.all([
+    const [agents, internalFiles, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
       getInternalFileDetails(this.rootDir),
-      loadTelemetrySummary(this.rootDir)
+      loadTelemetrySummary(this.rootDir),
+      getDropboxSnapshot(this.rootDir)
     ]);
     const nextTask = this.sortPendingTasks(this.systemState.auto.pending)[0];
     const lastCompleted = this.systemState.auto.completed.at(-1);
@@ -456,12 +505,13 @@ export class CrustyApp {
       `Mid tier: ${tiers.mid.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Low tier: ${tiers.low.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
+      `Dropbox: ${dropbox.inbox.length} inbox / ${dropbox.active.length} active / ${dropbox.outbox.length} outbox`,
       `Telemetry: ${telemetry.totalEvents} events, ${telemetry.byKind["ollama.chat"] ?? 0} model calls, ${telemetry.wikipedia.calls} wiki searches`,
       `Recent model metrics: ${topModels.length > 0 ? topModels.map((key) => formatTelemetryBucket(telemetry, key)).join(" | ") : "(none yet)"}`,
       `Last audit: ${lastAudit ? `#${lastAudit.id} ${lastAudit.summary}` : "(none yet)"}`,
       `Docs: focus ${internalFiles.focusTodo.modifiedAt} | roadmap ${internalFiles.roadmap.modifiedAt}`,
       `Docs: changelog ${internalFiles.changelog.modifiedAt} | directives ${internalFiles.directives.modifiedAt}`,
-      `Internal tree root: ${getStoragePaths(this.rootDir).systemDir}`,
+      `Explorer roots: ${getStoragePaths(this.rootDir).systemDir} | ${getDropboxPaths(this.rootDir).externalMemoryDir}`,
       "",
       "Press Esc to return."
     ];
@@ -486,11 +536,13 @@ export class CrustyApp {
     agents: AgentMeta[];
     docs: Awaited<ReturnType<typeof getInternalFileDetails>>;
     telemetry: TelemetrySummary;
+    dropbox: Awaited<ReturnType<typeof getDropboxSnapshot>>;
   }> {
-    const [agents, docs, telemetry] = await Promise.all([
+    const [agents, docs, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
       getInternalFileDetails(this.rootDir),
-      loadTelemetrySummary(this.rootDir)
+      loadTelemetrySummary(this.rootDir),
+      getDropboxSnapshot(this.rootDir)
     ]);
 
     return {
@@ -511,7 +563,8 @@ export class CrustyApp {
       tiers: getResourceProfilesByTier(this.rootDir),
       agents,
       docs,
-      telemetry
+      telemetry,
+      dropbox
     };
   }
 
@@ -543,11 +596,42 @@ export class CrustyApp {
     return listAgents(this.rootDir);
   }
 
+  async getDropboxSnapshot() {
+    return getDropboxSnapshot(this.rootDir);
+  }
+
+  async createInboxDocument(filename: string, content: string): Promise<CommandResult> {
+    const entry = await writeInboxDocument(filename, content, this.rootDir);
+    await appendAuditEvent(
+      {
+        timestamp: new Date().toISOString(),
+        kind: "system",
+        scope: "dropbox.inbox.write",
+        summary: `Wrote inbox document ${entry.relativePath}.`,
+        success: true,
+        actor: "user",
+        target: entry.relativePath,
+        metadata: {
+          stage: "inbox",
+          path: entry.path
+        }
+      },
+      this.rootDir
+    );
+    await appendChangelogEntry(`Wrote inbox document ${entry.relativePath}.`, this.rootDir);
+    return {
+      lines: [`Wrote inbox document: ${entry.path}`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
   async getHudLines(tab: "status" | "queue" | "metrics" | "detail"): Promise<string[]> {
-    const [statusLines, telemetry, auditEvents] = await Promise.all([
+    const [statusLines, telemetry, auditEvents, dropbox] = await Promise.all([
       this.getStatusLines(),
       loadTelemetrySummary(this.rootDir),
-      readRecentAuditEvents(tab === "detail" ? 6 : 3, this.rootDir)
+      readRecentAuditEvents(tab === "detail" ? 6 : 3, this.rootDir),
+      getDropboxSnapshot(this.rootDir)
     ]);
     const pending = this.sortPendingTasks(this.systemState.auto.pending);
     const completed = [...this.systemState.auto.completed].slice(-8).reverse();
@@ -594,6 +678,8 @@ export class CrustyApp {
     if (tab === "queue") {
       return [
         `HUD ${tabs}`,
+        "",
+        `Dropbox: ${dropbox.inbox.length} inbox / ${dropbox.active.length} active / ${dropbox.outbox.length} outbox`,
         "",
         `Pending tasks: ${pending.length}`,
         ...(pending.length > 0
@@ -710,11 +796,11 @@ export class CrustyApp {
     return {
       rootPath: tree.rootPath,
       lines: [
-        "Internal Explorer",
+        "Explorer",
         "",
         ...tree.lines,
         "",
-        "Type a full path and press Enter to open it. Press Esc to return."
+        "Type a full path from .crusty/system or external-memory and press Enter to open it. Press Esc to return."
       ]
     };
   }
@@ -800,7 +886,7 @@ export class CrustyApp {
       `Auto queue: ${this.systemState.auto.pending.length} pending, ${this.systemState.auto.completed.length} completed.`,
       `Direct message: @alias message`,
       `Crosstalk: @from to @to: "message"`,
-      `Commands: /help, /status, /hud, /explore, /chat, /group, /auto, /stop, /agent list, /agent new, /agent edit <name>, /agent <name>, /end`,
+      `Commands: /help, /status, /hud, /explore, /login, /chat, /group, /auto, /stop, /agent list, /agent new, /agent edit <name>, /agent <name>, /end`,
       `Commands: /priority [high|medium|low], /model [alias], /default [alias], /rename <old> <new>`,
       `Commands: /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset], /sound [on|off]`,
       "Commands: /compact, /reset, /clear, /exit"
@@ -836,6 +922,7 @@ export class CrustyApp {
     this.config = getDefaultConfig(this.rootDir);
     this.sessions = getEmptySessions();
     await clearSystemState(this.rootDir);
+    await clearDropboxState(this.rootDir);
     this.systemState = await loadSystemState(this.rootDir);
     this.autoCyclePromise = null;
     this.runtime = {
@@ -1233,6 +1320,8 @@ export class CrustyApp {
       agentName?: string;
       requestedResource?: string;
       requestedModel?: string;
+      sourceDocumentRelativePath?: string;
+      sourceDocumentName?: string;
     } = {}
   ): Promise<AutoQueueTask> {
     const task: AutoQueueTask = {
@@ -1244,7 +1333,11 @@ export class CrustyApp {
       status: "queued",
       ...(options.requestedResource ? { requestedResource: options.requestedResource } : {}),
       ...(options.requestedModel ? { requestedModel: options.requestedModel } : {}),
-      ...(options.agentName ? { agentName: options.agentName } : {})
+      ...(options.agentName ? { agentName: options.agentName } : {}),
+      ...(options.sourceDocumentRelativePath
+        ? { sourceDocumentRelativePath: options.sourceDocumentRelativePath }
+        : {}),
+      ...(options.sourceDocumentName ? { sourceDocumentName: options.sourceDocumentName } : {})
     };
 
     this.systemState = {
@@ -1268,6 +1361,8 @@ export class CrustyApp {
     createdBy: string,
     options: {
       agentName?: string;
+      sourceDocumentRelativePath?: string;
+      sourceDocumentName?: string;
     } = {}
   ): Promise<AutoQueueTask[]> {
     const addedTasks: AutoQueueTask[] = [];
@@ -1287,6 +1382,121 @@ export class CrustyApp {
     }
 
     return addedTasks;
+  }
+
+  private async handleGeneratedFileWrites(
+    fileWrites: Array<{
+      stage: "active" | "outbox";
+      filename: string;
+      content: string;
+    }>
+  ): Promise<string[]> {
+    const writtenLines: string[] = [];
+
+    for (const fileWrite of fileWrites) {
+      if (!fileWrite.filename.trim()) {
+        continue;
+      }
+
+      const entry = await writeGeneratedDropboxDocument(
+        fileWrite.stage,
+        fileWrite.filename,
+        fileWrite.content,
+        this.rootDir
+      );
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "dropbox.write",
+          summary: `Wrote ${fileWrite.stage} dropbox file ${entry.relativePath}.`,
+          success: true,
+          actor: "erin",
+          target: entry.relativePath,
+          metadata: {
+            stage: fileWrite.stage,
+            path: entry.path
+          }
+        },
+        this.rootDir
+      );
+      writtenLines.push(`Wrote ${fileWrite.stage} file: ${entry.path}`);
+    }
+
+    return writtenLines;
+  }
+
+  private async getAutoTaskExtraContext(task: AutoQueueTask): Promise<string[]> {
+    if (!task.sourceDocumentRelativePath) {
+      return [];
+    }
+
+    const source = await readActiveDropboxDocument(task.sourceDocumentRelativePath, this.rootDir);
+    const truncated = truncateForPrompt(source.content, AUTO_SOURCE_DOCUMENT_CHAR_LIMIT);
+
+    return [
+      [
+        "External dropbox document:",
+        `- Source document: ${task.sourceDocumentName ?? task.sourceDocumentRelativePath}`,
+        `- Active path: ${source.path}`,
+        "- This document came from external-memory/inbox and is the source of truth for this task.",
+        "- If you produce an in-progress draft, use WRITE[active][relative/path.ext] ... ENDWRITE.",
+        "- If you produce a final deliverable, use WRITE[outbox][relative/path.ext] ... ENDWRITE.",
+        truncated.truncated ? "- The document body below was truncated for context efficiency." : ""
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      `External document body:\n${truncated.text}`
+    ];
+  }
+
+  private async ingestNextInboxDocumentTask(): Promise<{
+    documentName: string;
+    relativePath: string;
+    task: AutoQueueTask;
+  } | null> {
+    const ingested = await ingestNextInboxDocument(this.rootDir);
+    if (!ingested) {
+      return null;
+    }
+
+    const task = await this.enqueueAutoTask(
+      `Review the active external document "${ingested.name}", extract the requested work, produce the best next artifact for it, and queue any follow-up tasks that are needed.`,
+      "high",
+      "external-memory:inbox",
+      {
+        sourceDocumentRelativePath: ingested.relativePath,
+        sourceDocumentName: ingested.name
+      }
+    );
+
+    await appendAuditEvent(
+      {
+        timestamp: new Date().toISOString(),
+        kind: "system",
+        scope: "dropbox.ingest",
+        summary: `Moved external document ${ingested.relativePath} from inbox to active and queued task #${task.id}.`,
+        success: true,
+        actor: "erin",
+        target: ingested.relativePath,
+        metadata: {
+          sourceStage: ingested.sourceStage,
+          destinationStage: ingested.stage,
+          taskId: task.id
+        }
+      },
+      this.rootDir
+    );
+    await appendChangelogEntry(
+      `Moved external document ${ingested.relativePath} from inbox to active and queued auto task #${task.id}.`,
+      this.rootDir
+    );
+
+    return {
+      documentName: ingested.name,
+      relativePath: ingested.relativePath,
+      task
+    };
   }
 
   private async requestAgentReply(agent: AgentMeta, userMessage: string): Promise<CommandResult> {
@@ -1371,14 +1581,22 @@ export class CrustyApp {
     const queued = await this.queueParsedTasks(parsed.queuedTasks, `agent:${agent.slug}`, {
       agentName: agent.slug
     });
+    let writtenFiles: string[] = [];
+    const postProcessErrors: string[] = [];
+    try {
+      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites);
+    } catch (error) {
+      postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
+    }
     await appendChangelogEntry(
-      `Agent @${agent.slug} replied via ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"}.`,
+      `Agent @${agent.slug} replied via ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
     );
 
     return {
       lines: [
         `@${agent.slug}: ${replyText}`,
+        ...writtenFiles,
         ...queued.map(
           (task) =>
             `Queued #${task.id} [${task.priority}]${
@@ -1386,7 +1604,7 @@ export class CrustyApp {
             }${task.requestedModel ? `/${task.requestedModel}` : ""} from @${agent.slug}: ${task.content}`
         )
       ],
-      errors: [],
+      errors: postProcessErrors,
       shouldExit: false
     };
   }
@@ -1489,6 +1707,7 @@ export class CrustyApp {
     if (task.requestedModel) {
       endpoint.model = task.requestedModel;
     }
+    const extraContextBlocks = await this.getAutoTaskExtraContext(task);
     const outgoingMessages = buildAutoTaskMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -1501,7 +1720,8 @@ export class CrustyApp {
       priority: task.priority,
       createdBy: task.createdBy,
       resourceAlias: selection.alias,
-      resourceRationale: selection.rationale
+      resourceRationale: selection.rationale,
+      extraContextBlocks
     });
 
     let rawReply: string;
@@ -1538,6 +1758,13 @@ export class CrustyApp {
 
     const parsed = parseQueuedTasks(rawReply);
     const replyText = parsed.replyText || "(No direct result text.)";
+    const postProcessErrors: string[] = [];
+    let writtenFiles: string[] = [];
+    try {
+      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites);
+    } catch (error) {
+      postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
+    }
     const completedTask: AutoQueueTask = {
       ...task,
       status: "completed",
@@ -1558,8 +1785,33 @@ export class CrustyApp {
     };
     await this.persistSystemState();
     const queued = await this.queueParsedTasks(parsed.queuedTasks, "erin:auto-processed");
+    let movedSourceLine: string | null = null;
+    if (task.sourceDocumentRelativePath) {
+      try {
+        const moved = await moveActiveDocumentToOutbox(task.sourceDocumentRelativePath, this.rootDir);
+        movedSourceLine = `Moved source document to outbox: ${moved.path}`;
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "dropbox.complete",
+            summary: `Moved source document ${task.sourceDocumentRelativePath} from active to outbox after task #${task.id}.`,
+            success: true,
+            actor: "erin",
+            target: task.sourceDocumentRelativePath,
+            metadata: {
+              taskId: task.id,
+              outboxPath: moved.path
+            }
+          },
+          this.rootDir
+        );
+      } catch (error) {
+        postProcessErrors.push(`Dropbox completion warning: ${(error as Error).message}`);
+      }
+    }
     await appendChangelogEntry(
-      `Completed auto task #${task.id} on ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"}.`,
+      `Completed auto task #${task.id} on ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
     );
 
@@ -1567,6 +1819,8 @@ export class CrustyApp {
       lines: [
         `Erin completed #${task.id} [${task.priority}] via ${selection.alias}/${endpoint.model}.`,
         replyText,
+        ...writtenFiles,
+        ...(movedSourceLine ? [movedSourceLine] : []),
         ...queued.map(
           (queuedTask) =>
             `Queued #${queuedTask.id} [${queuedTask.priority}]${
@@ -1574,7 +1828,7 @@ export class CrustyApp {
             }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
         )
       ],
-      errors: [],
+      errors: postProcessErrors,
       shouldExit: false
     };
   }
@@ -1590,6 +1844,19 @@ export class CrustyApp {
 
     return this.runAutoCycleLocked(async () => {
       if (this.systemState.auto.pending.length === 0) {
+        const ingested = await this.ingestNextInboxDocumentTask();
+        if (ingested) {
+          const processed = await this.processNextAutoTask();
+          return {
+            lines: [
+              `Ingested inbox document ${ingested.relativePath} and queued #${ingested.task.id}.`,
+              ...processed.lines
+            ],
+            errors: processed.errors,
+            shouldExit: false
+          };
+        }
+
         const filled = await this.fillAutoQueue();
         if (filled.length > 0) {
           return {
@@ -1868,6 +2135,17 @@ export class CrustyApp {
           viewerRequest: {
             kind: "explore"
           }
+        };
+      }
+
+      if (command.type === "login") {
+        return {
+          lines: [
+            "Remote login is not implemented in local Crusty yet.",
+            "See the remote portal docs and local handoff spec for the planned benlive.tv/crusty integration."
+          ],
+          errors: [],
+          shouldExit: false
         };
       }
 

@@ -111,6 +111,7 @@ export function buildAgentChatMessages(options: {
         "Stay aligned with your specification and maintain continuity with your private memory.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query.',
         "If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task.",
+        "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable.",
         "Do not emit queue lines unless a concrete asynchronous follow-up is useful."
       ].join(" ")
     }
@@ -162,8 +163,9 @@ export function buildAutoTaskMessages(options: {
   createdBy: string;
   resourceAlias: string;
   resourceRationale: string;
+  extraContextBlocks?: string[];
 }): ChatMessage[] {
-  return [
+  const outgoing: ChatMessage[] = [
     {
       role: "system",
       content: options.directives.trim()
@@ -178,7 +180,8 @@ export function buildAutoTaskMessages(options: {
         "Keep outputs concise and actionable.",
         "In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query.',
-        "If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task."
+        "If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task.",
+        "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable. Do not wrap WRITE blocks in markdown fences."
       ].join(" ")
     },
     {
@@ -204,18 +207,32 @@ export function buildAutoTaskMessages(options: {
     {
       role: "system",
       content: `Resource inventory:\n${options.inventory.trim()}`
-    },
-    {
-      role: "user",
-      content: [
-        `Priority: ${options.priority}`,
-        `Created by: ${options.createdBy}`,
-        "",
-        "Task:",
-        options.task
-      ].join("\n")
     }
   ];
+
+  for (const block of options.extraContextBlocks ?? []) {
+    if (!block.trim()) {
+      continue;
+    }
+
+    outgoing.push({
+      role: "system",
+      content: block.trim()
+    });
+  }
+
+  outgoing.push({
+    role: "user",
+    content: [
+      `Priority: ${options.priority}`,
+      `Created by: ${options.createdBy}`,
+      "",
+      "Task:",
+      options.task
+    ].join("\n")
+  });
+
+  return outgoing;
 }
 
 export function buildQueueFillMessages(options: {

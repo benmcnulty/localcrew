@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
+import { getLocalExternalMemoryDir } from "./external-memory.ts";
 import { getStoragePaths } from "./storage.ts";
 
 export interface InternalFileTree {
@@ -47,11 +48,15 @@ async function renderTreeLines(
 }
 
 export async function getInternalFileTree(rootDir = process.cwd()): Promise<InternalFileTree> {
-  const rootPath = getStoragePaths(rootDir).systemDir;
-  const lines = [rootPath];
-  await renderTreeLines(rootPath, "", lines);
+  const systemRoot = getStoragePaths(rootDir).systemDir;
+  const externalRoot = resolve(getLocalExternalMemoryDir(rootDir));
+  const lines = [systemRoot];
+  await renderTreeLines(systemRoot, "", lines);
+  lines.push("");
+  lines.push(externalRoot);
+  await renderTreeLines(externalRoot, "", lines);
   return {
-    rootPath,
+    rootPath: systemRoot,
     lines
   };
 }
@@ -60,17 +65,23 @@ export async function readInternalFile(
   requestedPath: string,
   rootDir = process.cwd()
 ): Promise<InternalFileDetail & { content: string }> {
-  const rootPath = resolve(getStoragePaths(rootDir).systemDir);
+  const allowedRoots = [
+    resolve(getStoragePaths(rootDir).systemDir),
+    resolve(getLocalExternalMemoryDir(rootDir))
+  ];
   const resolvedPath = resolve(requestedPath.trim());
-  const relativePath = relative(rootPath, resolvedPath);
+  const matchedRoot = allowedRoots.find((rootPath) => {
+    const relativePath = relative(rootPath, resolvedPath);
+    return !(
+      relativePath === "" ||
+      relativePath.startsWith(`..${sep}`) ||
+      relativePath === ".." ||
+      relativePath.startsWith("../")
+    );
+  });
 
-  if (
-    relativePath === "" ||
-    relativePath.startsWith(`..${sep}`) ||
-    relativePath === ".." ||
-    relativePath.startsWith("../")
-  ) {
-    throw new Error(`Path must stay inside ${rootPath}.`);
+  if (!matchedRoot) {
+    throw new Error(`Path must stay inside ${allowedRoots.join(" or ")}.`);
   }
 
   const fileStat = await stat(resolvedPath);
@@ -82,7 +93,7 @@ export async function readInternalFile(
 
   return {
     path: resolvedPath,
-    relativePath,
+    relativePath: relative(matchedRoot, resolvedPath),
     content,
     size: fileStat.size,
     modifiedAt: fileStat.mtime.toISOString()

@@ -22,12 +22,20 @@ function normalizeSlug(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+export function getLocalExternalMemoryDir(rootDir = process.cwd()): string {
+  return join(rootDir, "external-memory");
+}
+
 export function getExternalMemoryDir(rootDir = process.cwd()): string {
-  const localDir = join(rootDir, "external-memory");
-  if (existsSync(localDir)) {
+  const localDir = getLocalExternalMemoryDir(rootDir);
+  if (existsSync(join(localDir, "orchestrator")) || existsSync(join(localDir, "agents"))) {
     return localDir;
   }
 
+  return getExternalMemorySeedDir();
+}
+
+export function getExternalMemorySeedDir(): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   return resolve(moduleDir, "..", "external-memory");
 }

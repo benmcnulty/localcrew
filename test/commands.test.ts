@@ -60,6 +60,9 @@ describe("parseCommand", () => {
     expect(parseCommand("/explore")).toEqual({
       type: "explore"
     });
+    expect(parseCommand("/login")).toEqual({
+      type: "login"
+    });
   });
 
   test("parses auto mode commands", () => {

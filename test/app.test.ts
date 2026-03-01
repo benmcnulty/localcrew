@@ -361,6 +361,56 @@ describe("CrustyApp", () => {
     });
   });
 
+  test("ingests inbox documents, writes draft/final files, and moves the source document through the dropbox", async () => {
+    await withTempDir(async (rootDir) => {
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Document processed.",
+              "WRITE[active][drafts/outline.md]",
+              "# Rough Draft",
+              "Working notes.",
+              "ENDWRITE",
+              "WRITE[outbox][finals/result.md]",
+              "# Final Draft",
+              "Completed deliverable.",
+              "ENDWRITE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.createInboxDocument("request.md", "# Request\n\nBuild a short output.");
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const dropbox = await app.getDropboxSnapshot();
+      const sourceOutbox = await readFile(join(rootDir, "external-memory", "outbox", "request.md"), "utf8");
+      const finalOutbox = await readFile(
+        join(rootDir, "external-memory", "outbox", "finals", "result.md"),
+        "utf8"
+      );
+      const activeDraft = await readFile(
+        join(rootDir, "external-memory", "active", "drafts", "outline.md"),
+        "utf8"
+      );
+
+      expect(result.lines.some((line) => line.includes("Ingested inbox document"))).toBe(true);
+      expect(result.lines.some((line) => line.includes("Wrote active file"))).toBe(true);
+      expect(result.lines.some((line) => line.includes("Wrote outbox file"))).toBe(true);
+      expect(result.lines.some((line) => line.includes("Moved source document to outbox"))).toBe(true);
+      expect(dropbox.inbox).toHaveLength(0);
+      expect(dropbox.active.map((entry) => entry.relativePath)).toContain("drafts/outline.md");
+      expect(dropbox.outbox.map((entry) => entry.relativePath)).toEqual(
+        expect.arrayContaining(["request.md", "finals/result.md"])
+      );
+      expect(sourceOutbox).toContain("Crusty-Status: outbox");
+      expect(finalOutbox).toContain("Crusty-Status: outbox");
+      expect(activeDraft).toContain("Crusty-Status: active");
+    });
+  });
+
   test("returns a workflow request for agent creation and persists a generated agent", async () => {
     await withTempDir(async (rootDir) => {
       const app = await CrustyApp.create({

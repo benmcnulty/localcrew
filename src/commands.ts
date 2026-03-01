@@ -28,6 +28,8 @@ function usage(command: string): string {
       return "Usage: /hud";
     case "/explore":
       return "Usage: /explore";
+    case "/login":
+      return "Usage: /login";
     case "/end":
       return "Usage: /end";
     case "/help":
@@ -295,6 +297,11 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/explore"));
       }
       return { type: "explore" };
+    case "/login":
+      if (rest.length > 0) {
+        throw new CommandParseError(usage("/login"));
+      }
+      return { type: "login" };
     case "/end":
       if (rest.length > 0) {
         throw new CommandParseError(usage("/end"));

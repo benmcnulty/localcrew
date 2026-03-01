@@ -410,6 +410,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
   try {
     if (apiServer) {
       writeLine(stdout, `HTTP API: ${apiServer.url}/api/status`);
+      writeLine(stdout, `Local UI: ${apiServer.url}/ui`);
     }
 
     while (true) {

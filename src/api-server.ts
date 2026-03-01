@@ -4,7 +4,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CrustyApp } from "./app.ts";
+import { CommandParseError, parseCommand } from "./commands.ts";
 import { getEnvBoolean, getEnvNumber, getEnvString, loadLocalEnv } from "./env.ts";
+import { getGuiHtml, getGuiScript, getGuiStyles } from "./gui.ts";
 
 export interface ApiServerHandle {
   url: string;
@@ -24,14 +26,17 @@ interface WorkerErrorMessage {
 interface WorkerRequestMessage {
   type: "request";
   id: number;
+  method: string;
   url: string;
+  bodyText: string;
 }
 
 interface WorkerResponseMessage {
   type: "response";
   id: number;
   status: number;
-  body: unknown;
+  headers?: Record<string, string>;
+  bodyText: string;
 }
 
 interface WorkerShutdownMessage {
@@ -41,64 +46,208 @@ interface WorkerShutdownMessage {
 type WorkerIncomingMessage = WorkerReadyMessage | WorkerErrorMessage | WorkerRequestMessage;
 type WorkerOutgoingMessage = WorkerResponseMessage | WorkerShutdownMessage;
 
+interface ApiRequest {
+  method: string;
+  url: URL;
+  bodyText: string;
+}
+
+interface ApiResponsePayload {
+  status: number;
+  headers: Record<string, string>;
+  bodyText: string;
+}
+
 function writeJson(
   response: import("node:http").ServerResponse<import("node:http").IncomingMessage>,
   statusCode: number,
   body: unknown
 ): void {
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "cache-control": "no-store"
-  });
-  response.end(`${JSON.stringify(body, null, 2)}\n`);
+  const payload = jsonResponse(statusCode, body);
+  response.writeHead(payload.status, payload.headers);
+  response.end(payload.bodyText);
 }
 
 function normalizeHudTab(value: string | null): "status" | "queue" | "metrics" | "detail" {
   return value === "queue" || value === "metrics" || value === "detail" ? value : "status";
 }
 
-async function buildApiPayload(app: CrustyApp, requestUrl: URL): Promise<{ status: number; body: unknown }> {
-  if (requestUrl.pathname === "/api/health") {
-    return { status: 200, body: { ok: true } };
+function jsonResponse(status: number, body: unknown): ApiResponsePayload {
+  return {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store"
+    },
+    bodyText: `${JSON.stringify(body, null, 2)}\n`
+  };
+}
+
+function textResponse(
+  status: number,
+  bodyText: string,
+  contentType: string
+): ApiResponsePayload {
+  return {
+    status,
+    headers: {
+      "content-type": contentType,
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store"
+    },
+    bodyText
+  };
+}
+
+function parseJsonBody<T>(bodyText: string): T {
+  try {
+    return JSON.parse(bodyText || "{}") as T;
+  } catch (error) {
+    throw new Error(`Invalid JSON body: ${(error as Error).message}`);
+  }
+}
+
+async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<ApiResponsePayload> {
+  if (request.method === "GET" && (request.url.pathname === "/" || request.url.pathname === "/ui")) {
+    return textResponse(200, getGuiHtml(), "text/html; charset=utf-8");
   }
 
-  if (requestUrl.pathname === "/api/status") {
-    return { status: 200, body: await app.getStatusSnapshot() };
+  if (request.method === "GET" && request.url.pathname === "/ui/app.js") {
+    return textResponse(200, getGuiScript(), "text/javascript; charset=utf-8");
   }
 
-  if (requestUrl.pathname === "/api/hud") {
-    const tab = normalizeHudTab(requestUrl.searchParams.get("tab"));
-    return {
-      status: 200,
-      body: {
-        tab,
-        lines: await app.getHudLines(tab)
+  if (request.method === "GET" && request.url.pathname === "/ui/styles.css") {
+    return textResponse(200, getGuiStyles(), "text/css; charset=utf-8");
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/health") {
+    return jsonResponse(200, { ok: true });
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/status") {
+    return jsonResponse(200, await app.getStatusSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/hud") {
+    const tab = normalizeHudTab(request.url.searchParams.get("tab"));
+    return jsonResponse(200, {
+      tab,
+      lines: await app.getHudLines(tab)
+    });
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/queue") {
+    return jsonResponse(200, await app.getQueueSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/telemetry") {
+    return jsonResponse(200, await app.getTelemetrySnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/audit") {
+    const limit = Math.max(1, Math.min(200, Number(request.url.searchParams.get("limit") ?? "20")));
+    return jsonResponse(200, await app.getAuditSnapshot(Number.isFinite(limit) ? limit : 20));
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/agents") {
+    return jsonResponse(200, await app.getAgentsSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/dropbox") {
+    return jsonResponse(200, await app.getDropboxSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/explore/tree") {
+    return jsonResponse(200, await app.getExploreTree());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/explore/file") {
+    const path = request.url.searchParams.get("path");
+    if (!path) {
+      return jsonResponse(400, { error: "The path query parameter is required." });
+    }
+
+    return jsonResponse(200, await app.readExploreFile(path));
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/command") {
+    const body = parseJsonBody<{ input?: unknown }>(request.bodyText);
+    if (typeof body.input !== "string" || body.input.trim() === "") {
+      return jsonResponse(400, { error: "The input field is required." });
+    }
+
+    try {
+      const result = await app.execute(parseCommand(body.input));
+      return jsonResponse(200, { result });
+    } catch (error) {
+      if (error instanceof CommandParseError) {
+        return jsonResponse(400, { error: error.message });
       }
-    };
+      throw error;
+    }
   }
 
-  if (requestUrl.pathname === "/api/queue") {
-    return { status: 200, body: await app.getQueueSnapshot() };
+  if (request.method === "POST" && request.url.pathname === "/api/edit") {
+    const body = parseJsonBody<{ kind?: unknown; target?: unknown; text?: unknown }>(request.bodyText);
+    if (typeof body.target !== "string" || typeof body.text !== "string") {
+      return jsonResponse(400, { error: "The target and text fields are required." });
+    }
+
+    if (body.kind === "instructions") {
+      return jsonResponse(200, {
+        result: await app.updateInstructions(body.target, body.text)
+      });
+    }
+
+    if (body.kind === "agentSpec") {
+      return jsonResponse(200, {
+        result: await app.updateAgentSpec(body.target, body.text)
+      });
+    }
+
+    return jsonResponse(400, { error: "Unknown edit kind." });
   }
 
-  if (requestUrl.pathname === "/api/telemetry") {
-    return { status: 200, body: await app.getTelemetrySnapshot() };
+  if (request.method === "POST" && request.url.pathname === "/api/agent/create") {
+    const body = parseJsonBody<{
+      name?: unknown;
+      summary?: unknown;
+      mission?: unknown;
+      style?: unknown;
+      skills?: unknown;
+      preferredResource?: unknown;
+    }>(request.bodyText);
+    return jsonResponse(200, {
+      result: await app.createAgentFromWorkflow({
+        name: typeof body.name === "string" ? body.name : "",
+        summary: typeof body.summary === "string" ? body.summary : "",
+        mission: typeof body.mission === "string" ? body.mission : "",
+        style: typeof body.style === "string" ? body.style : "",
+        skills: typeof body.skills === "string" ? body.skills : "",
+        preferredResource: typeof body.preferredResource === "string" ? body.preferredResource : ""
+      })
+    });
   }
 
-  if (requestUrl.pathname === "/api/audit") {
-    const limit = Math.max(1, Math.min(200, Number(requestUrl.searchParams.get("limit") ?? "20")));
-    return {
-      status: 200,
-      body: await app.getAuditSnapshot(Number.isFinite(limit) ? limit : 20)
-    };
+  if (request.method === "POST" && request.url.pathname === "/api/dropbox/inbox") {
+    const body = parseJsonBody<{ filename?: unknown; content?: unknown }>(request.bodyText);
+    if (typeof body.filename !== "string" || typeof body.content !== "string") {
+      return jsonResponse(400, { error: "The filename and content fields are required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.createInboxDocument(body.filename, body.content)
+    });
   }
 
-  if (requestUrl.pathname === "/api/agents") {
-    return { status: 200, body: await app.getAgentsSnapshot() };
+  if (request.method === "POST" && request.url.pathname === "/api/login") {
+    return jsonResponse(501, {
+      error: "Remote login is not implemented in local Crusty yet. See the remote portal docs and handoff spec."
+    });
   }
 
-  return { status: 404, body: { error: "Not found." } };
+  return jsonResponse(404, { error: "Not found." });
 }
 
 async function startNodeWorkerApi(
@@ -138,13 +287,18 @@ async function startNodeWorkerApi(
 
       if (message.type === "request") {
         try {
-          const payload = await buildApiPayload(app, new URL(message.url, "http://localhost"));
+          const payload = await buildApiResponse(app, {
+            method: message.method,
+            url: new URL(message.url, "http://localhost"),
+            bodyText: message.bodyText
+          });
           if (child.connected) {
             child.send({
               type: "response",
               id: message.id,
               status: payload.status,
-              body: payload.body
+              headers: payload.headers,
+              bodyText: payload.bodyText
             } satisfies WorkerOutgoingMessage);
           }
         } catch (error) {
@@ -153,7 +307,8 @@ async function startNodeWorkerApi(
               type: "response",
               id: message.id,
               status: 500,
-              body: { error: (error as Error).message }
+              headers: jsonResponse(500, { error: (error as Error).message }).headers,
+              bodyText: jsonResponse(500, { error: (error as Error).message }).bodyText
             } satisfies WorkerOutgoingMessage);
           }
         }
@@ -211,13 +366,17 @@ async function startNodeWorkerApi(
 }
 
 function buildJsonResponse(status: number, body: unknown): Response {
-  return new Response(`${JSON.stringify(body, null, 2)}\n`, {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "access-control-allow-origin": "*",
-      "cache-control": "no-store"
-    }
+  const payload = jsonResponse(status, body);
+  return new Response(payload.bodyText, {
+    status: payload.status,
+    headers: payload.headers
+  });
+}
+
+function buildFetchResponse(payload: ApiResponsePayload): Response {
+  return new Response(payload.bodyText, {
+    status: payload.status,
+    headers: payload.headers
   });
 }
 
@@ -239,13 +398,13 @@ function startVirtualApiServer(
       return await originalFetch(input, init);
     }
 
-    if (request.method !== "GET") {
-      return buildJsonResponse(405, { error: "Method not allowed." });
-    }
-
     try {
-      const payload = await buildApiPayload(app, url);
-      return buildJsonResponse(payload.status, payload.body);
+      const payload = await buildApiResponse(app, {
+        method: request.method,
+        url,
+        bodyText: await request.text()
+      });
+      return buildFetchResponse(payload);
     } catch (error) {
       return buildJsonResponse(500, { error: (error as Error).message });
     }
@@ -298,15 +457,25 @@ export async function startApiServer(
   }
 
   const server = createServer(async (request, response) => {
-    if (request.method !== "GET") {
-      writeJson(response, 405, { error: "Method not allowed." });
-      return;
-    }
-
     try {
       const url = new URL(request.url ?? "/", `http://${host}:${requestedPort}`);
-      const payload = await buildApiPayload(app, url);
-      writeJson(response, payload.status, payload.body);
+      const bodyText = await new Promise<string>((resolveBody, rejectBody) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        request.on("end", () => {
+          resolveBody(Buffer.concat(chunks).toString("utf8"));
+        });
+        request.on("error", rejectBody);
+      });
+      const payload = await buildApiResponse(app, {
+        method: request.method ?? "GET",
+        url,
+        bodyText
+      });
+      response.writeHead(payload.status, payload.headers);
+      response.end(payload.bodyText);
     } catch (error) {
       writeJson(response, 500, {
         error: (error as Error).message

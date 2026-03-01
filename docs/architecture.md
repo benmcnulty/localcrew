@@ -15,6 +15,7 @@ Committed external system memory lives in `external-memory/` and seeds durable b
 
 - `external-memory/orchestrator/*.md`: default directives, roadmap, focus todo, and agent-creation workflow
 - `external-memory/agents/*`: built-in agent identities such as `data-analyst`
+- `external-memory/inbox`, `external-memory/active`, `external-memory/outbox`: local dropbox folders for file-driven work intake and delivery; only the folders are tracked, not their contents
 
 Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 
@@ -51,10 +52,22 @@ Current observability surfaces:
 
 - `/status`: point-in-time orchestration summary
 - `/hud`: live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs
-- `/explore`: internal file browser
-- local HTTP API for browser-based status, queue, telemetry, audit, and agent reads
+- `/explore`: internal and external-memory file browser
+- local HTTP API for browser-based status, queue, telemetry, audit, explorer, command, and edit flows
+- `/ui`: local browser prototype backed by the same API routes
 - terminal background output in `/auto`
 - append-only audit logging for Ollama and Wikipedia transactions
+
+## Dropbox Workflow
+
+When `/auto` is idle and the queue is empty, Erin checks `external-memory/inbox` before generating self-improvement work.
+
+- The next inbox document is moved into `external-memory/active`
+- its `Crusty-Status:` tag is updated to `active`
+- Erin queues a high-priority task against that active document
+- the task receives the active document body as prompt context
+- Erin can emit `WRITE[active][path] ... ENDWRITE` for rough drafts and `WRITE[outbox][path] ... ENDWRITE` for final deliverables
+- after a successful source-document task, the source document is moved from `active` to `outbox` and retagged as `outbox`
 
 ## Grounding
 

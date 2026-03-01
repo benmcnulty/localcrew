@@ -58,6 +58,8 @@ export interface AutoQueueTask {
   assignedModel?: string;
   agentName?: string;
   result?: string;
+  sourceDocumentRelativePath?: string;
+  sourceDocumentName?: string;
 }
 
 export interface AutoState {
@@ -223,6 +225,7 @@ export type Command =
   | { type: "status" }
   | { type: "hud" }
   | { type: "explore" }
+  | { type: "login" }
   | { type: "endMode" }
   | { type: "help" }
   | { type: "priority.get" }

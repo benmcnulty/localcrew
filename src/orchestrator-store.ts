@@ -94,7 +94,15 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
     ...(typeof candidate.agentName === "string" && candidate.agentName.trim() !== ""
       ? { agentName: candidate.agentName }
       : {}),
-    ...(typeof candidate.result === "string" ? { result: candidate.result } : {})
+    ...(typeof candidate.result === "string" ? { result: candidate.result } : {}),
+    ...(typeof candidate.sourceDocumentRelativePath === "string" &&
+    candidate.sourceDocumentRelativePath.trim() !== ""
+      ? { sourceDocumentRelativePath: candidate.sourceDocumentRelativePath }
+      : {}),
+    ...(typeof candidate.sourceDocumentName === "string" &&
+    candidate.sourceDocumentName.trim() !== ""
+      ? { sourceDocumentName: candidate.sourceDocumentName }
+      : {})
   };
 }
 
