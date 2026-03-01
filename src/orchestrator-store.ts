@@ -143,24 +143,35 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "",
     "## Core Rules",
     "",
-    "- Prefer the local orchestrator resource for reasoning, verification, and ambiguous routing decisions.",
-    "- Prefer the strongest available non-orchestrator top-tier resource for sustained drafting when one is available.",
-    "- Prefer mid-tier or tools-capable resources for structured routing, indexing, and bookkeeping work when possible.",
-    "- Reserve low-tier resources for small-context isolated tasks and overflow work.",
-    "- Keep tasks concrete, concise, and scoped to what this local system can actually do.",
-    "- When the queue is empty, propose a brief medium/low priority self-improvement backlog for the orchestration system itself.",
+    "- Prefer the local orchestrator resource for reasoning, verification, ambiguity resolution, and recovery work.",
+    "- Prefer the strongest available non-orchestrator top-tier resource for sustained drafting when parallel capacity is useful.",
+    "- Prefer mid-tier or tools-capable resources for routing, indexing, and bookkeeping work.",
+    "- Reserve low-tier resources for isolated small-context tasks and overflow.",
+    "- Keep tasks concrete, narrow, and proportionate to the current installation.",
+    "- Treat the local network itself as a first-order optimization target: understand resource tiers, context ceilings, load, and measured behavior before proposing broader change.",
     "- Agent identities are separate from devices. Devices are inference resources; agents are persistent working identities with their own specs and memory.",
     "- Track model/runtime evidence so delegation and model-switching decisions are based on measured performance instead of guesswork.",
-    "- Prefer stable model assignments, but switch models when telemetry shows a clear gain in quality or throughput for the task.",
+    "",
+    "## Memory Boundary",
+    "",
+    "- `external-memory/` is the committed seed layer and should contain only portable guidance, workflows, and durable patterns.",
+    "- `.crusty/` is internal local memory and may contain runtime summaries, queues, telemetry, and local experimentation.",
+    "- Promote only validated lessons from local memory into committed seeds after they have been reviewed and simplified.",
+    "- Prefer concise summaries and stable indexes over sprawling process prose.",
     "",
     ACTIVE_AUTO_DIRECTIVE_HEADING,
     "",
     `- In \`/auto\`, self-aware self-improvement is ${orchestratorName}'s default operating stance whenever the user has not given a more urgent direct task.`,
-    "- Continuously review documentation, indexing, task logs, prompt guidance, delegation heuristics, queue hygiene, and memory quality for opportunities to improve the system.",
+    "- Improve internal memory quality, routing quality, observability, context budgeting, queue hygiene, and failure recovery first.",
+    "- Before adding autonomous tasks, draft the plan, have the standing secondary reviewer critique it, then finalize only the narrowed approved tasks by consensus.",
+    '- Apply a "measure twice, cut once" standard: prefer fewer, clearer, better-justified tasks over speculative backlogs or documentation churn.',
+    "- Autonomous work may directly change only internal memory, prompt guidance, indexes, summaries, and other contained process artifacts.",
+    "- If a useful improvement would require external application, API, UI, script, source-code, or system-service work, write a detailed feature request ticket into `external-memory/outbox/feature-requests/` instead of treating it as executable autonomous work.",
+    "- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Crusty.",
+    "- Never create or rely on ad-hoc executable scripts, daemons, or undefined system processes from `/auto`; use only approved application capabilities.",
+    "- Unexpected failures should trigger diagnosis, quarantine, and recovery, not repeated blind retries.",
     "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance.",
-    "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance.",
-    "- Prefer improvements that make future autonomous work more coherent, reliable, efficient, and easier to verify.",
-    "- Never remain idle in `/auto`: if no task is queued, create the next best internal improvement task and continue."
+    "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance."
   ].join("\n");
 }
 
@@ -168,12 +179,12 @@ function getDefaultRoadmap(): string {
   return [
     "# Roadmap",
     "",
-    "- Refine routing policy with measured queue, latency, and model-load evidence.",
-    "- Expand the terminal HUD and browser-facing API into richer observability surfaces.",
-    "- Deepen agent identity creation, editing, and memory quality.",
-    "- Use the data-analyst identity for recurring metrics reviews and process refinements.",
-    "- Tighten structured outputs, indexing, compaction quality, and validation before promotion.",
-    "- Formalize how validated internal discoveries are promoted into committed external-memory seeds."
+    "- Make autonomous routing more evidence-driven through cleaner telemetry interpretation, queue awareness, and context-fit heuristics.",
+    "- Improve memory quality so summaries, indexes, and directives stay compact, canonical, and resistant to long-run drift.",
+    "- Expand observability through the HUD, local API, and browser GUI without weakening the internal/external memory boundary.",
+    "- Strengthen safe-mode recovery so failures produce diagnosis and realignment instead of repeated derailment.",
+    "- Formalize the promotion path from local discoveries in `.crusty/` into simplified, committed `external-memory/` seeds.",
+    "- Keep external feature work spec-driven through outbox tickets until it is deliberately implemented in the application layer."
   ].join("\n");
 }
 
@@ -181,9 +192,10 @@ function getDefaultFocusTodo(): string {
   return [
     "# In Focus Todo",
     "",
-    "- [high] Refine routing policy using measured queue pressure, latency, and model-switch costs.",
-    "- [medium] Expand the browser-facing API and GUI parity plan for observability and control.",
-    "- [medium] Formalize promotion from internal runtime discoveries into committed external-memory seeds."
+    "- [high] Keep canonical resource naming, routing, and queue delegation resistant to context drift.",
+    "- [medium] Tighten orchestrator summaries, indexes, and prompt guidance so long-running `/auto` sessions stay coherent.",
+    "- [medium] Improve safe-mode recovery and failure diagnosis using recent audit evidence.",
+    "- [low] Distill validated local lessons into simpler committed seed documents without carrying over experimental clutter."
   ].join("\n");
 }
 
@@ -201,7 +213,14 @@ function getDefaultWorkflow(): string {
     "- Mission and responsibility",
     "- Personality and response style",
     "- Tool-use and skills guidance",
-    "- Preferred resource (`resource-alias` or `auto`)"
+    "- Preferred resource (`resource-alias` or `auto`)",
+    "- Boundaries: what the agent should not do",
+    "- Deliverables: what good output from this agent should look like",
+    "",
+    "Before saving a new agent, check:",
+    "- The agent is not just a renamed device role.",
+    "- The mission is narrow enough to stay coherent over time.",
+    "- The skills guidance points to approved application capabilities, not ad-hoc system execution."
   ].join("\n");
 }
 
@@ -355,7 +374,13 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   );
   await writeIfMissing(
     paths.orchestratorMemorySummaryPath,
-    "# Orchestrator Memory\n\nPersistent orchestrator summaries and notes live here.\n"
+    [
+      "# Orchestrator Memory",
+      "",
+      "- Keep only compact durable summaries here.",
+      "- Record canonical resource names, current operating boundaries, and the most important active heuristics.",
+      "- Do not duplicate changelog detail or speculative implementation plans."
+    ].join("\n")
   );
   await writeIfMissing(paths.agentsIndexPath, JSON.stringify({ agents: [] }, null, 2));
   await replaceGeneratedOrchestratorIdentityText(rootDir, paths.directivesPath);
