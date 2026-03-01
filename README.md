@@ -1,8 +1,13 @@
 # Crusty
 
-Crusty is a local-first orchestration CLI for multi-node Ollama networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, transactional telemetry, a local browser-facing API, a crude browser GUI prototype, and observability tools such as `/status`, `/hud`, and `/explore`.
+Crusty is a local-first orchestration CLI for multi-device inference networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, transactional telemetry, a local browser-facing API, a crude browser GUI prototype, and observability tools such as `/status`, `/hud`, and `/explore`.
 
 The repo is being prepared for public release. Local node addresses, model assignments, and hardware-specific notes are now loaded from ignored env files instead of being committed into source.
+
+Provider foundation is built around:
+- `ollama` for local Ollama endpoints
+- `openai` for OpenAI-compatible endpoints such as LM Studio, OpenRouter, OpenAI, and similar custom-compatible services
+- `anthropic` for Anthropic-style endpoints
 
 ## Current Features
 
@@ -24,10 +29,10 @@ The repo is being prepared for public release. Local node addresses, model assig
 
 ## Quick Start
 
-1. Run `node scripts/setup-orchestrator.js` on the best local device with Ollama or another supported local OpenAI-compatible endpoint.
-2. Start Crusty with `node src/index.ts` or `bun run src/index.ts`.
+1. Run `npm run setup:orchestrator` on the best local device with Ollama or another supported endpoint.
+2. Start Crusty with `npm run start`.
 3. Open the printed `Local UI` link or stay in the CLI and use `/help`.
-4. Bring the next best device online and run `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310` on that device, or add it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`.
+4. Bring the next best agent device online and run `node scripts/setup-agent.js` on that device, or use the standalone `setup-agent.js` download when that is published. It prompts for the orchestrator IP, tests the connection immediately, prompts for a device nickname, shows a verified configuration summary, and then syncs the verified configuration. Re-running it on the same device replaces that device's prior synced listing instead of duplicating it. For OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync. You can still add devices manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`.
 
 Once the orchestrator is up, the fast validation path is:
 
@@ -36,7 +41,7 @@ Once the orchestrator is up, the fast validation path is:
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet
 - use `/ui` for the matching browser prototype with editable resources, participants, and direct test chat
 
-The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `node scripts/setup-orchestrator.js --name "Your Name"`.
+The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `npm run setup:orchestrator -- --name "Your Name"`.
 
 Notable views:
 
@@ -97,7 +102,7 @@ Control the API listener with:
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
 - Linux: `scripts/ollama-optimize-linux.sh`
 
-Each script benchmarks a local Ollama node, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `node scripts/setup-orchestrator.js`, then benchmark and add secondary devices with `node scripts/setup-node.js`.
+Each script benchmarks a local Ollama endpoint, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `npm run setup:orchestrator`, then bring secondary agent devices online with `node scripts/setup-agent.js`.
 
 ## Documentation
 

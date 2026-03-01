@@ -682,6 +682,50 @@ describe("CrustyApp", () => {
     });
   });
 
+  test("replaces an existing synced resource when the same device registers again", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
+
+      const first = await app.syncResourceReport({
+        alias: "studio-a",
+        label: "Studio A",
+        baseUrl: "http://127.0.0.1:1234",
+        apiStyle: "openai",
+        deviceId: "machine-1",
+        hostName: "workstation",
+        platform: "win32",
+        defaultModel: "openai/gpt-oss-20b",
+        availableModels: ["openai/gpt-oss-20b"]
+      });
+      const second = await app.syncResourceReport({
+        alias: "studio-b",
+        label: "Studio B",
+        baseUrl: "http://127.0.0.1:1234",
+        apiStyle: "openai",
+        deviceId: "machine-1",
+        hostName: "workstation",
+        platform: "win32",
+        defaultModel: "openai/gpt-oss-20b",
+        availableModels: ["openai/gpt-oss-20b"]
+      });
+
+      const resources = await app.getResourcesSnapshot();
+
+      expect(first.lines[0]).toContain("Added resource @studio-a from agent sync.");
+      expect(second.lines[0]).toContain("Updated resource @studio-b from agent sync.");
+      expect(resources.some((resource) => resource.alias === "studio-a")).toBe(false);
+      expect(
+        resources.some(
+          (resource) =>
+            resource.alias === "studio-b" &&
+            resource.label === "Studio B" &&
+            resource.deviceId === "machine-1"
+        )
+      ).toBe(true);
+    });
+  });
+
   test("renames an endpoint across config, runtime target, and stored conversation", async () => {
     await withTempDir(async (rootDir) => {
       const app = await CrustyApp.create({

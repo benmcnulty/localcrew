@@ -20,6 +20,7 @@ export interface ResourceProfile {
   baseUrl: string;
   apiStyle?: ResourceApiStyle;
   apiKeyEnv?: string;
+  deviceId?: string;
   hostName?: string;
   platform?: string;
   defaultModel: string;
@@ -61,7 +62,11 @@ function normalizeAlias(alias: string): string {
 }
 
 function normalizeApiStyle(value: unknown): ResourceApiStyle {
-  return value === "openai" ? "openai" : "ollama";
+  if (value === "openai" || value === "anthropic") {
+    return value;
+  }
+
+  return "ollama";
 }
 
 function getOptionalPositiveNumber(value: unknown): number | undefined {
@@ -180,6 +185,9 @@ function normalizeResource(alias: string, value: unknown): ResourceProfile {
     apiStyle: normalizeApiStyle(candidate.apiStyle),
     ...(typeof candidate.apiKeyEnv === "string" && candidate.apiKeyEnv.trim() !== ""
       ? { apiKeyEnv: candidate.apiKeyEnv.trim() }
+      : {}),
+    ...(typeof candidate.deviceId === "string" && candidate.deviceId.trim() !== ""
+      ? { deviceId: candidate.deviceId.trim() }
       : {}),
     ...(typeof candidate.hostName === "string" && candidate.hostName.trim() !== ""
       ? { hostName: candidate.hostName.trim() }
@@ -620,6 +628,7 @@ export function renderResourceInventory(rootDir = process.cwd()): string {
       `- Tier: ${profile.tier}`,
       `- Base URL: ${profile.baseUrl}`,
       `- API style: ${profile.apiStyle ?? "ollama"}`,
+      ...(profile.deviceId ? [`- Device ID: ${profile.deviceId}`] : []),
       ...(profile.hostName || profile.platform
         ? [
             `- Host: ${[profile.hostName, profile.platform].filter(Boolean).join(" / ")}`

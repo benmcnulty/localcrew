@@ -60,7 +60,7 @@ function getDefaultEndpointConfig(
   const upperAlias = alias.toUpperCase();
   let fallbackBaseUrl = "http://127.0.0.1:11434";
   let fallbackModel = "llama3.1:8b";
-  let fallbackApiStyle: "ollama" | "openai" = "ollama";
+  let fallbackApiStyle: "ollama" | "openai" | "anthropic" = "ollama";
   let fallbackApiKeyEnv: string | undefined;
   const fallbackNickname = titleCase(alias);
 
@@ -178,7 +178,10 @@ function normalizeEndpoint(
     typeof candidate.baseUrl === "string" && candidate.baseUrl.trim() !== ""
       ? candidate.baseUrl.trim()
       : "http://127.0.0.1:11434";
-  let apiStyle = candidate.apiStyle === "openai" ? "openai" : "ollama";
+  let apiStyle: "ollama" | "openai" | "anthropic" =
+    candidate.apiStyle === "openai" || candidate.apiStyle === "anthropic"
+      ? candidate.apiStyle
+      : "ollama";
   let apiKeyEnv =
     typeof candidate.apiKeyEnv === "string" && candidate.apiKeyEnv.trim() !== ""
       ? candidate.apiKeyEnv.trim()

@@ -8,6 +8,9 @@ export interface EndpointModelEntry {
   quantizationLevel?: string;
 }
 
+const ANTHROPIC_VERSION = "2023-06-01";
+const ANTHROPIC_MAX_TOKENS = 2048;
+
 function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -25,8 +28,14 @@ export async function chatWithOllamaDetailed(
   const headers: Record<string, string> = {
     "content-type": "application/json"
   };
-  if (endpoint.apiKeyEnv && process.env[endpoint.apiKeyEnv]?.trim()) {
-    headers.authorization = `Bearer ${process.env[endpoint.apiKeyEnv]!.trim()}`;
+  const apiKey = endpoint.apiKeyEnv ? process.env[endpoint.apiKeyEnv]?.trim() : undefined;
+  if (apiKey) {
+    if (endpoint.apiStyle === "anthropic") {
+      headers["x-api-key"] = apiKey;
+      headers["anthropic-version"] = ANTHROPIC_VERSION;
+    } else {
+      headers.authorization = `Bearer ${apiKey}`;
+    }
   }
 
   if (endpoint.apiStyle === "openai") {
@@ -69,6 +78,67 @@ export async function chatWithOllamaDetailed(
         : {}),
       ...(typeof body.usage?.completion_tokens === "number"
         ? { evalCount: body.usage.completion_tokens }
+        : {})
+    };
+  }
+
+  if (endpoint.apiStyle === "anthropic") {
+    const systemText = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n\n");
+    const anthropicMessages = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role,
+        content: message.content
+      }));
+
+    const response = await fetchFn(`${trimTrailingSlash(endpoint.baseUrl)}/v1/messages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: endpoint.model,
+        max_tokens: ANTHROPIC_MAX_TOKENS,
+        ...(systemText ? { system: systemText } : {}),
+        messages: anthropicMessages
+      })
+    });
+
+    if (!response.ok) {
+      const bodyText = await response.text();
+      throw new Error(formatHttpError(response.status, bodyText));
+    }
+
+    const body = (await response.json()) as {
+      content?: Array<{
+        type?: unknown;
+        text?: unknown;
+      }>;
+      usage?: {
+        input_tokens?: unknown;
+        output_tokens?: unknown;
+      };
+    };
+    const content = Array.isArray(body.content)
+      ? body.content
+          .filter((item) => item?.type === "text" && typeof item.text === "string")
+          .map((item) => item.text.trim())
+          .filter((text) => text !== "")
+          .join("\n")
+      : "";
+
+    if (!content) {
+      throw new Error("Anthropic response was missing content text.");
+    }
+
+    return {
+      text: content,
+      ...(typeof body.usage?.input_tokens === "number"
+        ? { promptEvalCount: body.usage.input_tokens }
+        : {}),
+      ...(typeof body.usage?.output_tokens === "number"
+        ? { evalCount: body.usage.output_tokens }
         : {})
     };
   }
@@ -132,12 +202,18 @@ export async function listOllamaModels(
   apiStyle: EndpointConfig["apiStyle"] = "ollama",
   apiKeyEnv?: string
 ): Promise<EndpointModelEntry[]> {
+  const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : undefined;
   const headers =
-    apiKeyEnv && process.env[apiKeyEnv]?.trim()
-      ? { authorization: `Bearer ${process.env[apiKeyEnv]!.trim()}` }
-      : undefined;
+    apiKey && apiStyle === "anthropic"
+      ? {
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION
+        }
+      : apiKey
+        ? { authorization: `Bearer ${apiKey}` }
+        : undefined;
 
-  if (apiStyle === "openai") {
+  if (apiStyle === "openai" || apiStyle === "anthropic") {
     const response = await fetchFn(`${trimTrailingSlash(baseUrl)}/v1/models`, {
       headers
     });

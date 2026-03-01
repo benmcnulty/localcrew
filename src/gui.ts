@@ -63,7 +63,7 @@ export function getGuiHtml(): string {
           </label>
           <label>
             Label
-            <input id="resource-label" name="label" type="text" value="Second Device">
+            <input id="resource-label" name="label" type="text" value="Agent Device">
           </label>
           <label>
             Base URL
@@ -81,7 +81,8 @@ export function getGuiHtml(): string {
             API style
             <select id="resource-api-style" name="apiStyle">
               <option value="ollama" selected>ollama</option>
-              <option value="openai">openai-compatible</option>
+              <option value="openai">openai-compatible (LM Studio/OpenRouter/OpenAI)</option>
+              <option value="anthropic">anthropic</option>
             </select>
           </label>
           <button type="submit">Add resource</button>
@@ -398,7 +399,7 @@ function renderResources(resources) {
   els.resourceList.replaceChildren();
   els.resourceSummary.textContent =
     resources.length <= 1
-      ? "One resource is configured. Run node scripts/setup-node.js on the next device, then add or sync it here."
+      ? "One resource is configured. Run node scripts/setup-agent.js on the next agent device, then sync it here."
       : resources.length + " resources configured.";
 
   for (const resource of resources) {
@@ -691,7 +692,7 @@ els.resourceForm.addEventListener("submit", async (event) => {
     });
     renderResult(payload);
     els.resourceAlias.value = "agent-" + String(Math.max(2, Date.now() % 1000));
-    els.resourceLabel.value = "Additional Device";
+    els.resourceLabel.value = "Agent Device";
     await refreshView();
   } catch (error) {
     els.resultOutput.textContent = String(error);

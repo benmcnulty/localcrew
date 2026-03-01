@@ -41,7 +41,7 @@ function usage(command: string): string {
     case "/participant":
       return 'Usage: /participant list | /participant add <alias> <resourceAlias> ["nickname"] | /participant edit <alias> | /participant remove <alias>';
     case "/resource":
-      return 'Usage: /resource list | /resource add <alias> "<label>" <baseUrl> [top|mid|low] [ollama|openai] | /resource edit <alias> | /resource refresh <alias> | /resource remove <alias>';
+      return 'Usage: /resource list | /resource add <alias> "<label>" <baseUrl> [top|mid|low] [ollama|openai|anthropic] | /resource edit <alias> | /resource refresh <alias> | /resource remove <alias>';
     case "/models":
       return "Usage: /models [resourceAlias|@participantAlias]";
     case "/direct":
@@ -113,8 +113,8 @@ function parseTier(value: string): "top" | "mid" | "low" | undefined {
   return undefined;
 }
 
-function parseApiStyle(value: string): "ollama" | "openai" | undefined {
-  if (value === "ollama" || value === "openai") {
+function parseApiStyle(value: string): "ollama" | "openai" | "anthropic" | undefined {
+  if (value === "ollama" || value === "openai" || value === "anthropic") {
     return value;
   }
 

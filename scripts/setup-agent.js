@@ -1,8 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { createInterface } from "node:readline/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
-import { cpus, hostname, networkInterfaces, platform, totalmem } from "node:os";
+import { randomUUID } from "node:crypto";
+import { cpus, homedir, hostname, networkInterfaces, platform, totalmem } from "node:os";
 
 function trimTrailingSlash(value) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -14,7 +15,7 @@ function normalizeAlias(value) {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "node"
+      .replace(/^-+|-+$/g, "") || "agent"
   );
 }
 
@@ -50,6 +51,47 @@ function detectLocalMachineProfile() {
   };
 }
 
+function getDeviceFingerprint(machine) {
+  return [
+    machine.hostName || "unknown-host",
+    machine.platform || "unknown-platform",
+    String(machine.cpuLogicalCores || 0),
+    String(machine.ramGb || 0)
+  ].join("|");
+}
+
+function getStoragePaths(rootDir) {
+  const storageDir = join(rootDir, ".crusty");
+  const identityDir = join(homedir(), ".crusty");
+  return {
+    storageDir,
+    identityDir,
+    deviceIdPath: join(identityDir, "agent-device-id")
+  };
+}
+
+function getAuthHeaders(apiStyle, apiKeyEnv) {
+  if (!apiKeyEnv) {
+    return {};
+  }
+
+  const apiKey = process.env[apiKeyEnv]?.trim();
+  if (!apiKey) {
+    throw new Error(`The env var ${apiKeyEnv} is not set in this shell.`);
+  }
+
+  if (apiStyle === "anthropic") {
+    return {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
+  }
+
+  return {
+    authorization: `Bearer ${apiKey}`
+  };
+}
+
 function pickModel(names, candidates, fallback) {
   for (const candidate of candidates) {
     const exact = names.find((name) => name.toLowerCase() === candidate.toLowerCase());
@@ -68,9 +110,13 @@ function pickModel(names, candidates, fallback) {
   return fallback ?? names[0];
 }
 
-async function probeResourceModels(baseUrl, apiStyle) {
-  if (apiStyle === "openai") {
-    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`);
+async function probeResourceModels(baseUrl, apiStyle, apiKeyEnv) {
+  const headers = getAuthHeaders(apiStyle, apiKeyEnv);
+
+  if (apiStyle === "openai" || apiStyle === "anthropic") {
+    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`, {
+      headers
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
@@ -93,8 +139,8 @@ async function probeResourceModels(baseUrl, apiStyle) {
   }
 
   const [versionResponse, tagsResponse] = await Promise.all([
-    fetch(`${trimTrailingSlash(baseUrl)}/api/version`),
-    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`)
+    fetch(`${trimTrailingSlash(baseUrl)}/api/version`, { headers }),
+    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`, { headers })
   ]);
 
   if (!tagsResponse.ok) {
@@ -124,13 +170,6 @@ async function probeResourceModels(baseUrl, apiStyle) {
   };
 }
 
-function getStoragePaths(rootDir) {
-  const storageDir = join(rootDir, ".crusty");
-  return {
-    storageDir
-  };
-}
-
 function autoTier(profile) {
   if (profile.ramGb >= 24 || profile.cpuLogicalCores >= 16) {
     return "top";
@@ -141,14 +180,28 @@ function autoTier(profile) {
   return "low";
 }
 
+function parseSubnetPrefix(ipAddress) {
+  if (!ipAddress) {
+    return "";
+  }
+
+  const octets = ipAddress.split(".");
+  if (octets.length !== 4) {
+    return "";
+  }
+
+  return `${octets[0]}.${octets[1]}.${octets[2]}.`;
+}
+
 function parseArgs(argv) {
   let rootDir = process.cwd();
   let endpointUrl = "http://127.0.0.1:11434";
   let apiStyle = "ollama";
   let alias;
-  let label;
+  let nickname;
   let tier;
   let orchestratorUrl;
+  let apiKeyEnv;
   let gpuModel;
   let gpuCount;
   let totalVramGb;
@@ -168,8 +221,17 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
-    if (arg === "--api-style" && next && (next === "ollama" || next === "openai")) {
+    if (
+      arg === "--api-style" &&
+      next &&
+      (next === "ollama" || next === "openai" || next === "anthropic")
+    ) {
       apiStyle = next;
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-key-env" && next) {
+      apiKeyEnv = next.trim();
       index += 1;
       continue;
     }
@@ -178,8 +240,8 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
-    if (arg === "--label" && next) {
-      label = next;
+    if (arg === "--nickname" && next) {
+      nickname = next.trim();
       index += 1;
       continue;
     }
@@ -218,8 +280,9 @@ function parseArgs(argv) {
     rootDir,
     endpointUrl,
     apiStyle,
+    apiKeyEnv,
     alias,
-    label,
+    nickname,
     tier,
     orchestratorUrl,
     gpuModel,
@@ -229,42 +292,145 @@ function parseArgs(argv) {
   };
 }
 
-async function promptForOrchestratorUrl(initial) {
-  if (initial || !input.isTTY || !output.isTTY) {
-    return initial;
+function promptWithPrefill(promptText, initialValue = "") {
+  return new Promise((resolve) => {
+    const readline = createInterface({ input, output });
+    readline.setPrompt(promptText);
+    readline.prompt();
+    if (initialValue) {
+      readline.write(initialValue);
+    }
+    readline.on("line", (line) => {
+      readline.close();
+      resolve(line.trim());
+    });
+  });
+}
+
+async function promptForSetup(options, machine) {
+  let nickname = options.nickname;
+
+  if (!nickname && input.isTTY && output.isTTY) {
+    nickname = await promptWithPrefill("Nickname: ", titleCase(machine.hostName));
   }
 
-  const readline = createInterface({ input, output });
+  return {
+    nickname
+  };
+}
+
+async function verifyOrchestratorConnection(orchestratorUrl) {
+  const trimmedBase = orchestratorUrl.replace(/\/+$/, "");
+  const healthUrl = `${trimmedBase}/api/health`;
+  const statusUrl = `${trimmedBase}/api/status`;
+
+  let healthResponse;
   try {
-    const answer = (await readline.question("Orchestrator API base URL (blank to skip sync)> ")).trim();
-    return answer || undefined;
-  } finally {
-    readline.close();
+    healthResponse = await fetch(healthUrl);
+  } catch (error) {
+    throw new Error(
+      `Could not reach orchestrator at ${trimmedBase}. Check that Crusty is running on the orchestrator, the IP is correct, and inbound TCP 4310 is allowed. Original error: ${error.message}`
+    );
+  }
+
+  if (!healthResponse.ok) {
+    throw new Error(`Orchestrator health check failed with HTTP ${healthResponse.status}.`);
+  }
+
+  return {
+    baseUrl: trimmedBase,
+    healthUrl,
+    statusUrl
+  };
+}
+
+async function resolveVerifiedOrchestratorUrl(initialUrl, machine) {
+  if (initialUrl) {
+    return {
+      orchestratorUrl: initialUrl,
+      verification: await verifyOrchestratorConnection(initialUrl)
+    };
+  }
+
+  if (!input.isTTY || !output.isTTY) {
+    return {
+      orchestratorUrl: undefined,
+      verification: undefined
+    };
+  }
+
+  const subnetPrefix = parseSubnetPrefix(machine.localIp);
+  while (true) {
+    const orchestratorIp = await promptWithPrefill("Orchestrator IP: ", subnetPrefix);
+    if (!orchestratorIp) {
+      return {
+        orchestratorUrl: undefined,
+        verification: undefined
+      };
+    }
+
+    const orchestratorUrl = `http://${orchestratorIp}:4310`;
+    console.log(`Testing orchestrator connection: ${orchestratorUrl}/api/health`);
+    try {
+      const verification = await verifyOrchestratorConnection(orchestratorUrl);
+      console.log(`Verified orchestrator connection: ${verification.healthUrl}`);
+      return {
+        orchestratorUrl,
+        verification
+      };
+    } catch (error) {
+      console.error(`Connection test failed: ${error.message}`);
+      console.error("Please confirm the orchestrator IP and try again, or press Enter to skip sync.");
+    }
   }
 }
 
 async function writeLocalReport(rootDir, report) {
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
-  const reportPath = join(paths.storageDir, "node-setup-report.json");
+  const reportPath = join(paths.storageDir, "agent-setup-report.json");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   return reportPath;
 }
 
-async function syncToOrchestrator(orchestratorUrl, report) {
-  const trimmedBase = orchestratorUrl.replace(/\/+$/, "");
-  const healthResponse = await fetch(`${trimmedBase}/api/health`);
-  if (!healthResponse.ok) {
-    throw new Error(`Orchestrator health check failed with HTTP ${healthResponse.status}.`);
+async function getStableDeviceId(rootDir, machine) {
+  const paths = getStoragePaths(rootDir);
+
+  try {
+    const existing = (await readFile(paths.deviceIdPath, "utf8")).trim();
+    if (existing) {
+      return existing;
+    }
+  } catch {
+    // Fall through and create a new ID.
   }
 
-  const syncResponse = await fetch(`${trimmedBase}/api/resources/sync`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify(report)
-  });
+  const deviceId = `agent-${randomUUID()}`;
+  try {
+    await mkdir(paths.identityDir, { recursive: true });
+    await writeFile(paths.deviceIdPath, `${deviceId}\n`, "utf8");
+    return deviceId;
+  } catch {
+    return `agent-${getDeviceFingerprint(machine)}`;
+  }
+}
+
+async function syncToOrchestrator(orchestratorUrl, report) {
+  const trimmedBase = orchestratorUrl.replace(/\/+$/, "");
+  let syncResponse;
+  try {
+    syncResponse = await fetch(`${trimmedBase}/api/resources/sync`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(report)
+    });
+  } catch (error) {
+    throw new Error(
+      `The orchestrator health check passed but resource sync failed while posting to ${trimmedBase}/api/resources/sync. Original error: ${error.message}`
+    );
+  }
 
   const payload = await syncResponse.json();
   if (!syncResponse.ok) {
@@ -277,17 +443,25 @@ async function syncToOrchestrator(orchestratorUrl, report) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const machine = detectLocalMachineProfile();
-  const discovered = await probeResourceModels(options.endpointUrl, options.apiStyle);
+  const verifiedOrchestrator = await resolveVerifiedOrchestratorUrl(options.orchestratorUrl, machine);
+  const prompted = await promptForSetup(options, machine);
+  const discovered = await probeResourceModels(
+    options.endpointUrl,
+    options.apiStyle,
+    options.apiKeyEnv
+  );
+  const nickname = prompted.nickname || titleCase(machine.hostName);
   const alias = options.alias ?? normalizeAlias(machine.hostName);
-  const label = options.label ?? `${titleCase(alias)} Node`;
   const tier = options.tier ?? autoTier(machine);
-  const orchestratorUrl = await promptForOrchestratorUrl(options.orchestratorUrl);
+  const deviceId = await getStableDeviceId(options.rootDir, machine);
 
   const report = {
     alias,
-    label,
+    label: nickname,
     baseUrl: options.endpointUrl,
     apiStyle: options.apiStyle,
+    ...(options.apiKeyEnv ? { apiKeyEnv: options.apiKeyEnv } : {}),
+    deviceId,
     tier,
     hostName: machine.hostName,
     platform: machine.platform,
@@ -318,16 +492,20 @@ async function main() {
       ...(discovered.embeddingModel ? ["embeddings"] : [])
     ],
     notes: [
-      "Synced from setup:node.",
-      "Refresh this node later if models or endpoint settings change."
+      "Synced from setup-agent.",
+      "Refresh this agent later if models or endpoint settings change."
     ]
   };
 
   const reportPath = await writeLocalReport(options.rootDir, report);
 
-  console.log("Crusty node setup complete.");
+  console.log("Crusty agent setup complete.");
   console.log(`Repo root: ${options.rootDir}`);
   console.log(`Local report: ${reportPath}`);
+  console.log(`Device nickname: ${nickname}`);
+  console.log(`Agent alias: @${alias}`);
+  console.log(`Device ID: ${deviceId}`);
+  console.log(`Local endpoint: ${options.endpointUrl}`);
   console.log(`Detected host name: ${machine.hostName}`);
   if (machine.localIp) {
     console.log(`Detected LAN IP: ${machine.localIp}`);
@@ -335,21 +513,44 @@ async function main() {
   console.log(`Platform: ${machine.platform}`);
   console.log(`CPU threads: ${machine.cpuLogicalCores}`);
   console.log(`RAM: ${machine.ramGb} GB`);
-  console.log(`Endpoint: ${options.endpointUrl} (${options.apiStyle})`);
-  console.log(`Suggested resource alias: @${alias}`);
+  console.log(`API style: ${options.apiStyle}`);
+  if (options.apiKeyEnv) {
+    console.log(`API key env: ${options.apiKeyEnv}`);
+  }
   console.log(`Suggested tier: ${tier}`);
   console.log(
     `Discovered models: ${
       discovered.availableModels.length > 0 ? discovered.availableModels.join(", ") : "(none)"
     }`
   );
+  console.log("");
+  console.log("Verified configuration:");
+  console.log(`- Device nickname: ${nickname}`);
+  console.log(`- Agent alias: @${alias}`);
+  console.log(`- Device ID: ${deviceId}`);
+  console.log(`- Local endpoint: ${options.endpointUrl}`);
+  console.log(`- API style: ${options.apiStyle}`);
+  if (options.apiKeyEnv) {
+    console.log(`- API key env: ${options.apiKeyEnv}`);
+  }
+  console.log(`- Suggested tier: ${tier}`);
+  if (verifiedOrchestrator.verification) {
+    console.log(`- Orchestrator: ${verifiedOrchestrator.verification.baseUrl}`);
+    console.log(`- Orchestrator health: ${verifiedOrchestrator.verification.healthUrl}`);
+    console.log(`- Orchestrator status: ${verifiedOrchestrator.verification.statusUrl}`);
+  } else {
+    console.log("- Orchestrator sync: skipped");
+  }
 
-  if (!orchestratorUrl) {
+  if (!verifiedOrchestrator.orchestratorUrl) {
     console.log("Sync skipped. Re-run with --orchestrator http://host:4310 or add the resource manually.");
     return;
   }
 
-  const syncSummary = await syncToOrchestrator(orchestratorUrl, report);
+  console.log(
+    `Attempting orchestrator sync: ${verifiedOrchestrator.orchestratorUrl.replace(/\/+$/, "")}/api/resources/sync`
+  );
+  const syncSummary = await syncToOrchestrator(verifiedOrchestrator.orchestratorUrl, report);
   console.log(`Orchestrator sync: ${syncSummary}`);
 }
 

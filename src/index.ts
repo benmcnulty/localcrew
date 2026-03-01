@@ -414,12 +414,22 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       if (apiServer.publicUrl && apiServer.publicUrl !== apiServer.url) {
         writeLine(stdout, `LAN UI: ${apiServer.publicUrl}/ui`);
       }
+      writeLine(stdout, "");
+      writeLine(stdout, "Open next:");
+      writeLine(stdout, `- ${apiServer.url}/api/health`);
+      writeLine(stdout, `- ${apiServer.url}/api/status`);
+      writeLine(stdout, `- ${apiServer.url}/ui`);
+      if (apiServer.publicUrl && apiServer.publicUrl !== apiServer.url) {
+        writeLine(stdout, `- ${apiServer.publicUrl}/api/health`);
+        writeLine(stdout, `- ${apiServer.publicUrl}/api/status`);
+        writeLine(stdout, `- ${apiServer.publicUrl}/ui`);
+      }
     }
     const resources = await app.getResourcesSnapshot();
     if (resources.length <= 1) {
       writeLine(
         stdout,
-        'Onboarding: this install has one resource. Run `node scripts/setup-node.js --orchestrator http://<orchestrator-ip>:4310` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
+        'Onboarding: this install has one resource. Run `node scripts/setup-agent.js` on the next agent device. It will prompt for the orchestrator IP and a device nickname, then sync it here automatically.'
       );
     }
 

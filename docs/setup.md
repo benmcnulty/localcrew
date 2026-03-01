@@ -2,20 +2,26 @@
 
 ## Requirements
 
-- Bun 1.3+ is recommended for setup, testing, and the default runtime
-- Node.js can run the main app entrypoint if you prefer `node src/index.ts`
-- Ollama or another compatible local OpenAI-style inference endpoint reachable from the machine running Crusty
+- Node.js and npm are the default runtime and setup path
+- Bun is optional for development and tests
+- Ollama, LM Studio, or another reachable inference endpoint using `ollama`, `openai`, or `anthropic` API style
 - macOS only for `say` voice playback; the rest of the CLI and Local UI are cross-platform
 
 ## First-Run Flow
 
-1. Clone the repo and run `bun install`.
-2. On the best local device, run `node scripts/setup-orchestrator.js`.
-3. Start Crusty with `node src/index.ts`.
+1. Clone the repo and run `npm install`.
+2. On the best local device, run `npm run setup:orchestrator`.
+3. Start Crusty with `npm run start`.
 4. Open the printed `Local UI` link or stay in the CLI.
-5. Bring a second device online, benchmark it with the platform script on that device if needed, then run:
-   - `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310`
-   - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`
+5. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
+   - `node scripts/setup-agent.js`
+   - the script will prompt for `Orchestrator IP:` and prefill the first three octets from the local subnet when available
+   - it immediately tests `http://<orchestrator-ip>:4310/api/health` before continuing
+   - it then prompts for a device nickname used in the orchestrator resource listing
+   - it prints a verified configuration summary before syncing
+   - re-running it on the same device replaces the prior synced listing for that device instead of creating duplicates
+   - for OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync
+   - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`
    - or use the `Resources` section in `/ui`
 6. Configure the starter chat roster and test the network:
    - `/participant list`
@@ -36,7 +42,7 @@ Crusty keeps a strict split between committed external system memory and ignored
 - `.crusty/` is ignored and contains local queue state, internal memory, telemetry, and resource inventory.
 - `.env` and `.env.local` are ignored and can hold machine-specific overrides.
 
-The orchestrator bootstrap script writes a managed block to `.env.local` and seeds `.crusty/resources.json` for the first local resource. The node bootstrap script writes a local node report and can sync it directly into the orchestrator over the local API.
+The orchestrator bootstrap script writes a managed block to `.env.local` and seeds `.crusty/resources.json` for the first local resource. The agent bootstrap script is self-contained, writes a local agent report, and can sync it directly into the orchestrator over the local API.
 
 ## Environment Variables
 
@@ -80,11 +86,11 @@ Shell env values take precedence over `.env`, which takes precedence over `.env.
 
 If you want a non-default orchestrator identity name during install, run:
 
-- `node scripts/setup-orchestrator.js --name "Aster"`
+- `npm run setup:orchestrator -- --name "Aster"`
 
 ## Device Benchmark Scripts
 
-Run the benchmark script locally on each device before adding it as a resource:
+Run the benchmark script locally on each agent device before adding it as a resource:
 
 - macOS: `scripts/ollama-optimize-macos.sh`
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
@@ -100,7 +106,7 @@ Use the script output to decide the device tier:
 
 - `/help`
 - `/resource list`
-- `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`
+- `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`
 - `/resource edit <alias>`
 - `/resource refresh <alias>`
 - `/participant list`

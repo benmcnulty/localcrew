@@ -555,7 +555,7 @@ export class CrustyApp {
       `Resources: ${resources.length}`,
       ...(resources.length <= 1
         ? [
-            'Onboarding: run `node scripts/setup-node.js --orchestrator http://<orchestrator-ip>:4310` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
+            'Onboarding: run `node scripts/setup-agent.js` on the next agent device. It will prompt for the orchestrator IP and a device nickname, then sync it here automatically.'
           ]
         : []),
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
@@ -743,7 +743,7 @@ export class CrustyApp {
     label: string,
     baseUrl: string,
     tier: "top" | "mid" | "low" = "mid",
-    apiStyle: "ollama" | "openai" = "ollama"
+    apiStyle: "ollama" | "openai" | "anthropic" = "ollama"
   ): Promise<CommandResult> {
     let discovered:
       | Awaited<ReturnType<typeof probeResourceModels>>
@@ -844,7 +844,23 @@ export class CrustyApp {
 
   async syncResourceReport(report: ResourceSyncReport): Promise<CommandResult> {
     const alias = report.alias.trim().toLowerCase();
-    const existing = listResources(this.rootDir).find((resource) => resource.alias === alias);
+    const resources = listResources(this.rootDir);
+    const existing = resources.find((resource) => resource.alias === alias);
+    const duplicate = report.deviceId
+      ? resources.find(
+          (resource) =>
+            resource.alias !== alias &&
+            resource.deviceId &&
+            resource.deviceId === report.deviceId
+        )
+      : resources.find(
+          (resource) =>
+            resource.alias !== alias &&
+            resource.hostName &&
+            report.hostName &&
+            resource.hostName === report.hostName &&
+            resource.platform === report.platform
+        );
     const nextResource = {
       ...(existing ?? {
         alias,
@@ -852,7 +868,7 @@ export class CrustyApp {
         tier: report.tier ?? "mid",
         baseUrl: report.baseUrl,
         defaultModel: report.defaultModel ?? "llama3.1:8b",
-        role: "Synced from a node setup report.",
+        role: "Synced from an agent setup report.",
         capabilities: [],
         notes: []
       }),
@@ -861,6 +877,7 @@ export class CrustyApp {
       baseUrl: report.baseUrl.trim(),
       apiStyle: report.apiStyle ?? existing?.apiStyle ?? "ollama",
       ...(report.apiKeyEnv ? { apiKeyEnv: report.apiKeyEnv.trim() } : {}),
+      ...(report.deviceId ? { deviceId: report.deviceId.trim() } : {}),
       ...(report.hostName ? { hostName: report.hostName.trim() } : {}),
       ...(report.platform ? { platform: report.platform.trim() } : {}),
       tier: report.tier ?? existing?.tier ?? "mid",
@@ -882,10 +899,14 @@ export class CrustyApp {
       lastRefreshedAt: new Date().toISOString(),
       role:
         existing?.role ??
-        "Network-connected inference resource discovered and synced from a node setup report.",
+        "Network-connected inference resource discovered and synced from an agent setup report.",
       capabilities: report.capabilities ?? existing?.capabilities ?? [],
       notes: report.notes ?? existing?.notes ?? []
     };
+
+    if (duplicate) {
+      await removeResource(duplicate.alias, this.rootDir);
+    }
 
     if (existing) {
       await updateResource(alias, nextResource, this.rootDir);
@@ -897,7 +918,7 @@ export class CrustyApp {
     await appendChangelogEntry(`Synced resource report for ${alias}.`, this.rootDir);
     return {
       lines: [
-        `${existing ? "Updated" : "Added"} resource @${alias} from node sync.`,
+        `${existing || duplicate ? "Updated" : "Added"} resource @${alias} from agent sync.`,
         `Models: ${(report.availableModels ?? []).length} | tier: ${nextResource.tier} | API: ${nextResource.apiStyle ?? "ollama"}`
       ],
       errors: [],
@@ -942,7 +963,9 @@ export class CrustyApp {
           ? { tier: parsed.tier }
           : {}),
         ...(typeof parsed.baseUrl === "string" ? { baseUrl: parsed.baseUrl } : {}),
-        ...(parsed.apiStyle === "ollama" || parsed.apiStyle === "openai"
+        ...(parsed.apiStyle === "ollama" ||
+        parsed.apiStyle === "openai" ||
+        parsed.apiStyle === "anthropic"
           ? { apiStyle: parsed.apiStyle }
           : {}),
         ...(typeof parsed.apiKeyEnv === "string" || parsed.apiKeyEnv === null

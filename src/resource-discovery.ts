@@ -51,7 +51,10 @@ function pickModel(names: string[], candidates: string[], fallback?: string): st
   return fallback ?? names[0];
 }
 
-function getAuthHeaders(apiKeyEnv?: string): Record<string, string> {
+function getAuthHeadersForStyle(
+  apiStyle: EndpointApiStyle,
+  apiKeyEnv?: string
+): Record<string, string> {
   if (!apiKeyEnv) {
     return {};
   }
@@ -59,6 +62,13 @@ function getAuthHeaders(apiKeyEnv?: string): Record<string, string> {
   const apiKey = process.env[apiKeyEnv]?.trim();
   if (!apiKey) {
     return {};
+  }
+
+  if (apiStyle === "anthropic") {
+    return {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
   }
 
   return {
@@ -96,9 +106,9 @@ export async function probeResourceModels(
   fetchFn: FetchFn = fetch,
   apiKeyEnv?: string
 ): Promise<DiscoveredResourceModels> {
-  const headers = getAuthHeaders(apiKeyEnv);
+  const headers = getAuthHeadersForStyle(apiStyle, apiKeyEnv);
 
-  if (apiStyle === "openai") {
+  if (apiStyle === "openai" || apiStyle === "anthropic") {
     const response = await fetchFn(`${trimTrailingSlash(baseUrl)}/v1/models`, {
       headers
     });

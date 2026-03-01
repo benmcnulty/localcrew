@@ -198,6 +198,8 @@ describe("API server", () => {
             label: "LM Studio",
             baseUrl: "http://127.0.0.1:1234",
             apiStyle: "openai",
+            apiKeyEnv: "OPENAI_API_KEY",
+            deviceId: "studio-device-1",
             tier: "mid",
             hostName: "studio-box",
             platform: "linux",
@@ -305,15 +307,18 @@ describe("API server", () => {
         expect(inboxWrite.result.lines[0]).toContain("Wrote inbox document");
         expect(resourceAdd.result.lines[0]).toContain("Added resource @overflow");
         expect(resourceRefresh.result.lines[0]).toContain("Refreshed @overflow");
-        expect(resourceSync.result.lines[0]).toContain("Added resource @studio from node sync.");
+        expect(resourceSync.result.lines[0]).toContain("Added resource @studio from agent sync.");
         expect(participantAdd.result.lines[0]).toContain("Added participant @reviewer");
         expect(participantEdit.result.lines[0]).toContain("Updated participant @reviewer.");
         expect(orchestratorRename.result.lines[0]).toContain("Orchestrator profile name is now Aster.");
         expect(resources.some((resource: { alias: string }) => resource.alias === "overflow")).toBe(true);
         expect(
           resources.some(
-            (resource: { alias: string; apiStyle?: string }) =>
-              resource.alias === "studio" && resource.apiStyle === "openai"
+            (resource: { alias: string; apiStyle?: string; apiKeyEnv?: string; deviceId?: string }) =>
+              resource.alias === "studio" &&
+              resource.apiStyle === "openai" &&
+              resource.apiKeyEnv === "OPENAI_API_KEY" &&
+              resource.deviceId === "studio-device-1"
           )
         ).toBe(true);
         expect(participants).toEqual(

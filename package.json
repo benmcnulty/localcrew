@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "setup:orchestrator": "node scripts/setup-orchestrator.js",
-    "setup:node": "node scripts/setup-node.js",
-    "start": "bun run src/index.ts",
+    "setup:agent": "node scripts/setup-agent.js",
+    "start": "node src/index.ts",
+    "start:bun": "bun run src/index.ts",
     "start:node": "node src/index.ts",
     "test": "bun test"
   }

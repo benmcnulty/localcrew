@@ -310,7 +310,9 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
         body.label,
         body.baseUrl,
         body.tier === "top" || body.tier === "mid" || body.tier === "low" ? body.tier : "mid",
-        body.apiStyle === "openai" ? "openai" : "ollama"
+        body.apiStyle === "openai" || body.apiStyle === "anthropic"
+          ? body.apiStyle
+          : "ollama"
       )
     });
   }
@@ -332,6 +334,8 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
       label?: unknown;
       baseUrl?: unknown;
       apiStyle?: unknown;
+      apiKeyEnv?: unknown;
+      deviceId?: unknown;
       tier?: unknown;
       hostName?: unknown;
       platform?: unknown;
@@ -365,9 +369,11 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
         alias: body.alias,
         label: body.label,
         baseUrl: body.baseUrl,
-        ...(body.apiStyle === "openai" || body.apiStyle === "ollama"
+        ...(body.apiStyle === "openai" || body.apiStyle === "ollama" || body.apiStyle === "anthropic"
           ? { apiStyle: body.apiStyle }
           : {}),
+        ...(typeof body.apiKeyEnv === "string" ? { apiKeyEnv: body.apiKeyEnv } : {}),
+        ...(typeof body.deviceId === "string" ? { deviceId: body.deviceId } : {}),
         ...(body.tier === "top" || body.tier === "mid" || body.tier === "low"
           ? { tier: body.tier }
           : {}),

@@ -132,6 +132,15 @@ describe("parseCommand", () => {
       baseUrl: "http://127.0.0.1:1234",
       apiStyle: "openai"
     });
+    expect(
+      parseCommand('/resource add claude "Anthropic Cloud" https://api.anthropic.com anthropic')
+    ).toEqual({
+      type: "resource.add",
+      alias: "claude",
+      label: "Anthropic Cloud",
+      baseUrl: "https://api.anthropic.com",
+      apiStyle: "anthropic"
+    });
     expect(parseCommand("/resource edit workhorse")).toEqual({
       type: "resource.edit",
       alias: "workhorse"

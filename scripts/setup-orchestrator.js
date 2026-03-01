@@ -31,6 +31,37 @@ function detectLocalMachineProfile() {
   };
 }
 
+function getDeviceId(machine) {
+  return [
+    machine.hostName || "unknown-host",
+    machine.platform || "unknown-platform",
+    String(machine.cpuLogicalCores || 0),
+    String(machine.ramGb || 0)
+  ].join("|");
+}
+
+function getAuthHeaders(apiStyle, apiKeyEnv) {
+  if (!apiKeyEnv) {
+    return {};
+  }
+
+  const apiKey = process.env[apiKeyEnv]?.trim();
+  if (!apiKey) {
+    throw new Error(`The env var ${apiKeyEnv} is not set in this shell.`);
+  }
+
+  if (apiStyle === "anthropic") {
+    return {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
+  }
+
+  return {
+    authorization: `Bearer ${apiKey}`
+  };
+}
+
 function getStoragePaths(rootDir) {
   const storageDir = join(rootDir, ".crusty");
   return {
@@ -61,9 +92,13 @@ function pickModel(names, candidates, fallback) {
   return fallback ?? names[0];
 }
 
-async function probeResourceModels(baseUrl, apiStyle) {
-  if (apiStyle === "openai") {
-    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`);
+async function probeResourceModels(baseUrl, apiStyle, apiKeyEnv) {
+  const headers = getAuthHeaders(apiStyle, apiKeyEnv);
+
+  if (apiStyle === "openai" || apiStyle === "anthropic") {
+    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`, {
+      headers
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
@@ -86,8 +121,8 @@ async function probeResourceModels(baseUrl, apiStyle) {
   }
 
   const [versionResponse, tagsResponse] = await Promise.all([
-    fetch(`${trimTrailingSlash(baseUrl)}/api/version`),
-    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`)
+    fetch(`${trimTrailingSlash(baseUrl)}/api/version`, { headers }),
+    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`, { headers })
   ]);
 
   if (!tagsResponse.ok) {
@@ -122,6 +157,7 @@ function parseArgs(argv) {
   let rootDir = process.cwd();
   let endpointUrl = "http://127.0.0.1:11434";
   let apiStyle = "ollama";
+  let apiKeyEnv;
   let name = "Orchestrator";
   let alias = "orchestrator";
   let label = "Local Orchestrator";
@@ -144,8 +180,17 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
-    if (arg === "--api-style" && next && (next === "ollama" || next === "openai")) {
+    if (
+      arg === "--api-style" &&
+      next &&
+      (next === "ollama" || next === "openai" || next === "anthropic")
+    ) {
       apiStyle = next;
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-key-env" && next) {
+      apiKeyEnv = next.trim();
       index += 1;
       continue;
     }
@@ -193,6 +238,7 @@ function parseArgs(argv) {
     rootDir,
     endpointUrl,
     apiStyle,
+    apiKeyEnv,
     name,
     alias,
     label,
@@ -220,6 +266,7 @@ function buildManagedEnvBlock({ setup, machine, discovered }) {
     `CRUSTY_ORCHESTRATOR_TIER=${setup.tier}`,
     `CRUSTY_ORCHESTRATOR_BASE_URL=${setup.endpointUrl}`,
     `CRUSTY_ORCHESTRATOR_API_STYLE=${setup.apiStyle}`,
+    ...(setup.apiKeyEnv ? [`CRUSTY_ORCHESTRATOR_API_KEY_ENV=${setup.apiKeyEnv}`] : []),
     `CRUSTY_ORCHESTRATOR_HOST_NAME=${machine.hostName}`,
     `CRUSTY_ORCHESTRATOR_PLATFORM=${machine.platform}`,
     `CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES=${machine.cpuLogicalCores}`,
@@ -300,6 +347,8 @@ async function syncResourceInventory({ setup, machine, discovered }) {
     tier: setup.tier,
     baseUrl: setup.endpointUrl,
     apiStyle: setup.apiStyle,
+    ...(setup.apiKeyEnv ? { apiKeyEnv: setup.apiKeyEnv } : {}),
+    deviceId: getDeviceId(machine),
     hostName: machine.hostName,
     platform: machine.platform,
     cpuLogicalCores: machine.cpuLogicalCores,
@@ -323,7 +372,7 @@ async function syncResourceInventory({ setup, machine, discovered }) {
     ],
     notes: [
       "Bootstrapped by the orchestrator setup script.",
-      "Bring additional devices online with node scripts/setup-node.js from those systems."
+      "Bring additional agent devices online with node scripts/setup-agent.js from those systems."
     ]
   };
 
@@ -334,7 +383,11 @@ async function syncResourceInventory({ setup, machine, discovered }) {
 async function main() {
   const setup = parseArgs(process.argv.slice(2));
   const machine = detectLocalMachineProfile();
-  const discovered = await probeResourceModels(setup.endpointUrl, setup.apiStyle);
+  const discovered = await probeResourceModels(
+    setup.endpointUrl,
+    setup.apiStyle,
+    setup.apiKeyEnv
+  );
   const envPath = await writeManagedEnv(
     setup.rootDir,
     buildManagedEnvBlock({
@@ -361,6 +414,9 @@ async function main() {
   console.log(`Resource inventory: ${resourcesPath}`);
   console.log(`Orchestrator profile: ${setup.name}`);
   console.log(`Inference endpoint: ${setup.endpointUrl} (${setup.apiStyle})`);
+  if (setup.apiKeyEnv) {
+    console.log(`API key env: ${setup.apiKeyEnv}`);
+  }
   console.log(`Local host name: ${machine.hostName}`);
   console.log(`Platform: ${machine.platform}`);
   if (machine.localIp) {
@@ -374,18 +430,25 @@ async function main() {
     }`
   );
   console.log(`Selected default model: ${discovered.defaultModel ?? "(none)"}`);
+  console.log(`API health (after start): http://127.0.0.1:${setup.apiPort}/api/health`);
+  console.log(`API status (after start): http://127.0.0.1:${setup.apiPort}/api/status`);
   console.log(`Local UI (after start): ${localUiUrl}`);
   if (lanUiUrl !== localUiUrl) {
+    console.log(`LAN health (after start): http://${setup.publicHost}:${setup.apiPort}/api/health`);
+    console.log(`LAN status (after start): http://${setup.publicHost}:${setup.apiPort}/api/status`);
     console.log(`LAN UI (after start): ${lanUiUrl}`);
   }
   console.log("");
   console.log("Next steps:");
-  console.log("1. Start Crusty with: node src/index.ts");
+  console.log("1. Start Crusty with: npm run start");
   console.log("2. Open the Local UI link above after startup.");
   console.log(
-    `3. On the next device, run: node scripts/setup-node.js --orchestrator http://${setup.publicHost ?? "127.0.0.1"}:${setup.apiPort}`
+    `3. On the next agent device, run: node scripts/setup-agent.js`
   );
-  console.log("4. Review and refresh devices later with /resource refresh <alias> when models change.");
+  console.log(
+    `   It will prompt for the orchestrator IP and prefill ${setup.publicHost ?? "the local subnet"} for convenience.`
+  );
+  console.log("4. Review and refresh agent resources later with /resource refresh <alias> when models change.");
 }
 
 main().catch((error) => {

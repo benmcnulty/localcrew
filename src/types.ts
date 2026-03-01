@@ -1,5 +1,5 @@
 export type Role = "system" | "user" | "assistant";
-export type EndpointApiStyle = "ollama" | "openai";
+export type EndpointApiStyle = "ollama" | "openai" | "anthropic";
 
 export interface ChatMessage {
   role: Role;
@@ -214,6 +214,7 @@ export interface ResourceSyncReport {
   baseUrl: string;
   apiStyle?: EndpointApiStyle;
   apiKeyEnv?: string;
+  deviceId?: string;
   tier?: "top" | "mid" | "low";
   hostName?: string;
   platform?: string;
