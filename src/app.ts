@@ -60,7 +60,8 @@ import {
   buildChatMessages,
   buildQueueFillFinalizeMessages,
   buildQueueFillMessages,
-  buildQueueFillReviewMessages
+  buildQueueFillReviewMessages,
+  buildTaskPreflightMessages
 } from "./messages.ts";
 import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
 import { probeResourceModels } from "./resource-discovery.ts";
@@ -118,7 +119,7 @@ import type {
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
-import { titleCase } from "./utils.ts";
+import { formatCurrentDateTime, titleCase } from "./utils.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
@@ -2204,13 +2205,20 @@ export class CrustyApp {
     assignedModel?: string;
     errorMessage: string;
     createRecoveryTask: boolean;
+    startedAt?: string;
+    taskStartMs?: number;
   }): Promise<{ recoveryTask?: AutoQueueTask }> {
+    const completedAt = new Date().toISOString();
     const failedTask: AutoQueueTask = {
       ...options.task,
       status: "completed",
+      ...(options.startedAt ? { startedAt: options.startedAt } : {}),
+      completedAt,
+      ...(options.taskStartMs !== undefined ? { durationMs: Date.now() - options.taskStartMs } : {}),
       ...(options.assignedResource ? { assignedResource: options.assignedResource } : {}),
       ...(options.assignedModel ? { assignedModel: options.assignedModel } : {}),
-      result: `FAILED: ${options.errorMessage}`
+      result: `FAILED: ${options.errorMessage}`,
+      errorMessage: options.errorMessage
     };
 
     this.systemState = {
@@ -2765,6 +2773,42 @@ export class CrustyApp {
     return blocks;
   }
 
+  private async runTaskPreflight(options: {
+    task: AutoQueueTask;
+    documents: { directives: string; inventory: string };
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+  }): Promise<string | null> {
+    const messages = buildTaskPreflightMessages({
+      orchestratorName: this.getOrchestratorName(),
+      task: options.task.content,
+      priority: options.task.priority,
+      directives: options.documents.directives,
+      inventory: options.documents.inventory,
+      currentDateTime: formatCurrentDateTime()
+    });
+
+    try {
+      const result = await this.callModel({
+        scope: "auto.task.preflight",
+        actor: "orchestrator",
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: `task:${options.task.id}`,
+        messages,
+        summary: `Pre-flight reasoning for auto task #${options.task.id}.`
+      });
+      const preflightText = result.text.trim();
+      if (!preflightText) {
+        return null;
+      }
+      return `Pre-flight analysis:\n${preflightText}`;
+    } catch {
+      // Pre-flight is advisory — proceed with the task even if it fails.
+      return null;
+    }
+  }
+
   private async ingestNextInboxDocumentTask(): Promise<{
     documentName: string;
     relativePath: string;
@@ -2838,7 +2882,8 @@ export class CrustyApp {
       recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
       taskPrompt: `USER -> @${agent.slug}: ${userMessage}`,
       resourceRoster: this.getResourceRosterText(),
-      extraContextBlocks
+      extraContextBlocks,
+      currentDateTime: formatCurrentDateTime()
     });
 
     let rawReply: string;
@@ -2945,6 +2990,7 @@ export class CrustyApp {
     const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
     const resourceRoster = this.getResourceRosterText();
     const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+    const fillDateTime = formatCurrentDateTime();
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -2954,7 +3000,8 @@ export class CrustyApp {
       orchestratorSummary: documents.orchestratorSummary,
       orchestratorName: this.getOrchestratorName(),
       agents: agents.map((agent) => `@${agent.slug}`),
-      resourceRoster
+      resourceRoster,
+      currentDateTime: fillDateTime
     });
 
     let draftReply: string;
@@ -3021,7 +3068,8 @@ export class CrustyApp {
         roadmap: documents.roadmap,
         focusTodo: documents.focusTodo,
         changelog: documents.changelog,
-        resourceRoster
+        resourceRoster,
+        currentDateTime: fillDateTime
       });
 
       try {
@@ -3061,7 +3109,8 @@ export class CrustyApp {
       agents: agents.map((agent) => `@${agent.slug}`),
       draftTasks: draftTaskText,
       reviewFeedback,
-      resourceRoster
+      resourceRoster,
+      currentDateTime: fillDateTime
     });
 
     let finalReply: string;
@@ -3146,6 +3195,8 @@ export class CrustyApp {
     }
 
     const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+    const taskStartedAt = new Date().toISOString();
+    const taskStartMs = Date.now();
     const [documents, agents] = await Promise.all([
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
@@ -3199,7 +3250,9 @@ export class CrustyApp {
         remaining,
         assignedResource: selection.alias,
         errorMessage: `No default model configured for resource "${selection.alias}".`,
-        createRecoveryTask: !this.isSafeModeRecoveryTask(task)
+        createRecoveryTask: !this.isSafeModeRecoveryTask(task),
+        startedAt: taskStartedAt,
+        taskStartMs
       });
       return {
         lines: recovery.recoveryTask
@@ -3214,6 +3267,19 @@ export class CrustyApp {
       };
     }
     const extraContextBlocks = await this.getAutoTaskExtraContext(task);
+
+    // Pre-flight: ask the model to reason briefly about the task before executing.
+    // Failure is non-fatal — we log it and proceed without the context block.
+    const preflightContext = await this.runTaskPreflight({
+      task,
+      documents,
+      endpoint,
+      resourceAlias: selection.alias
+    });
+    if (preflightContext) {
+      extraContextBlocks.push(preflightContext);
+    }
+
     const outgoingMessages = buildAutoTaskMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -3229,7 +3295,8 @@ export class CrustyApp {
       resourceAlias: selection.alias,
       resourceRationale: selection.rationale,
       resourceRoster: this.getResourceRosterText(),
-      extraContextBlocks
+      extraContextBlocks,
+      currentDateTime: formatCurrentDateTime()
     });
 
     let rawReply: string;
@@ -3262,7 +3329,9 @@ export class CrustyApp {
         assignedResource: selection.alias,
         assignedModel: endpoint.model,
         errorMessage,
-        createRecoveryTask: !this.isSafeModeRecoveryTask(task)
+        createRecoveryTask: !this.isSafeModeRecoveryTask(task),
+        startedAt: taskStartedAt,
+        taskStartMs
       });
       return {
         lines: recovery.recoveryTask
@@ -3288,9 +3357,13 @@ export class CrustyApp {
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
+    const taskCompletedAt = new Date().toISOString();
     const completedTask: AutoQueueTask = {
       ...task,
       status: "completed",
+      startedAt: taskStartedAt,
+      completedAt: taskCompletedAt,
+      durationMs: Date.now() - taskStartMs,
       assignedResource: selection.alias,
       assignedModel: endpoint.model,
       result: replyText

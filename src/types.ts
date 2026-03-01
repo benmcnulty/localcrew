@@ -56,6 +56,9 @@ export interface AutoQueueTask {
   content: string;
   priority: TaskPriority;
   createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
   createdBy: string;
   status: "queued" | "completed";
   delegationRole?: string;
@@ -65,6 +68,7 @@ export interface AutoQueueTask {
   assignedModel?: string;
   agentName?: string;
   result?: string;
+  errorMessage?: string;
   sourceDocumentRelativePath?: string;
   sourceDocumentName?: string;
 }
