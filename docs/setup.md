@@ -15,7 +15,7 @@
    - when you rerun setup later, that prompt is prefilled from the existing local configuration
    - after configuration, Crusty starts automatically in the same terminal unless you pass `--no-start`
 3. Open the printed `Local UI` link or stay in the CLI.
-5. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
+4. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
    - `node scripts/setup-agent.js`
    - the Crusty setup output shows the full primary-device IP to remember
    - the script will prompt for `Orchestrator IP:` and prefill the first three IP numbers from the local network when available
@@ -29,7 +29,7 @@
    - for OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync
    - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`
    - or use the `Resources` section in `/ui`
-6. Configure the starter chat roster and test the network:
+5. Configure the starter chat roster and test the network:
    - `/participant list`
    - `/nickname @erin "Your Preferred Name"`
    - `/bind @erin orchestrator`
@@ -58,6 +58,8 @@ The main public-safe env surface is:
 - `CRUSTY_API_BIND_HOST`
 - `CRUSTY_API_PUBLIC_HOST`
 - `CRUSTY_API_PORT`
+- `CRUSTY_API_CORS_ORIGIN` — allowed CORS origin for the local API (omit for no CORS headers)
+- `CRUSTY_API_TOKEN` — optional Bearer token for API authentication
 - `CRUSTY_ORCHESTRATOR_NAME`
 - `CRUSTY_ORCHESTRATOR_ALIAS`
 - `CRUSTY_ORCHESTRATOR_LABEL`
@@ -74,6 +76,12 @@ The main public-safe env surface is:
 - `CRUSTY_ORCHESTRATOR_ROLE`
 - `CRUSTY_ORCHESTRATOR_CAPABILITIES`
 - `CRUSTY_ORCHESTRATOR_NOTES`
+
+Optional runtime tuning:
+
+- `CRUSTY_AUTO_PULSE_INTERVAL_MS` — auto-mode pulse interval in milliseconds (default: 1500)
+- `CRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT` — max chars from a source document fed to auto prompts (default: 12000)
+- `CRUSTY_ANTHROPIC_MAX_TOKENS` — max tokens for Anthropic-style completions (default: 2048)
 
 Participant routing still supports optional env overrides such as `CRUSTY_ENDPOINT_ERIN_RESOURCE`, `CRUSTY_ENDPOINT_ERIN_NICKNAME`, and `CRUSTY_ENDPOINT_ERIN_MODEL`, but the preferred path for ongoing device management is `/resource`, `/participant`, `/nickname`, `/bind`, and `/model` in the CLI or Local UI.
 

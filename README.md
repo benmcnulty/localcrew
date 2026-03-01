@@ -50,6 +50,20 @@ Notable views:
 - `/ui` in a browser for the prototype GUI backed by the same local API
 - `/resource list` and `/resource edit <alias>` for dynamic device inventory management
 
+Additional CLI commands:
+
+- `/priority [high|medium|low]` — set default priority for queued tasks
+- `/rename <oldAlias> <newAlias>` — rename a participant alias
+- `/reset` — reset the current session transcript
+- `/compact` — compact the conversation by summarizing older messages
+- `/default [alias]` — set or show the default participant for chat
+- `/instructions [@alias] ["text"]` — view or set custom instructions for a participant
+- `/sound [on|off]` — toggle voice playback (macOS only)
+- `/voice [@alias] [preset|list]` — set or list available voice presets
+- `/clear` — reset the app back to its env-backed first-run state
+- `/end` — end the current chat or group session
+- `/exit` — exit Crusty
+
 ## Local State
 
 - `.env` and `.env.local` are ignored and may contain device-specific configuration.
@@ -94,6 +108,8 @@ Control the API listener with:
 - `CRUSTY_API_BIND_HOST=0.0.0.0`
 - `CRUSTY_API_PUBLIC_HOST=127.0.0.1`
 - `CRUSTY_API_PORT=4310`
+- `CRUSTY_API_CORS_ORIGIN=http://localhost:3000` — allowed CORS origin (omit for no CORS headers)
+- `CRUSTY_API_TOKEN=your-secret` — optional Bearer token for API authentication
 
 ## Platform Scripts
 
