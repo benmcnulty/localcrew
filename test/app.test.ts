@@ -435,10 +435,31 @@ describe("CrustyApp", () => {
       await seedResourceInventory(rootDir);
       const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
       process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
+      let callCount = 0;
+      const seenModels: string[] = [];
       const app = await CrustyApp.create({
         rootDir,
-        fetchFn: async () =>
-          makeChatResponse("[medium] Tighten the queue routing rubric.\n[low] Audit stale memory summaries."),
+        fetchFn: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { model?: string };
+          seenModels.push(body.model ?? "");
+          callCount += 1;
+
+          if (callCount === 1) {
+            return makeChatResponse(
+              "[medium] Tighten the queue routing rubric.\n[low] Audit stale memory summaries.\n[low] Rewrite multiple memory indexes."
+            );
+          }
+
+          if (callCount === 2) {
+            return makeChatResponse(
+              "The draft is too broad. Drop the extra memory rewrite task and keep the scope narrow.\nVERDICT: revise"
+            );
+          }
+
+          return makeChatResponse(
+            "[medium] Tighten the queue routing rubric.\n[low] Audit stale memory summaries."
+          );
+        },
         speakFn: () => {}
       });
 
@@ -452,6 +473,7 @@ describe("CrustyApp", () => {
           "medium:Tighten the queue routing rubric.",
           "low:Audit stale memory summaries."
         ]);
+        expect(seenModels).toEqual(["gpt-oss:20b", "llama3.1:8b", "gpt-oss:20b"]);
       } finally {
         if (previousName === undefined) {
           delete process.env.CRUSTY_ORCHESTRATOR_NAME;

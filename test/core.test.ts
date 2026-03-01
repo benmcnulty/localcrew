@@ -9,7 +9,9 @@ import {
   buildAgentChatMessages,
   buildAutoTaskMessages,
   buildChatMessages,
+  buildQueueFillFinalizeMessages,
   buildQueueFillMessages,
+  buildQueueFillReviewMessages,
   formatConversationTranscript
 } from "../src/messages.ts";
 import { loadSystemDocuments, loadSystemState } from "../src/orchestrator-store.ts";
@@ -589,7 +591,42 @@ describe("message assembly", () => {
     ).toEqual({
       role: "system",
       content:
-        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Propose a brief self-improvement backlog for the local orchestration system only. Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
+        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet. Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. This draft will be critiqued by the standing secondary reviewer before any tasks are finalized. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
+    });
+
+    expect(
+      buildQueueFillReviewMessages({
+        orchestratorName: "Aster",
+        reviewerAlias: "zora",
+        draftTasks: "[medium] Tighten routing\n[low] Rewrite docs",
+        inventory: "Inventory",
+        roadmap: "Roadmap",
+        focusTodo: "Focus",
+        changelog: "Changelog"
+      })[0]
+    ).toEqual({
+      role: "system",
+      content:
+        "You are @zora, the secondary reviewer for Aster's auto-mode planning. Critique the proposed self-improvement backlog before anything is queued. Apply a measure twice, cut once standard: reject vague, duplicative, over-broad, or low-leverage work. Prefer fewer, narrower, higher-impact tasks over many speculative tasks. Call out documentation churn, memory churn, and process sprawl when the plan does not first justify the added complexity. Do not propose external deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Respond with a short critique followed by one final verdict line exactly in the form VERDICT: approve or VERDICT: revise."
+    });
+
+    expect(
+      buildQueueFillFinalizeMessages({
+        directives: "Directives",
+        inventory: "Inventory",
+        roadmap: "Roadmap",
+        focusTodo: "Focus",
+        changelog: "Changelog",
+        orchestratorSummary: "Summary",
+        orchestratorName: "Aster",
+        agents: ["@reviewer"],
+        draftTasks: "[medium] Tighten routing",
+        reviewFeedback: "Too broad.\nVERDICT: revise"
+      })[1]
+    ).toEqual({
+      role: "system",
+      content:
+        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. You already drafted a provisional backlog and received a critique from the secondary reviewer. Finalize the queue only after applying that critique and tightening scope, ordering, and expected impact. Apply a measure twice, cut once standard: prefer fewer, narrower, better-justified tasks over a larger speculative backlog. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only approved task lines in the exact format [medium] task or [low] task. Prefer 1-3 tasks total with at least one medium task when meaningful. Do not output any explanation before or after the task lines."
     });
   });
 });

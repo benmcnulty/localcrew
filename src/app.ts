@@ -57,7 +57,9 @@ import {
   buildAgentChatMessages,
   buildAutoTaskMessages,
   buildChatMessages,
-  buildQueueFillMessages
+  buildQueueFillFinalizeMessages,
+  buildQueueFillMessages,
+  buildQueueFillReviewMessages
 } from "./messages.ts";
 import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
 import { probeResourceModels } from "./resource-discovery.ts";
@@ -333,6 +335,11 @@ function parseQueueFillOutput(content: string): Array<{ priority: TaskPriority; 
       };
     })
     .filter((task): task is { priority: TaskPriority; content: string } => task !== null);
+}
+
+function parseQueueReviewVerdict(content: string): "approve" | "revise" {
+  const match = content.trim().match(/(?:^|\n)VERDICT:\s*(approve|revise)\s*$/i);
+  return match && match[1].toLowerCase() === "approve" ? "approve" : "revise";
 }
 
 function buildPrompt(
@@ -2396,8 +2403,8 @@ export class CrustyApp {
       listAgents(this.rootDir)
     ]);
     const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
-    const endpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
-    const outgoingMessages = buildQueueFillMessages({
+    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+    const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
       inventory: documents.inventory,
       roadmap: documents.roadmap,
@@ -2408,27 +2415,27 @@ export class CrustyApp {
       agents: agents.map((agent) => `@${agent.slug}`)
     });
 
-    let rawReply: string;
+    let draftReply: string;
     try {
-      rawReply = (
+      draftReply = (
         await this.callModel({
-          scope: "auto.queue-fill",
+          scope: "auto.queue-fill.draft",
           actor: "orchestrator",
-          endpoint,
+          endpoint: draftEndpoint,
           resourceAlias: orchestratorAlias,
           target: this.getOrchestratorName(),
-          messages: outgoingMessages,
-          summary: "Filling the auto queue."
+          messages: draftMessages,
+          summary: "Drafting the auto queue backlog."
         })
       ).text;
-      rawReply = await this.resolveWikipediaTool({
-        scope: "auto.queue-fill",
+      draftReply = await this.resolveWikipediaTool({
+        scope: "auto.queue-fill.draft",
         actor: "orchestrator",
-        endpoint,
+        endpoint: draftEndpoint,
         resourceAlias: orchestratorAlias,
         target: this.getOrchestratorName(),
-        messages: outgoingMessages,
-        rawReply
+        messages: draftMessages,
+        rawReply: draftReply
       });
     } catch (error) {
       return [
@@ -2445,7 +2452,111 @@ export class CrustyApp {
       ];
     }
 
-    const parsedTasks = parseQueueFillOutput(rawReply);
+    const draftTasks = parseQueueFillOutput(draftReply);
+    const draftTaskText =
+      draftTasks.length > 0
+        ? draftTasks.map((task) => `[${task.priority}] ${task.content}`).join("\n")
+        : draftReply.trim();
+    const reviewerResource =
+      listResources(this.rootDir).find(
+        (resource) => resource.alias === "zora" && resource.alias !== orchestratorAlias
+      ) ??
+      listResources(this.rootDir).find(
+        (resource) => resource.tier === "top" && resource.alias !== orchestratorAlias
+      );
+
+    let reviewFeedback = "VERDICT: revise";
+    if (reviewerResource) {
+      const reviewEndpoint = getResourceEndpoint(reviewerResource.alias, "default", this.rootDir);
+      const reviewMessages = buildQueueFillReviewMessages({
+        orchestratorName: this.getOrchestratorName(),
+        reviewerAlias: reviewerResource.alias,
+        draftTasks: draftTaskText,
+        inventory: documents.inventory,
+        roadmap: documents.roadmap,
+        focusTodo: documents.focusTodo,
+        changelog: documents.changelog
+      });
+
+      try {
+        reviewFeedback = (
+          await this.callModel({
+            scope: "auto.queue-fill.review",
+            actor: "orchestrator",
+            endpoint: reviewEndpoint,
+            resourceAlias: reviewerResource.alias,
+            target: reviewerResource.alias,
+            messages: reviewMessages,
+            summary: `Reviewing the drafted auto queue backlog with @${reviewerResource.alias}.`
+          })
+        ).text;
+        reviewFeedback = await this.resolveWikipediaTool({
+          scope: "auto.queue-fill.review",
+          actor: "orchestrator",
+          endpoint: reviewEndpoint,
+          resourceAlias: reviewerResource.alias,
+          target: reviewerResource.alias,
+          messages: reviewMessages,
+          rawReply: reviewFeedback
+        });
+      } catch (error) {
+        reviewFeedback = `Critique unavailable because the reviewer step failed: ${(error as Error).message}\nVERDICT: revise`;
+      }
+    }
+
+    const finalizeMessages = buildQueueFillFinalizeMessages({
+      directives: documents.directives,
+      inventory: documents.inventory,
+      roadmap: documents.roadmap,
+      focusTodo: documents.focusTodo,
+      changelog: documents.changelog,
+      orchestratorSummary: documents.orchestratorSummary,
+      orchestratorName: this.getOrchestratorName(),
+      agents: agents.map((agent) => `@${agent.slug}`),
+      draftTasks: draftTaskText,
+      reviewFeedback
+    });
+
+    let finalReply: string;
+    try {
+      finalReply = (
+        await this.callModel({
+          scope: "auto.queue-fill.finalize",
+          actor: "orchestrator",
+          endpoint: draftEndpoint,
+          resourceAlias: orchestratorAlias,
+          target: this.getOrchestratorName(),
+          messages: finalizeMessages,
+          summary: reviewerResource
+            ? `Finalizing the auto queue backlog after critique from @${reviewerResource.alias}.`
+            : "Finalizing the auto queue backlog without a secondary reviewer."
+        })
+      ).text;
+      finalReply = await this.resolveWikipediaTool({
+        scope: "auto.queue-fill.finalize",
+        actor: "orchestrator",
+        endpoint: draftEndpoint,
+        resourceAlias: orchestratorAlias,
+        target: this.getOrchestratorName(),
+        messages: finalizeMessages,
+        rawReply: finalReply
+      });
+    } catch (error) {
+      return [
+        await this.enqueueAutoTask(
+          "Review the orchestrator planning consensus flow and tighten queue finalization after the failed queue-fill finalize attempt.",
+          "medium",
+          "orchestrator:auto-fill-fallback"
+        ),
+        await this.enqueueAutoTask(
+          `Inspect the last queue-fill finalize failure and capture it in the changelog. Error: ${(error as Error).message}`,
+          "low",
+          "orchestrator:auto-fill-fallback"
+        )
+      ];
+    }
+
+    const parsedTasks = parseQueueFillOutput(finalReply);
     const tasks =
       parsedTasks.length > 0
         ? parsedTasks
@@ -2460,7 +2571,16 @@ export class CrustyApp {
             }
           ];
 
-    return this.queueParsedTasks(tasks, "orchestrator:auto-fill");
+    const queued = await this.queueParsedTasks(tasks, "orchestrator:auto-fill");
+    if (queued.length > 0) {
+      await appendChangelogEntry(
+        reviewerResource
+          ? `Auto queue filled after draft/review/finalize consensus between ${this.getOrchestratorName()} and @${reviewerResource.alias}. Verdict: ${parseQueueReviewVerdict(reviewFeedback)}.`
+          : `Auto queue filled after orchestrator-only planning because no secondary reviewer resource was available.`,
+        this.rootDir
+      );
+    }
+    return queued;
   }
 
   private async processNextAutoTask(): Promise<CommandResult> {
