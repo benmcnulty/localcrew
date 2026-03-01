@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 import { compactConversation } from "./compact.ts";
 import {
@@ -130,6 +131,12 @@ const AUTONOMOUS_DISALLOWED_FILE_PATH_PATTERN =
   /(?:^|\/)(?:scripts?|bin|src|app|api|server|client|public|dist|build|test|tests|__tests__)\//i;
 const AUTONOMOUS_DISALLOWED_FILE_EXTENSION_PATTERN =
   /\.(?:py|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|ps1|bat|cmd|rb|php|pl|lua|java|go|rs|swift|kt|scala|cs|cpp|c|h|hpp|sql)$/i;
+const LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN =
+  /^(?:implement|review|compare|evaluate|check|analyze|analysis|fix|optimize|improve|research|plan|draft|refine|update|test|verify|document|write|summarize|summarise|create|build|design|explore|investigate|audit)$/i;
+const INTERNAL_MEMORY_PATH_HINT_PATTERN =
+  /(?:^|\/)(?:internal|internal-memory|memory|index|indexes|summary|summaries|heuristics|routing|telemetry|diagnostics|notes|verification|plans)(?:\/|[-_])/i;
+const INTERNAL_WIKIPEDIA_QUERY_PATTERN =
+  /\b(crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\s+is\s+required)?|telemetry|hud|prompt|resource alias|erin|zora|min|pav)\b/i;
 const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
 const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
@@ -216,7 +223,7 @@ function parseQueuedTasks(content: string): {
     requestedModel?: string;
   }>;
   fileWrites: Array<{
-    stage: "active" | "outbox";
+    stage: "active" | "outbox" | "internal";
     filename: string;
     content: string;
   }>;
@@ -230,18 +237,18 @@ function parseQueuedTasks(content: string): {
     requestedModel?: string;
   }> = [];
   const fileWrites: Array<{
-    stage: "active" | "outbox";
+    stage: "active" | "outbox" | "internal";
     filename: string;
     content: string;
   }> = [];
 
   const writePattern =
-    /(?:^|\n)WRITE\[(active|outbox)\]\[([^\]\n]+)\]\n([\s\S]*?)\nENDWRITE(?=\n|$)/gi;
+    /(?:^|\n)WRITE\[(active|outbox|internal)\]\[([^\]\n]+)\]\n([\s\S]*?)\nENDWRITE(?=\n|$)/gi;
   let workingContent = content;
   let writeMatch: RegExpExecArray | null;
   while ((writeMatch = writePattern.exec(content)) !== null) {
     fileWrites.push({
-      stage: writeMatch[1].toLowerCase() as "active" | "outbox",
+      stage: writeMatch[1].toLowerCase() as "active" | "outbox" | "internal",
       filename: writeMatch[2].trim(),
       content: writeMatch[3].trimEnd()
     });
@@ -384,6 +391,30 @@ function truncateForPrompt(content: string, limit: number): { text: string; trun
   };
 }
 
+function ensureSafeGeneratedRelativePath(value: string): string {
+  const trimmed = value.replaceAll("\\", "/").trim().replace(/^\/+/, "");
+  if (!trimmed) {
+    throw new Error("A relative path is required.");
+  }
+
+  const segments = trimmed.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    throw new Error("A relative path is required.");
+  }
+
+  for (const segment of segments) {
+    if (segment === "." || segment === "..") {
+      throw new Error("Relative paths may not escape the workspace.");
+    }
+
+    if (segment.startsWith(".")) {
+      throw new Error("Hidden file names are reserved.");
+    }
+  }
+
+  return segments.join("/");
+}
+
 function toKebabSlug(value: string, fallback = "ticket"): string {
   const slug = value
     .toLowerCase()
@@ -395,6 +426,66 @@ function toKebabSlug(value: string, fallback = "ticket"): string {
 
 function formatAuditEventLine(event: AuditEvent): string {
   return `- ${event.timestamp} [${event.kind}] ${event.scope}: ${event.summary}${event.success ? "" : " (failed)"}`;
+}
+
+function isLowInformationAutonomousTask(content: string): boolean {
+  const normalized = content.trim().replace(/[“”"]/g, "");
+  if (!normalized) {
+    return true;
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length >= 5) {
+    return false;
+  }
+
+  if (LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN.test(normalized)) {
+    return true;
+  }
+
+  return words.length <= 2;
+}
+
+function summarizeRecentAutoTasks(
+  completed: AutoQueueTask[],
+  limit = 100
+): {
+  completedCount: number;
+  failureCount: number;
+  modelUsage: Array<{ key: string; count: number }>;
+  failureReasons: Array<{ reason: string; count: number }>;
+} {
+  const recent = completed.slice(-limit);
+  const modelCounts = new Map<string, number>();
+  const failureCounts = new Map<string, number>();
+
+  for (const task of recent) {
+    const modelKey =
+      task.assignedResource && task.assignedModel
+        ? `${task.assignedResource}/${task.assignedModel}`
+        : task.assignedResource
+          ? `${task.assignedResource}/(default)`
+          : "(unassigned)";
+    modelCounts.set(modelKey, (modelCounts.get(modelKey) ?? 0) + 1);
+
+    if (typeof task.result === "string" && task.result.startsWith("FAILED:")) {
+      const reason = task.result.slice("FAILED:".length).trim().replace(/\s+/g, " ");
+      failureCounts.set(reason, (failureCounts.get(reason) ?? 0) + 1);
+    }
+  }
+
+  return {
+    completedCount: recent.length,
+    failureCount: [...failureCounts.values()].reduce((sum, count) => sum + count, 0),
+    modelUsage: [...modelCounts.entries()]
+      .map(([key, count]) => ({ key, count }))
+      .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key))
+      .slice(0, 5),
+    failureReasons: [...failureCounts.entries()]
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+      .slice(0, 5)
+  };
 }
 
 function getAgentCreationQuestions(resourceAliases: string[]): WorkflowQuestion[] {
@@ -1486,10 +1577,13 @@ export class CrustyApp {
       "utf8"
     );
     const agents = await listAgents(this.rootDir);
+    const recentAutoSummary = summarizeRecentAutoTasks(this.systemState.auto.completed);
     await updateOrchestratorIndex({
       rootDir: this.rootDir,
       queueDepth: this.systemState.auto.pending.length,
-      activeAgents: agents.map((agent) => agent.slug)
+      activeAgents: agents.map((agent) => agent.slug),
+      connectedResources: listResources(this.rootDir).map((resource) => resource.alias),
+      recentAutoSummary
     });
   }
 
@@ -1703,6 +1797,13 @@ export class CrustyApp {
     const parsedToolRequest = parseWikipediaRequest(options.rawReply);
     if (!parsedToolRequest.query) {
       return options.rawReply;
+    }
+
+    if (
+      (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
+      INTERNAL_WIKIPEDIA_QUERY_PATTERN.test(parsedToolRequest.query)
+    ) {
+      return parsedToolRequest.replyText || options.rawReply;
     }
 
     try {
@@ -2041,7 +2142,14 @@ export class CrustyApp {
       return false;
     }
 
-    return this.isAutonomousTaskSource(createdBy) && AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content);
+    if (!this.isAutonomousTaskSource(createdBy)) {
+      return false;
+    }
+
+    return (
+      AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content) ||
+      isLowInformationAutonomousTask(content)
+    );
   }
 
   private getResourceRosterText(): string {
@@ -2192,6 +2300,51 @@ export class CrustyApp {
     return entry.path;
   }
 
+  private async writeInternalGeneratedDocument(filename: string, content: string): Promise<{
+    path: string;
+    relativePath: string;
+  }> {
+    const paths = getStoragePaths(this.rootDir);
+    const safeRelativePath = ensureSafeGeneratedRelativePath(filename);
+    const targetPath = resolve(join(paths.orchestratorGeneratedDir, safeRelativePath));
+    const allowedRoot = resolve(paths.orchestratorGeneratedDir);
+    if (!targetPath.startsWith(`${allowedRoot}/`) && targetPath !== allowedRoot) {
+      throw new Error("Internal write path must stay inside the orchestrator generated directory.");
+    }
+
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, `${content.trimEnd()}\n`, "utf8");
+    return {
+      path: targetPath,
+      relativePath: safeRelativePath
+    };
+  }
+
+  private shouldPreferInternalWrite(options: {
+    stage: "active" | "outbox" | "internal";
+    filename: string;
+    createdBy?: string;
+    sourceDocumentRelativePath?: string;
+  }): boolean {
+    if (options.stage === "internal") {
+      return true;
+    }
+
+    if (!options.createdBy || !this.isAutonomousTaskSource(options.createdBy)) {
+      return false;
+    }
+
+    if (options.sourceDocumentRelativePath) {
+      return false;
+    }
+
+    if (options.stage === "active") {
+      return true;
+    }
+
+    return INTERNAL_MEMORY_PATH_HINT_PATTERN.test(options.filename);
+  }
+
   private normalizeQueuedTaskRouting(task: {
     priority: TaskPriority;
     content: string;
@@ -2215,6 +2368,12 @@ export class CrustyApp {
       try {
         const resource = getResourceProfile(normalizedTask.requestedResource, this.rootDir);
         normalizedTask.requestedResource = resource.alias;
+        if (!normalizedTask.requestedModel && resource.defaultModel) {
+          return {
+            ...normalizedTask,
+            requestedModel: resource.defaultModel
+          };
+        }
       } catch {
         return {
           ...normalizedTask,
@@ -2230,6 +2389,17 @@ export class CrustyApp {
 
     const knownAliases = this.getKnownRoutingAliases();
     if (knownAliases.has(normalizedTask.requestedModel.toLowerCase())) {
+      if (normalizedTask.requestedResource) {
+        try {
+          const resource = getResourceProfile(normalizedTask.requestedResource, this.rootDir);
+          return {
+            ...normalizedTask,
+            requestedModel: resource.defaultModel || undefined
+          };
+        } catch {
+          // Fall through to clearing the alias-like model name.
+        }
+      }
       return {
         ...normalizedTask,
         requestedModel: undefined
@@ -2258,7 +2428,7 @@ export class CrustyApp {
 
       return {
         ...normalizedTask,
-        requestedModel: undefined
+        requestedModel: resource.defaultModel || undefined
       };
     } catch {
       return {
@@ -2380,6 +2550,9 @@ export class CrustyApp {
       }
 
       if (this.shouldRejectAutonomousTask(normalizedTask.content, createdBy)) {
+        if (isLowInformationAutonomousTask(normalizedTask.content)) {
+          notes.push(`Skipped vague autonomous task: ${normalizedTask.content}`);
+        }
         continue;
       }
 
@@ -2401,13 +2574,14 @@ export class CrustyApp {
 
   private async handleGeneratedFileWrites(
     fileWrites: Array<{
-      stage: "active" | "outbox";
+      stage: "active" | "outbox" | "internal";
       filename: string;
       content: string;
     }>,
     options: {
       createdBy?: string;
       taskId?: number;
+      sourceDocumentRelativePath?: string;
     } = {}
   ): Promise<string[]> {
     const writtenLines: string[] = [];
@@ -2445,8 +2619,36 @@ export class CrustyApp {
         continue;
       }
 
+      if (
+        this.shouldPreferInternalWrite({
+          stage: fileWrite.stage,
+          filename: safeFilename,
+          createdBy: options.createdBy,
+          sourceDocumentRelativePath: options.sourceDocumentRelativePath
+        })
+      ) {
+        const entry = await this.writeInternalGeneratedDocument(safeFilename, fileWrite.content);
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "internal.write",
+            summary: `Wrote internal orchestration file ${entry.relativePath}.`,
+            success: true,
+            actor: "orchestrator",
+            target: entry.relativePath,
+            metadata: {
+              path: entry.path
+            }
+          },
+          this.rootDir
+        );
+        writtenLines.push(`Wrote internal file: ${entry.path}`);
+        continue;
+      }
+
       const entry = await writeGeneratedDropboxDocument(
-        fileWrite.stage,
+        fileWrite.stage as "active" | "outbox",
         fileWrite.filename,
         fileWrite.content,
         this.rootDir
@@ -2476,6 +2678,7 @@ export class CrustyApp {
   private async getAutoTaskExtraContext(task: AutoQueueTask): Promise<string[]> {
     const resources = listResources(this.rootDir);
     const capacity = getResourceCapacitySummary(this.rootDir);
+    const recentAutoSummary = summarizeRecentAutoTasks(this.systemState.auto.completed);
     const pendingByResource = resources.map((resource) => {
       const pendingCount = this.systemState.auto.pending.filter(
         (pendingTask) => pendingTask.requestedResource === resource.alias
@@ -2496,11 +2699,33 @@ export class CrustyApp {
         "- Prefer queueing precise subtasks for currently lighter resources when a stronger node is better reserved for a later reasoning or drafting step.",
         "- For collaborative work, decompose into multiple QUEUE lines with resource aliases and optional role tags so different nodes can contribute complementary outputs.",
         `- Canonical resource roster: ${canonicalRoster}. Use only these exact aliases. If unsure, omit the alias and let Crusty route the task automatically.`,
+        "- Contributor chat participants are a separate concept from connected inference resources. Never infer a resource alias from a participant nickname.",
         `- Known cluster capacity: ${capacity.resourceCount} resource(s), ${capacity.knownCpuLogicalCores || "(unknown)"} CPU threads, ${capacity.knownRamGb || "(unknown)"} GB RAM, ${capacity.knownGpuCount || "(unknown)"} GPU(s), ${capacity.knownTotalVramGb || "(unknown)"} GB VRAM, max context ${capacity.highestKnownContextTokens || "(unknown)"}.`,
         "- Current explicit queue pressure by resource:",
         ...(pendingByResource.length > 0 ? pendingByResource : ["- (none)"])
       ].join("\n")
     ];
+
+    if (recentAutoSummary.completedCount > 0) {
+      blocks.push(
+        [
+          "Recent auto evidence:",
+          `- Reviewed ${recentAutoSummary.completedCount} recent completed auto task(s); ${recentAutoSummary.failureCount} failure(s).`,
+          `- Most-used models: ${
+            recentAutoSummary.modelUsage.length > 0
+              ? recentAutoSummary.modelUsage.map((entry) => `${entry.key} x${entry.count}`).join(", ")
+              : "(none)"
+          }`,
+          `- Most common failure reasons: ${
+            recentAutoSummary.failureReasons.length > 0
+              ? recentAutoSummary.failureReasons
+                  .map((entry) => `${entry.reason} x${entry.count}`)
+                  .join(" | ")
+              : "(none)"
+          }`
+        ].join("\n")
+      );
+    }
 
     if (this.isSafeModeRecoveryTask(task)) {
       blocks.push(
@@ -2968,6 +3193,26 @@ export class CrustyApp {
     if (task.requestedModel) {
       endpoint.model = task.requestedModel;
     }
+    if (!endpoint.model?.trim()) {
+      const recovery = await this.quarantineFailedAutoTask({
+        task,
+        remaining,
+        assignedResource: selection.alias,
+        errorMessage: `No default model configured for resource "${selection.alias}".`,
+        createRecoveryTask: !this.isSafeModeRecoveryTask(task)
+      });
+      return {
+        lines: recovery.recoveryTask
+          ? [
+              `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+            ]
+          : [`Quarantined failed safe mode recovery task #${task.id}.`],
+        errors: [
+          `Auto task #${task.id} could not resolve a model for ${selection.alias} (${endpoint.baseUrl}).`
+        ],
+        shouldExit: false
+      };
+    }
     const extraContextBlocks = await this.getAutoTaskExtraContext(task);
     const outgoingMessages = buildAutoTaskMessages({
       directives: documents.directives,
@@ -3037,7 +3282,8 @@ export class CrustyApp {
     try {
       writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites, {
         createdBy: task.createdBy,
-        taskId: task.id
+        taskId: task.id,
+        sourceDocumentRelativePath: task.sourceDocumentRelativePath
       });
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);

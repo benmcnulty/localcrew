@@ -389,7 +389,9 @@ describe("CrustyApp", () => {
 
         expect(result.lines[0]).toBe("Queued #1 [high]: Design a routing policy.");
         expect(result.lines[1]).toContain("Aster completed #1 [high] via orchestrator/");
-        expect(result.lines[3]).toBe("Queued #2 [low] -> overflow: sanity check the result");
+        expect(result.lines[3]).toBe(
+          "Queued #2 [low] -> overflow/llama3.2:3b: sanity check the result"
+        );
         expect(systemState.auto.pending).toEqual([
           expect.objectContaining({
             id: 2,
@@ -604,7 +606,7 @@ describe("CrustyApp", () => {
       ]);
       expect(reply.lines[0]).toBe("@reviewer: I would test the plan against the queue.");
       expect(reply.lines[1]).toBe(
-        "Queued #1 [medium] -> workhorse from @reviewer: compare two routing strategies"
+        "Queued #1 [medium] -> workhorse/llama3.1:8b from @reviewer: compare two routing strategies"
       );
       expect(systemState.auto.pending).toEqual([
         expect.objectContaining({
@@ -1096,7 +1098,7 @@ describe("CrustyApp", () => {
           requestedResource: "workhorse"
         })
       );
-      expect(state.auto.pending[0].requestedModel).toBeUndefined();
+      expect(state.auto.pending[0].requestedModel).toBe("llama3.1:8b");
       expect(state.auto.pending[1]).toEqual(
         expect.objectContaining({
           id: 3,
@@ -1168,6 +1170,115 @@ describe("CrustyApp", () => {
       expect(
         dropbox.outbox.some((entry) => entry.relativePath.startsWith("feature-requests/"))
       ).toBe(true);
+    });
+  });
+
+  test("stores autonomous internal documentation in local internal memory instead of external-memory drafts", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 1,
+              pending: [
+                {
+                  id: 1,
+                  content: "Summarize the recent auto failures into a compact internal note.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Captured the note.",
+              "WRITE[internal][memory/failure-summary.md]",
+              "# Failure Summary",
+              "",
+              "- Model routing drift caused repeated failures.",
+              "ENDWRITE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const dropbox = await app.getDropboxSnapshot();
+      const internalFile = await readFile(
+        join(rootDir, ".crusty", "system", "secure", "orchestrator", "generated", "memory", "failure-summary.md"),
+        "utf8"
+      );
+
+      expect(result.errors).toEqual([]);
+      expect(result.lines.some((line) => line.includes("Wrote internal file:"))).toBe(true);
+      expect(dropbox.active).toHaveLength(0);
+      expect(dropbox.outbox).toHaveLength(0);
+      expect(internalFile).toContain("# Failure Summary");
+    });
+  });
+
+  test("skips vague autonomous follow-up tasks instead of queueing them", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 1,
+              pending: [
+                {
+                  id: 1,
+                  content: "Review recent queue failures and suggest the next focused improvement.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(["Queued follow-up.", "QUEUE[medium]: implement"].join("\n")),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const state = await loadSystemState(rootDir);
+
+      expect(result.errors).toEqual([]);
+      expect(result.lines.some((line) => line.includes("Skipped vague autonomous task: implement"))).toBe(true);
+      expect(state.auto.pending).toHaveLength(0);
     });
   });
 
@@ -1339,7 +1450,7 @@ describe("CrustyApp", () => {
       const state = await loadSystemState(rootDir);
 
       expect(reply.lines[1]).toBe(
-        "Queued #1 [medium] {reviewer} -> workhorse from @reviewer: critique the routing plan"
+        "Queued #1 [medium] {reviewer} -> workhorse/llama3.1:8b from @reviewer: critique the routing plan"
       );
       expect(state.auto.pending[0]).toEqual(
         expect.objectContaining({

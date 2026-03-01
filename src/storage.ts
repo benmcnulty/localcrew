@@ -13,6 +13,7 @@ export interface StoragePaths {
   secureDir: string;
   systemStatePath: string;
   orchestratorDir: string;
+  orchestratorGeneratedDir: string;
   orchestratorMemoryDir: string;
   orchestratorMemoryIndexPath: string;
   orchestratorMemorySummaryPath: string;
@@ -35,6 +36,7 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
   const systemDir = join(storageDir, "system");
   const secureDir = join(systemDir, "secure");
   const orchestratorDir = join(secureDir, "orchestrator");
+  const orchestratorGeneratedDir = join(orchestratorDir, "generated");
   const orchestratorMemoryDir = join(orchestratorDir, "memory");
   const telemetryDir = join(orchestratorDir, "telemetry");
   const agentsDir = join(secureDir, "agents");
@@ -49,6 +51,7 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     secureDir,
     systemStatePath: join(systemDir, "state.json"),
     orchestratorDir,
+    orchestratorGeneratedDir,
     orchestratorMemoryDir,
     orchestratorMemoryIndexPath: join(orchestratorMemoryDir, "index.json"),
     orchestratorMemorySummaryPath: join(orchestratorMemoryDir, "summary.md"),
