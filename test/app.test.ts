@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -690,7 +690,7 @@ describe("CrustyApp", () => {
       const first = await app.syncResourceReport({
         alias: "studio-a",
         label: "Studio A",
-        baseUrl: "http://127.0.0.1:1234",
+        baseUrl: "http://192.168.1.50:1234",
         apiStyle: "openai",
         deviceId: "machine-1",
         hostName: "workstation",
@@ -701,7 +701,7 @@ describe("CrustyApp", () => {
       const second = await app.syncResourceReport({
         alias: "studio-b",
         label: "Studio B",
-        baseUrl: "http://127.0.0.1:1234",
+        baseUrl: "http://192.168.1.50:1234",
         apiStyle: "openai",
         deviceId: "machine-1",
         hostName: "workstation",
@@ -987,6 +987,136 @@ describe("CrustyApp", () => {
         })
       );
       expect(requestedModels).toContain("special-model");
+    });
+  });
+
+  test("drops unsafe autonomous tasks and strips alias-like model overrides on startup", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 2,
+              pending: [
+                {
+                  id: 1,
+                  content: "Deploy the `/metrics` endpoint to @orchestrator.",
+                  priority: "medium",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-processed",
+                  status: "queued",
+                  requestedResource: "workhorse",
+                  requestedModel: "orchestrator"
+                },
+                {
+                  id: 2,
+                  content: "Review queue pressure and summarize the result.",
+                  priority: "low",
+                  createdAt: "2026-03-01T00:01:00.000Z",
+                  createdBy: "orchestrator:auto-processed",
+                  status: "queued",
+                  requestedResource: "workhorse",
+                  requestedModel: "workhorse"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("ok"),
+        speakFn: () => {}
+      });
+
+      const state = await loadSystemState(rootDir);
+      expect(state.auto.pending).toHaveLength(1);
+      expect(state.auto.pending[0]).toEqual(
+        expect.objectContaining({
+          id: 2,
+          requestedResource: "workhorse"
+        })
+      );
+      expect(state.auto.pending[0].requestedModel).toBeUndefined();
+    });
+  });
+
+  test("uses the top-tier default model instead of a tools model for autonomous structured tasks", async () => {
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        orchestrator: {
+          alias: "orchestrator",
+          label: "Local Orchestrator",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.1:8b",
+          reasoningModel: "gpt-oss:20b",
+          toolsModel: "gemma3:4b",
+          role: "Primary orchestration resource.",
+          capabilities: ["reasoning"],
+          notes: []
+        },
+        workhorse: {
+          alias: "workhorse",
+          label: "Second Device",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11435",
+          defaultModel: "llama3.1:latest",
+          toolsModel: "gemma3:4b",
+          role: "Top-tier drafting resource.",
+          capabilities: ["chat"],
+          notes: []
+        }
+      };
+      await saveResources(resources, rootDir);
+
+      const requestedModels: string[] = [];
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { model?: string };
+          requestedModels.push(body.model ?? "");
+          return makeChatResponse("Reviewed queue pressure.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Review queue pressure and summarize the result as JSON."));
+      await app.runIdleCycle();
+
+      expect(requestedModels).toContain("llama3.1:latest");
+      expect(requestedModels).not.toContain("gemma3:4b");
+    });
+  });
+
+  test("rejects loopback base URLs for synced non-orchestrator resources", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("ok"),
+        speakFn: () => {}
+      });
+
+      await expect(
+        app.syncResourceReport({
+          alias: "workhorse",
+          label: "Second Device",
+          baseUrl: "http://127.0.0.1:11435",
+          apiStyle: "ollama"
+        })
+      ).rejects.toThrow(/loopback base url/i);
     });
   });
 

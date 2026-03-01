@@ -118,6 +118,8 @@ import { searchWikipedia } from "./wikipedia.ts";
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
 const AGENT_COMPACT_MESSAGE_LIMIT = 10;
+const AUTONOMOUS_EXTERNAL_CHANGE_PATTERN =
+  /\b(deploy|restart|reboot|reconfigure|install|uninstall|upgrade|downgrade|open\s+firewall|allow\s+inbound|allowlist|pf\s+anchor|registry|service\b|daemon\b|kill\s+process|terminate\s+process|pull\s+model|delete\s+model|remove\s+model)\b/i;
 const AUTO_PULSE_INTERVAL_MS = 1500;
 const AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
@@ -269,6 +271,10 @@ function parseQueuedTasks(content: string): {
     queuedTasks,
     fileWrites
   };
+}
+
+function isLoopbackHost(value: string): boolean {
+  return ["127.0.0.1", "localhost", "::1"].includes(value.toLowerCase());
 }
 
 function formatTelemetryBucket(summary: TelemetrySummary, key: string): string {
@@ -467,6 +473,7 @@ export class CrustyApp {
 
     const app = new CrustyApp(config, sessions, systemState, { ...options, rootDir });
     await ensureDropboxLayout(rootDir);
+    await app.sanitizeAutoQueueState();
     await app.syncSystemFiles();
     return app;
   }
@@ -844,6 +851,17 @@ export class CrustyApp {
 
   async syncResourceReport(report: ResourceSyncReport): Promise<CommandResult> {
     const alias = report.alias.trim().toLowerCase();
+    let reportHost = "";
+    try {
+      reportHost = new URL(report.baseUrl).hostname;
+    } catch {
+      throw new Error(`Invalid base URL for synced resource @${alias}.`);
+    }
+    if (alias !== getOrchestratorResourceAlias(this.rootDir) && isLoopbackHost(reportHost)) {
+      throw new Error(
+        `Refusing to sync non-orchestrator resource @${alias} with loopback base URL ${report.baseUrl}. Re-run setup-agent on that device so it advertises its LAN-reachable endpoint instead.`
+      );
+    }
     const resources = listResources(this.rootDir);
     const existing = resources.find((resource) => resource.alias === alias);
     const duplicate = report.deviceId
@@ -1954,6 +1972,120 @@ export class CrustyApp {
     return task;
   }
 
+  private getKnownRoutingAliases(): Set<string> {
+    return new Set([
+      ...Object.keys(this.config.endpoints).map((alias) => alias.toLowerCase()),
+      ...listResources(this.rootDir).map((resource) => resource.alias.toLowerCase())
+    ]);
+  }
+
+  private isAutonomousTaskSource(createdBy: string): boolean {
+    return createdBy.startsWith("orchestrator:") || createdBy.startsWith("agent:");
+  }
+
+  private shouldRejectAutonomousTask(content: string, createdBy: string): boolean {
+    return this.isAutonomousTaskSource(createdBy) && AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content);
+  }
+
+  private normalizeQueuedTaskRouting(task: {
+    priority: TaskPriority;
+    content: string;
+    delegationRole?: string;
+    requestedResource?: string;
+    requestedModel?: string;
+  }): {
+    priority: TaskPriority;
+    content: string;
+    delegationRole?: string;
+    requestedResource?: string;
+    requestedModel?: string;
+  } {
+    const normalizedTask = {
+      ...task,
+      ...(task.requestedResource ? { requestedResource: task.requestedResource.trim().toLowerCase() } : {}),
+      ...(task.requestedModel ? { requestedModel: task.requestedModel.trim() } : {})
+    };
+
+    if (!normalizedTask.requestedModel) {
+      return normalizedTask;
+    }
+
+    const knownAliases = this.getKnownRoutingAliases();
+    if (knownAliases.has(normalizedTask.requestedModel.toLowerCase())) {
+      return {
+        ...normalizedTask,
+        requestedModel: undefined
+      };
+    }
+
+    if (!normalizedTask.requestedResource) {
+      return normalizedTask;
+    }
+
+    try {
+      const resource = getResourceProfile(normalizedTask.requestedResource, this.rootDir);
+      if (!resource.availableModels || resource.availableModels.length === 0) {
+        return normalizedTask;
+      }
+
+      const matchedModel = resource.availableModels.find(
+        (model) => model.toLowerCase() === normalizedTask.requestedModel?.toLowerCase()
+      );
+      if (matchedModel) {
+        return {
+          ...normalizedTask,
+          requestedModel: matchedModel
+        };
+      }
+
+      return {
+        ...normalizedTask,
+        requestedModel: undefined
+      };
+    } catch {
+      return {
+        ...normalizedTask,
+        requestedModel: undefined
+      };
+    }
+  }
+
+  private async sanitizeAutoQueueState(): Promise<void> {
+    const nextPending = this.systemState.auto.pending
+      .map((task) => this.normalizeQueuedTaskRouting(task))
+      .filter((task) => !this.shouldRejectAutonomousTask(task.content, task.createdBy));
+    const nextCompleted = this.systemState.auto.completed.map((task) =>
+      this.normalizeQueuedTaskRouting(task)
+    );
+    const changed =
+      JSON.stringify(nextPending) !== JSON.stringify(this.systemState.auto.pending) ||
+      JSON.stringify(nextCompleted) !== JSON.stringify(this.systemState.auto.completed);
+
+    if (!changed) {
+      return;
+    }
+
+    this.systemState = {
+      ...this.systemState,
+      auto: {
+        ...this.systemState.auto,
+        pending: nextPending,
+        completed: nextCompleted
+      }
+    };
+    await this.persistSystemState();
+  }
+
+  private getAutoTaskEndpoint(selection: {
+    alias: string;
+    tier: "top" | "mid" | "low";
+    purpose: "default" | "reasoning" | "coding" | "tools";
+  }): EndpointConfig {
+    const purpose =
+      selection.purpose === "tools" && selection.tier === "top" ? "default" : selection.purpose;
+    return getResourceEndpoint(selection.alias, purpose, this.rootDir);
+  }
+
   private async queueParsedTasks(
     queuedTasks: Array<{
       priority: TaskPriority;
@@ -1976,12 +2108,17 @@ export class CrustyApp {
         continue;
       }
 
+      const normalizedTask = this.normalizeQueuedTaskRouting(task);
+      if (this.shouldRejectAutonomousTask(normalizedTask.content, createdBy)) {
+        continue;
+      }
+
       addedTasks.push(
-        await this.enqueueAutoTask(task.content, task.priority, createdBy, {
+        await this.enqueueAutoTask(normalizedTask.content, normalizedTask.priority, createdBy, {
           ...options,
-          delegationRole: task.delegationRole,
-          requestedResource: task.requestedResource,
-          requestedModel: task.requestedModel
+          delegationRole: normalizedTask.delegationRole,
+          requestedResource: normalizedTask.requestedResource,
+          requestedModel: normalizedTask.requestedModel
         })
       );
     }
@@ -2347,7 +2484,7 @@ export class CrustyApp {
       this.rootDir,
       { resourceLoad }
     );
-    const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
+    const endpoint = this.getAutoTaskEndpoint(selection);
     if (task.requestedModel) {
       endpoint.model = task.requestedModel;
     }

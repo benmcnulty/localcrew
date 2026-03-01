@@ -564,7 +564,11 @@ async function startNodeWorkerApi(
             : {}),
           close: async () =>
             await new Promise<void>((resolveClose) => {
+              let timeout: ReturnType<typeof setTimeout> | null = null;
               const handleExit = (): void => {
+                if (timeout) {
+                  clearTimeout(timeout);
+                }
                 child.off("exit", handleExit);
                 resolveClose();
               };
@@ -572,6 +576,11 @@ async function startNodeWorkerApi(
               child.on("exit", handleExit);
               if (child.connected) {
                 child.send({ type: "shutdown" } satisfies WorkerOutgoingMessage);
+                timeout = setTimeout(() => {
+                  if (!child.killed) {
+                    child.kill();
+                  }
+                }, 500);
                 return;
               }
 
@@ -688,6 +697,10 @@ export async function startApiServer(
   const requestedPort = getEnvNumber("CRUSTY_API_PORT", 4310);
   const bunRuntime = (globalThis as { Bun?: object }).Bun;
   if (bunRuntime) {
+    if (requestedPort === 0) {
+      return startVirtualApiServer(app, warn);
+    }
+
     const handle = await startNodeWorkerApi(app, bindHost, requestedPort, localHost, publicHost, warn);
     if (handle) {
       return handle;
