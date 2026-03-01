@@ -156,6 +156,7 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "",
     "- `external-memory/` is the committed seed layer and should contain only portable guidance, workflows, and durable patterns.",
     "- `.crusty/` is internal local memory and may contain runtime summaries, queues, telemetry, and local experimentation.",
+    "- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.crusty/`, not in `external-memory/active/`.",
     "- Promote only validated lessons from local memory into committed seeds after they have been reviewed and simplified.",
     "- Prefer concise summaries and stable indexes over sprawling process prose.",
     "",
@@ -166,9 +167,12 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "- Before adding autonomous tasks, draft the plan, have the standing secondary reviewer critique it, then finalize only the narrowed approved tasks by consensus.",
     '- Apply a "measure twice, cut once" standard: prefer fewer, clearer, better-justified tasks over speculative backlogs or documentation churn.',
     "- Autonomous work may directly change only internal memory, prompt guidance, indexes, summaries, and other contained process artifacts.",
+    "- Use connected resource aliases from the live resource inventory only. Contributor chat participants are a separate concept and must not be used as substitute resource aliases.",
     "- If a useful improvement would require external application, API, UI, script, source-code, or system-service work, write a detailed feature request ticket into `external-memory/outbox/feature-requests/` instead of treating it as executable autonomous work.",
     "- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Crusty.",
     "- Never create or rely on ad-hoc executable scripts, daemons, or undefined system processes from `/auto`; use only approved application capabilities.",
+    "- Reject vague placeholder tasks. Every autonomous task must have a clear object, scope, and expected outcome.",
+    "- Use Wikipedia only for external factual knowledge, not for internal Crusty routing, prompt, naming, or model-diagnosis questions.",
     "- Unexpected failures should trigger diagnosis, quarantine, and recovery, not repeated blind retries.",
     "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance.",
     "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance."
@@ -340,6 +344,7 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await mkdir(paths.systemDir, { recursive: true });
   await mkdir(paths.secureDir, { recursive: true });
   await mkdir(paths.orchestratorDir, { recursive: true });
+  await mkdir(paths.orchestratorGeneratedDir, { recursive: true });
   await mkdir(paths.orchestratorMemoryDir, { recursive: true });
   await mkdir(paths.telemetryDir, { recursive: true });
   await mkdir(paths.agentsDir, { recursive: true });
@@ -378,7 +383,8 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
       "# Orchestrator Memory",
       "",
       "- Keep only compact durable summaries here.",
-      "- Record canonical resource names, current operating boundaries, and the most important active heuristics.",
+      "- Record canonical connected resource names, current operating boundaries, and the most important active heuristics.",
+      "- Distinguish connected inference resources from contributor chat participants; do not infer one roster from the other.",
       "- Do not duplicate changelog detail or speculative implementation plans."
     ].join("\n")
   );
@@ -545,6 +551,13 @@ export async function appendChangelogEntry(
 export async function updateOrchestratorIndex(options: {
   queueDepth: number;
   activeAgents: string[];
+  connectedResources?: string[];
+  recentAutoSummary?: {
+    completedCount: number;
+    failureCount: number;
+    modelUsage: Array<{ key: string; count: number }>;
+    failureReasons: Array<{ reason: string; count: number }>;
+  };
   rootDir?: string;
 }): Promise<void> {
   const paths = getStoragePaths(options.rootDir);
@@ -555,7 +568,9 @@ export async function updateOrchestratorIndex(options: {
       {
         updatedAt: new Date().toISOString(),
         queueDepth: options.queueDepth,
-        activeAgents: options.activeAgents
+        activeAgents: options.activeAgents,
+        ...(options.connectedResources ? { connectedResources: options.connectedResources } : {}),
+        ...(options.recentAutoSummary ? { recentAutoSummary: options.recentAutoSummary } : {})
       },
       null,
       2
