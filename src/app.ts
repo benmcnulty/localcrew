@@ -124,6 +124,12 @@ const AUTO_COMPLETED_TASK_LIMIT = 50;
 const AGENT_COMPACT_MESSAGE_LIMIT = 10;
 const AUTONOMOUS_EXTERNAL_CHANGE_PATTERN =
   /\b(deploy|restart|reboot|reconfigure|install|uninstall|upgrade|downgrade|open\s+firewall|allow\s+inbound|allowlist|pf\s+anchor|registry|service\b|daemon\b|kill\s+process|terminate\s+process|pull\s+model|delete\s+model|remove\s+model)\b/i;
+const AUTONOMOUS_EXTERNAL_FEATURE_PATTERN =
+  /\b(build|implement|create|add|expose|integrate|refactor|run|start|write|review|finalize|plan|design|specify)\b[\s\S]{0,120}\b(api|endpoint|ui|gui|browser|server|script|collector|service|daemon|python|javascript|typescript|node\b|bun\b|package|test|hud|auth|firebase|stripe|portal|web)\b/i;
+const AUTONOMOUS_DISALLOWED_FILE_PATH_PATTERN =
+  /(?:^|\/)(?:scripts?|bin|src|app|api|server|client|public|dist|build|test|tests|__tests__)\//i;
+const AUTONOMOUS_DISALLOWED_FILE_EXTENSION_PATTERN =
+  /\.(?:py|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|ps1|bat|cmd|rb|php|pl|lua|java|go|rs|swift|kt|scala|cs|cpp|c|h|hpp|sql)$/i;
 const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
 const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
@@ -376,6 +382,15 @@ function truncateForPrompt(content: string, limit: number): { text: string; trun
     text: `${content.slice(0, limit)}\n\n[truncated by Crusty after ${limit} characters]`,
     truncated: true
   };
+}
+
+function toKebabSlug(value: string, fallback = "ticket"): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return slug || fallback;
 }
 
 function getAgentCreationQuestions(resourceAliases: string[]): WorkflowQuestion[] {
@@ -1994,8 +2009,91 @@ export class CrustyApp {
     return createdBy.startsWith("orchestrator:") || createdBy.startsWith("agent:");
   }
 
+  private shouldConvertAutonomousTaskToFeatureRequest(content: string, createdBy: string): boolean {
+    if (!this.isAutonomousTaskSource(createdBy)) {
+      return false;
+    }
+
+    const normalized = content.toLowerCase();
+    if (
+      normalized.includes("feature request ticket") ||
+      normalized.includes("outbox feature request")
+    ) {
+      return false;
+    }
+
+    return (
+      AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content) ||
+      AUTONOMOUS_EXTERNAL_FEATURE_PATTERN.test(content)
+    );
+  }
+
   private shouldRejectAutonomousTask(content: string, createdBy: string): boolean {
     return this.isAutonomousTaskSource(createdBy) && AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content);
+  }
+
+  private getResourceRosterText(): string {
+    const resources = listResources(this.rootDir);
+    return resources.length > 0
+      ? resources.map((resource) => `@${resource.alias} (${resource.label})`).join(", ")
+      : "(none)";
+  }
+
+  private async writeFeatureRequestTicket(options: {
+    title: string;
+    detail: string;
+    createdBy: string;
+    taskId?: number;
+    requestedResource?: string;
+    requestedModel?: string;
+    relatedPath?: string;
+    reason: string;
+  }): Promise<string> {
+    const slugBase = toKebabSlug(
+      options.title,
+      options.taskId ? `task-${options.taskId}` : "feature-request"
+    );
+    const filename = `feature-requests/${options.taskId ? `task-${options.taskId}-` : ""}${slugBase}.md`;
+    const detail = truncateForPrompt(options.detail.trim(), 8000).text;
+    const entry = await writeGeneratedDropboxDocument(
+      "outbox",
+      filename,
+      [
+        `# Feature Request: ${options.title.trim() || "Untitled request"}`,
+        "",
+        `- Requested by: ${options.createdBy}`,
+        `- Reason redirected by Crusty: ${options.reason}`,
+        ...(options.taskId ? [`- Source task ID: ${options.taskId}`] : []),
+        ...(options.requestedResource ? [`- Suggested resource: @${options.requestedResource}`] : []),
+        ...(options.requestedModel ? [`- Suggested model: ${options.requestedModel}`] : []),
+        ...(options.relatedPath ? [`- Related requested path: ${options.relatedPath}`] : []),
+        "",
+        "## Requested change",
+        "",
+        detail
+      ].join("\n"),
+      this.rootDir
+    );
+    await appendAuditEvent(
+      {
+        timestamp: new Date().toISOString(),
+        kind: "system",
+        scope: "feature-request.redirect",
+        summary: `Redirected autonomous external change request into outbox ticket ${entry.relativePath}.`,
+        success: true,
+        actor: "orchestrator",
+        target: entry.relativePath,
+        metadata: {
+          createdBy: options.createdBy,
+          taskId: options.taskId,
+          requestedResource: options.requestedResource,
+          requestedModel: options.requestedModel,
+          relatedPath: options.relatedPath
+        }
+      },
+      this.rootDir
+    );
+    return entry.path;
   }
 
   private normalizeQueuedTaskRouting(task: {
@@ -2016,6 +2114,19 @@ export class CrustyApp {
       ...(task.requestedResource ? { requestedResource: task.requestedResource.trim().toLowerCase() } : {}),
       ...(task.requestedModel ? { requestedModel: task.requestedModel.trim() } : {})
     };
+
+    if (normalizedTask.requestedResource) {
+      try {
+        const resource = getResourceProfile(normalizedTask.requestedResource, this.rootDir);
+        normalizedTask.requestedResource = resource.alias;
+      } catch {
+        return {
+          ...normalizedTask,
+          requestedResource: undefined,
+          requestedModel: undefined
+        };
+      }
+    }
 
     if (!normalizedTask.requestedModel) {
       return normalizedTask;
@@ -2069,13 +2180,45 @@ export class CrustyApp {
   }
 
   private async sanitizeAutoQueueState(): Promise<void> {
-    const nextPending = this.systemState.auto.pending
-      .map((task) => this.normalizeAutoQueueTask(task))
-      .filter((task) => !this.shouldRejectAutonomousTask(task.content, task.createdBy));
+    const nextPending: AutoQueueTask[] = [];
+    let changed = false;
+    for (const task of this.systemState.auto.pending) {
+      const normalizedTask = this.normalizeAutoQueueTask(task);
+      if (JSON.stringify(normalizedTask) !== JSON.stringify(task)) {
+        changed = true;
+      }
+
+      if (
+        this.shouldConvertAutonomousTaskToFeatureRequest(
+          normalizedTask.content,
+          normalizedTask.createdBy
+        )
+      ) {
+        await this.writeFeatureRequestTicket({
+          title: normalizedTask.content,
+          detail: normalizedTask.content,
+          createdBy: normalizedTask.createdBy,
+          taskId: normalizedTask.id,
+          requestedResource: normalizedTask.requestedResource,
+          requestedModel: normalizedTask.requestedModel,
+          reason:
+            "Autonomous work may improve only internal memory and process artifacts directly. External implementation requests are redirected into outbox feature tickets."
+        });
+        changed = true;
+        continue;
+      }
+
+      if (this.shouldRejectAutonomousTask(normalizedTask.content, normalizedTask.createdBy)) {
+        changed = true;
+        continue;
+      }
+
+      nextPending.push(normalizedTask);
+    }
     const nextCompleted = this.systemState.auto.completed.map((task) => this.normalizeAutoQueueTask(task));
-    const changed =
-      JSON.stringify(nextPending) !== JSON.stringify(this.systemState.auto.pending) ||
-      JSON.stringify(nextCompleted) !== JSON.stringify(this.systemState.auto.completed);
+    if (JSON.stringify(nextCompleted) !== JSON.stringify(this.systemState.auto.completed)) {
+      changed = true;
+    }
 
     if (!changed) {
       return;
@@ -2116,8 +2259,9 @@ export class CrustyApp {
       sourceDocumentRelativePath?: string;
       sourceDocumentName?: string;
     } = {}
-  ): Promise<AutoQueueTask[]> {
+  ): Promise<{ tasks: AutoQueueTask[]; notes: string[] }> {
     const addedTasks: AutoQueueTask[] = [];
+    const notes: string[] = [];
 
     for (const task of queuedTasks) {
       if (!task.content.trim()) {
@@ -2125,6 +2269,20 @@ export class CrustyApp {
       }
 
       const normalizedTask = this.normalizeQueuedTaskRouting(task);
+      if (this.shouldConvertAutonomousTaskToFeatureRequest(normalizedTask.content, createdBy)) {
+        const ticketPath = await this.writeFeatureRequestTicket({
+          title: normalizedTask.content,
+          detail: normalizedTask.content,
+          createdBy,
+          requestedResource: normalizedTask.requestedResource,
+          requestedModel: normalizedTask.requestedModel,
+          reason:
+            "Autonomous work may improve only internal memory and process artifacts directly. External implementation requests are redirected into outbox feature tickets."
+        });
+        notes.push(`Redirected external feature request to outbox ticket: ${ticketPath}`);
+        continue;
+      }
+
       if (this.shouldRejectAutonomousTask(normalizedTask.content, createdBy)) {
         continue;
       }
@@ -2139,7 +2297,10 @@ export class CrustyApp {
       );
     }
 
-    return addedTasks;
+    return {
+      tasks: addedTasks,
+      notes
+    };
   }
 
   private async handleGeneratedFileWrites(
@@ -2147,12 +2308,44 @@ export class CrustyApp {
       stage: "active" | "outbox";
       filename: string;
       content: string;
-    }>
+    }>,
+    options: {
+      createdBy?: string;
+      taskId?: number;
+    } = {}
   ): Promise<string[]> {
     const writtenLines: string[] = [];
 
     for (const fileWrite of fileWrites) {
       if (!fileWrite.filename.trim()) {
+        continue;
+      }
+
+      const isAutonomousWrite = Boolean(
+        options.createdBy && this.isAutonomousTaskSource(options.createdBy)
+      );
+      const safeFilename = fileWrite.filename.replaceAll("\\", "/").trim();
+      if (
+        isAutonomousWrite &&
+        (AUTONOMOUS_DISALLOWED_FILE_PATH_PATTERN.test(safeFilename) ||
+          AUTONOMOUS_DISALLOWED_FILE_EXTENSION_PATTERN.test(safeFilename))
+      ) {
+        const ticketPath = await this.writeFeatureRequestTicket({
+          title: `External implementation requested for ${safeFilename}`,
+          detail: [
+            `The autonomous system requested a generated file at ${safeFilename}.`,
+            "",
+            "Requested content:",
+            "",
+            fileWrite.content.trim() || "(none)"
+          ].join("\n"),
+          createdBy: options.createdBy ?? "orchestrator",
+          taskId: options.taskId,
+          relatedPath: safeFilename,
+          reason:
+            "Autonomous file writes are limited to internal text artifacts. Executable scripts, source files, and app-level implementation requests are redirected into outbox feature tickets."
+        });
+        writtenLines.push(`Redirected external file request to outbox ticket: ${ticketPath}`);
         continue;
       }
 
@@ -2195,6 +2388,10 @@ export class CrustyApp {
         resource.maxContextTokens ? `, maxContext=${resource.maxContextTokens}` : ""
       }`;
     });
+    const canonicalRoster =
+      resources.length > 0
+        ? resources.map((resource) => `@${resource.alias} (${resource.label})`).join(", ")
+        : "(none)";
 
     const blocks: string[] = [
       [
@@ -2202,6 +2399,7 @@ export class CrustyApp {
         "- The highest-value self-improvement work is better configuration, context budgeting, delegation, and task decomposition for this specific local network.",
         "- Prefer queueing precise subtasks for currently lighter resources when a stronger node is better reserved for a later reasoning or drafting step.",
         "- For collaborative work, decompose into multiple QUEUE lines with resource aliases and optional role tags so different nodes can contribute complementary outputs.",
+        `- Canonical resource roster: ${canonicalRoster}. Use only these exact aliases. If unsure, omit the alias and let Crusty route the task automatically.`,
         `- Known cluster capacity: ${capacity.resourceCount} resource(s), ${capacity.knownCpuLogicalCores || "(unknown)"} CPU threads, ${capacity.knownRamGb || "(unknown)"} GB RAM, ${capacity.knownGpuCount || "(unknown)"} GPU(s), ${capacity.knownTotalVramGb || "(unknown)"} GB VRAM, max context ${capacity.highestKnownContextTokens || "(unknown)"}.`,
         "- Current explicit queue pressure by resource:",
         ...(pendingByResource.length > 0 ? pendingByResource : ["- (none)"])
@@ -2305,6 +2503,7 @@ export class CrustyApp {
       summary: memory.conversation.summary,
       recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
       taskPrompt: `USER -> @${agent.slug}: ${userMessage}`,
+      resourceRoster: this.getResourceRosterText(),
       extraContextBlocks
     });
 
@@ -2362,13 +2561,16 @@ export class CrustyApp {
     };
     await saveAgentMemory(agent.slug, nextMemory, this.rootDir);
 
-    const queued = await this.queueParsedTasks(parsed.queuedTasks, `agent:${agent.slug}`, {
+    const queuedResult = await this.queueParsedTasks(parsed.queuedTasks, `agent:${agent.slug}`, {
       agentName: agent.slug
     });
+    const queued = queuedResult.tasks;
     let writtenFiles: string[] = [];
     const postProcessErrors: string[] = [];
     try {
-      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites);
+      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites, {
+        createdBy: `agent:${agent.slug}`
+      });
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
@@ -2381,6 +2583,7 @@ export class CrustyApp {
       lines: [
         `@${agent.slug}: ${replyText}`,
         ...writtenFiles,
+        ...queuedResult.notes,
         ...queued.map(
           (task) =>
             `Queued #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${
@@ -2393,9 +2596,12 @@ export class CrustyApp {
     };
   }
 
-  private async fillAutoQueue(): Promise<AutoQueueTask[]> {
+  private async fillAutoQueue(): Promise<{ queued: AutoQueueTask[]; notes: string[] }> {
     if (this.systemState.auto.pending.length > 0) {
-      return [];
+      return {
+        queued: [],
+        notes: []
+      };
     }
 
     const [documents, agents] = await Promise.all([
@@ -2403,6 +2609,7 @@ export class CrustyApp {
       listAgents(this.rootDir)
     ]);
     const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
+    const resourceRoster = this.getResourceRosterText();
     const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
@@ -2412,7 +2619,8 @@ export class CrustyApp {
       changelog: documents.changelog,
       orchestratorSummary: documents.orchestratorSummary,
       orchestratorName: this.getOrchestratorName(),
-      agents: agents.map((agent) => `@${agent.slug}`)
+      agents: agents.map((agent) => `@${agent.slug}`),
+      resourceRoster
     });
 
     let draftReply: string;
@@ -2438,18 +2646,21 @@ export class CrustyApp {
         rawReply: draftReply
       });
     } catch (error) {
-      return [
-        await this.enqueueAutoTask(
-          "Review the orchestrator prompts and tighten queue fill guidance after the failed auto-fill attempt.",
-          "medium",
-          "orchestrator:auto-fill-fallback"
-        ),
-        await this.enqueueAutoTask(
-          `Inspect the last auto-fill failure and capture it in the changelog. Error: ${(error as Error).message}`,
-          "low",
-          "orchestrator:auto-fill-fallback"
-        )
-      ];
+      return {
+        queued: [
+          await this.enqueueAutoTask(
+            "Review the orchestrator prompts and tighten queue fill guidance after the failed auto-fill attempt.",
+            "medium",
+            "orchestrator:auto-fill-fallback"
+          ),
+          await this.enqueueAutoTask(
+            `Inspect the last auto-fill failure and capture it in the changelog. Error: ${(error as Error).message}`,
+            "low",
+            "orchestrator:auto-fill-fallback"
+          )
+        ],
+        notes: []
+      };
     }
 
     const draftTasks = parseQueueFillOutput(draftReply);
@@ -2475,7 +2686,8 @@ export class CrustyApp {
         inventory: documents.inventory,
         roadmap: documents.roadmap,
         focusTodo: documents.focusTodo,
-        changelog: documents.changelog
+        changelog: documents.changelog,
+        resourceRoster
       });
 
       try {
@@ -2514,7 +2726,8 @@ export class CrustyApp {
       orchestratorName: this.getOrchestratorName(),
       agents: agents.map((agent) => `@${agent.slug}`),
       draftTasks: draftTaskText,
-      reviewFeedback
+      reviewFeedback,
+      resourceRoster
     });
 
     let finalReply: string;
@@ -2542,18 +2755,21 @@ export class CrustyApp {
         rawReply: finalReply
       });
     } catch (error) {
-      return [
-        await this.enqueueAutoTask(
-          "Review the orchestrator planning consensus flow and tighten queue finalization after the failed queue-fill finalize attempt.",
-          "medium",
-          "orchestrator:auto-fill-fallback"
-        ),
-        await this.enqueueAutoTask(
-          `Inspect the last queue-fill finalize failure and capture it in the changelog. Error: ${(error as Error).message}`,
-          "low",
-          "orchestrator:auto-fill-fallback"
-        )
-      ];
+      return {
+        queued: [
+          await this.enqueueAutoTask(
+            "Review the orchestrator planning consensus flow and tighten queue finalization after the failed queue-fill finalize attempt.",
+            "medium",
+            "orchestrator:auto-fill-fallback"
+          ),
+          await this.enqueueAutoTask(
+            `Inspect the last queue-fill finalize failure and capture it in the changelog. Error: ${(error as Error).message}`,
+            "low",
+            "orchestrator:auto-fill-fallback"
+          )
+        ],
+        notes: []
+      };
     }
 
     const parsedTasks = parseQueueFillOutput(finalReply);
@@ -2571,8 +2787,8 @@ export class CrustyApp {
             }
           ];
 
-    const queued = await this.queueParsedTasks(tasks, "orchestrator:auto-fill");
-    if (queued.length > 0) {
+    const queuedResult = await this.queueParsedTasks(tasks, "orchestrator:auto-fill");
+    if (queuedResult.tasks.length > 0 || queuedResult.notes.length > 0) {
       await appendChangelogEntry(
         reviewerResource
           ? `Auto queue filled after draft/review/finalize consensus between ${this.getOrchestratorName()} and @${reviewerResource.alias}. Verdict: ${parseQueueReviewVerdict(reviewFeedback)}.`
@@ -2580,7 +2796,10 @@ export class CrustyApp {
         this.rootDir
       );
     }
-    return queued;
+    return {
+      queued: queuedResult.tasks,
+      notes: queuedResult.notes
+    };
   }
 
   private async processNextAutoTask(): Promise<CommandResult> {
@@ -2607,12 +2826,35 @@ export class CrustyApp {
       },
       {}
     );
-    const selection = chooseResourceForTask(
-      task.content,
-      task.requestedResource ?? "auto",
-      this.rootDir,
-      { resourceLoad }
-    );
+    let selection;
+    let routingFallbackWarning: string | null = null;
+    try {
+      selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
+        resourceLoad
+      });
+    } catch (error) {
+      const invalidRequestedResource = task.requestedResource;
+      selection = chooseResourceForTask(task.content, "auto", this.rootDir, { resourceLoad });
+      task.requestedResource = undefined;
+      routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${selection.alias}.`;
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "auto.route.fallback",
+          summary: `Fell back to automatic routing for task #${task.id} after invalid requested resource selection.`,
+          success: true,
+          actor: "orchestrator",
+          target: `task:${task.id}`,
+          metadata: {
+            invalidRequestedResource,
+            error: (error as Error).message,
+            fallbackResource: selection.alias
+          }
+        },
+        this.rootDir
+      );
+    }
     const endpoint = this.getAutoTaskEndpoint(selection);
     if (task.requestedModel) {
       endpoint.model = task.requestedModel;
@@ -2632,6 +2874,7 @@ export class CrustyApp {
       createdBy: task.createdBy,
       resourceAlias: selection.alias,
       resourceRationale: selection.rationale,
+      resourceRoster: this.getResourceRosterText(),
       extraContextBlocks
     });
 
@@ -2672,7 +2915,10 @@ export class CrustyApp {
     const postProcessErrors: string[] = [];
     let writtenFiles: string[] = [];
     try {
-      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites);
+      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites, {
+        createdBy: task.createdBy,
+        taskId: task.id
+      });
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
@@ -2695,7 +2941,8 @@ export class CrustyApp {
       }
     };
     await this.persistSystemState();
-    const queued = await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed");
+    const queuedResult = await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed");
+    const queued = queuedResult.tasks;
     let movedSourceLine: string | null = null;
     if (task.sourceDocumentRelativePath) {
       try {
@@ -2730,7 +2977,9 @@ export class CrustyApp {
       lines: [
         `${this.getOrchestratorName()} completed #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
         replyText,
+        ...(routingFallbackWarning ? [routingFallbackWarning] : []),
         ...writtenFiles,
+        ...queuedResult.notes,
         ...(movedSourceLine ? [movedSourceLine] : []),
         ...queued.map(
           (queuedTask) =>
@@ -2753,36 +3002,45 @@ export class CrustyApp {
       };
     }
 
-    return this.runAutoCycleLocked(async () => {
-      if (this.systemState.auto.pending.length === 0) {
-        const ingested = await this.ingestNextInboxDocumentTask();
-        if (ingested) {
-          const processed = await this.processNextAutoTask();
-          return {
-            lines: [
-              `Ingested inbox document ${ingested.relativePath} and queued #${ingested.task.id}.`,
-              ...processed.lines
-            ],
-            errors: processed.errors,
-            shouldExit: false
-          };
+    try {
+      return await this.runAutoCycleLocked(async () => {
+        if (this.systemState.auto.pending.length === 0) {
+          const ingested = await this.ingestNextInboxDocumentTask();
+          if (ingested) {
+            const processed = await this.processNextAutoTask();
+            return {
+              lines: [
+                `Ingested inbox document ${ingested.relativePath} and queued #${ingested.task.id}.`,
+                ...processed.lines
+              ],
+              errors: processed.errors,
+              shouldExit: false
+            };
+          }
+
+          const filled = await this.fillAutoQueue();
+          if (filled.queued.length > 0 || filled.notes.length > 0) {
+            return {
+              lines: [
+                `${this.getOrchestratorName()} filled the queue with ${filled.queued.length} self-improvement task${filled.queued.length === 1 ? "" : "s"}.`,
+                ...filled.notes,
+                ...filled.queued.map((task) => `Queued #${task.id} [${task.priority}]: ${task.content}`)
+              ],
+              errors: [],
+              shouldExit: false
+            };
+          }
         }
 
-        const filled = await this.fillAutoQueue();
-        if (filled.length > 0) {
-          return {
-            lines: [
-              `${this.getOrchestratorName()} filled the queue with ${filled.length} self-improvement task${filled.length === 1 ? "" : "s"}.`,
-              ...filled.map((task) => `Queued #${task.id} [${task.priority}]: ${task.content}`)
-            ],
-            errors: [],
-            shouldExit: false
-          };
-        }
-      }
-
-      return this.processNextAutoTask();
-    });
+        return this.processNextAutoTask();
+      });
+    } catch (error) {
+      return {
+        lines: [],
+        errors: [`Auto cycle failed safely: ${(error as Error).message}`],
+        shouldExit: false
+      };
+    }
   }
 
   async updateInstructions(alias: string, text: string): Promise<CommandResult> {
