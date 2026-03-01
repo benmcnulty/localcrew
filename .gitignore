@@ -1,2 +1,7 @@
 node_modules/
-.crusty/sessions.json
+.env
+.env.local
+.env.*.local
+!.env.example
+.crusty/
+ollama-profile-*.json

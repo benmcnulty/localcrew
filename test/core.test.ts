@@ -70,7 +70,7 @@ describe("config bootstrap", () => {
             soundEnabled: true,
             endpoints: {
               sam: {
-                baseUrl: "http://192.168.1.190:11434",
+                baseUrl: "http://localhost:11436",
                 model: "llama3.2:1b",
                 instructions: getDefaultInstruction("sam"),
                 voicePreset: "sandy_us"
@@ -106,19 +106,19 @@ describe("config bootstrap", () => {
                 voicePreset: "siri"
               },
               zora: {
-                baseUrl: "http://192.168.1.175:11434",
+                baseUrl: "http://localhost:11435",
                 model: "llama3.1:latest",
                 instructions: getDefaultInstruction("zora"),
                 voicePreset: "zoe"
               },
               sam: {
-                baseUrl: "http://192.168.1.190:11434",
+                baseUrl: "http://localhost:11436",
                 model: "llama3.2:1b",
                 instructions: getDefaultInstruction("sam"),
                 voicePreset: "samantha"
               },
               pav: {
-                baseUrl: "http://192.168.1.108:11434",
+                baseUrl: "http://localhost:11437",
                 model: "llama3.2:1b",
                 instructions: getDefaultInstruction("pav"),
                 voicePreset: "daniel"

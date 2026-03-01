@@ -249,7 +249,7 @@ describe("CrustyApp", () => {
         kind: "explore"
       });
       expect(tree.lines.some((line) => line.includes("focus-todo.md"))).toBe(true);
-      expect(file.content).toContain("No active tasks.");
+      expect(file.content).toContain("Add telemetry capture for model latency");
     });
   });
 
@@ -514,7 +514,7 @@ describe("CrustyApp", () => {
       expect(systemState.auto.pending).toEqual([]);
       expect(systemState.auto.completed).toEqual([]);
       expect(agents).toEqual([]);
-      expect(focusTodo).toContain("No active tasks.");
+      expect(focusTodo).toContain("Add telemetry capture for model latency");
     });
   });
 

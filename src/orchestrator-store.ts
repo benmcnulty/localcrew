@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { loadLocalEnv } from "./env.ts";
 import { getStoragePaths } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
 import type {
@@ -138,11 +139,14 @@ function getDefaultDirectives(): string {
     "- Keep tasks concrete, concise, and scoped to what this local system can actually do.",
     "- When the queue is empty, propose a brief medium/low priority self-improvement backlog for the orchestration system itself.",
     "- Agent identities are separate from devices. Devices are inference resources; agents are persistent working identities with their own specs and memory.",
+    "- Track model/runtime evidence so delegation and model-switching decisions are based on measured performance instead of guesswork.",
+    "- Prefer stable model assignments, but switch models when telemetry shows a clear gain in quality or throughput for the task.",
     "",
     ACTIVE_AUTO_DIRECTIVE_HEADING,
     "",
     "- In `/auto`, self-aware self-improvement is Erin's default operating stance whenever the user has not given a more urgent direct task.",
     "- Continuously review documentation, indexing, task logs, prompt guidance, delegation heuristics, queue hygiene, and memory quality for opportunities to improve the system.",
+    "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance.",
     "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance.",
     "- Prefer improvements that make future autonomous work more coherent, reliable, efficient, and easier to verify.",
     "- Never remain idle in `/auto`: if no task is queued, create the next best internal improvement task and continue."
@@ -154,14 +158,22 @@ function getDefaultRoadmap(): string {
     "# Roadmap",
     "",
     "- Stabilize the orchestrator queue and task delegation model.",
+    "- Add runtime telemetry, task analytics, and per-model performance history.",
     "- Improve agent identity creation, editing, and memory quality.",
-    "- Tighten structured outputs, indexing, and compaction quality.",
-    "- Add better internal validation before promoting ideas into the external system."
+    "- Add a dedicated data-analyst agent identity for metrics review and routing refinements.",
+    "- Tighten structured outputs, indexing, compaction quality, and validation before promotion.",
+    "- Build a richer terminal HUD and prepare a browser GUI with parity for observability and control."
   ].join("\n");
 }
 
 function getDefaultFocusTodo(): string {
-  return ["# In Focus Todo", "", "- No active tasks."].join("\n");
+  return [
+    "# In Focus Todo",
+    "",
+    "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
+    "- [medium] Design a data-analyst agent identity that distills metrics into routing refinements.",
+    "- [medium] Specify a terminal HUD and browser GUI parity plan."
+  ].join("\n");
 }
 
 function getDefaultChangelog(): string {
@@ -207,6 +219,7 @@ async function ensureDocumentContains(
 }
 
 export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void> {
+  loadLocalEnv(rootDir);
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.systemDir, { recursive: true });
   await mkdir(paths.secureDir, { recursive: true });
@@ -219,7 +232,7 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await writeIfMissing(paths.roadmapPath, getDefaultRoadmap());
   await writeIfMissing(paths.focusTodoPath, getDefaultFocusTodo());
   await writeIfMissing(paths.changelogPath, getDefaultChangelog());
-  await writeIfMissing(paths.deviceInventoryPath, renderResourceInventory());
+  await writeIfMissing(paths.deviceInventoryPath, renderResourceInventory(rootDir));
   await writeIfMissing(paths.agentWorkflowPath, getDefaultWorkflow());
   await writeIfMissing(
     paths.orchestratorMemoryIndexPath,
@@ -243,9 +256,39 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
       "- Never remain idle in `/auto`: if no task is queued, create the next best internal improvement task and continue."
     ].join("\n")
   );
+  await ensureDocumentContains(
+    paths.directivesPath,
+    "- Track model/runtime evidence so delegation and model-switching decisions are based on measured performance instead of guesswork.",
+    [
+      "## Telemetry And Model Policy",
+      "",
+      "- Track model/runtime evidence so delegation and model-switching decisions are based on measured performance instead of guesswork.",
+      "- Prefer stable model assignments, but switch models when telemetry shows a clear gain in quality or throughput for the task.",
+      "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance."
+    ].join("\n")
+  );
+  await ensureDocumentContains(
+    paths.roadmapPath,
+    "- Add runtime telemetry, task analytics, and per-model performance history.",
+    [
+      "- Add runtime telemetry, task analytics, and per-model performance history.",
+      "- Add a dedicated data-analyst agent identity for metrics review and routing refinements.",
+      "- Build a richer terminal HUD and prepare a browser GUI with parity for observability and control."
+    ].join("\n")
+  );
+  await ensureDocumentContains(
+    paths.focusTodoPath,
+    "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
+    [
+      "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
+      "- [medium] Design a data-analyst agent identity that distills metrics into routing refinements.",
+      "- [medium] Specify a terminal HUD and browser GUI parity plan."
+    ].join("\n")
+  );
 }
 
 export async function loadSystemState(rootDir = process.cwd()): Promise<SystemState> {
+  loadLocalEnv(rootDir);
   const paths = getStoragePaths(rootDir);
   await ensureSystemLayout(rootDir);
 
@@ -434,8 +477,8 @@ export function normalizeAgentSlug(name: string): string {
   return slug.replace(/^-+|-+$/g, "");
 }
 
-export function isValidPreferredResource(resource: string): boolean {
-  return resource === "auto" || getResourceAliases().includes(resource);
+export function isValidPreferredResource(resource: string, rootDir = process.cwd()): boolean {
+  return resource === "auto" || getResourceAliases(rootDir).includes(resource);
 }
 
 function buildAgentSpec(answers: AgentCreateAnswers): string {

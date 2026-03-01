@@ -501,7 +501,7 @@ export class CrustyApp {
   }
 
   private async clearApplicationState(): Promise<void> {
-    this.config = getDefaultConfig();
+    this.config = getDefaultConfig(this.rootDir);
     this.sessions = getEmptySessions();
     await clearSystemState(this.rootDir);
     this.systemState = await loadSystemState(this.rootDir);

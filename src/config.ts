@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
+import { getEnvBoolean, getEnvString, loadLocalEnv } from "./env.ts";
 import { getStoragePaths } from "./storage.ts";
 import type { AppConfig, EndpointConfig } from "./types.ts";
 import {
@@ -41,40 +42,56 @@ export function getDefaultInstruction(alias: string): string {
   }
 }
 
-function getDefaultEndpoints(): Record<string, EndpointConfig> {
+function getDefaultEndpointModel(alias: string): string {
+  switch (alias.toLowerCase()) {
+    case "erin":
+      return "llama3.1:8b";
+    case "zora":
+      return "llama3.1:8b";
+    case "sam":
+      return "llama3.2:1b";
+    case "pav":
+      return "llama3.2:1b";
+    default:
+      return "llama3.1:8b";
+  }
+}
+
+function getDefaultEndpointConfig(alias: string): EndpointConfig {
+  const upperAlias = alias.toUpperCase();
+
   return {
-    erin: {
-      baseUrl: "http://127.0.0.1:11434",
-      model: "llama3.1:8b",
-      instructions: getDefaultInstruction("erin"),
-      voicePreset: getDefaultVoicePreset("erin")
-    },
-    zora: {
-      baseUrl: "http://192.168.1.175:11434",
-      model: "llama3.1:latest",
-      instructions: getDefaultInstruction("zora"),
-      voicePreset: getDefaultVoicePreset("zora")
-    },
-    sam: {
-      baseUrl: "http://192.168.1.190:11434",
-      model: "llama3.2:1b",
-      instructions: getDefaultInstruction("sam"),
-      voicePreset: getDefaultVoicePreset("sam")
-    },
-    pav: {
-      baseUrl: "http://192.168.1.108:11434",
-      model: "llama3.2:1b",
-      instructions: getDefaultInstruction("pav"),
-      voicePreset: getDefaultVoicePreset("pav")
-    }
+    baseUrl: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_BASE_URL`, "http://127.0.0.1:11434"),
+    model: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_MODEL`, getDefaultEndpointModel(alias)),
+    instructions: getEnvString(
+      `CRUSTY_ENDPOINT_${upperAlias}_INSTRUCTIONS`,
+      getDefaultInstruction(alias)
+    ),
+    voicePreset: normalizeVoicePreset(
+      getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_VOICE`, getDefaultVoicePreset(alias)),
+      alias
+    )
   };
 }
 
-export function getDefaultConfig(): AppConfig {
+function getDefaultEndpoints(rootDir = process.cwd()): Record<string, EndpointConfig> {
+  loadLocalEnv(rootDir);
+
   return {
-    defaultEndpoint: "erin",
-    soundEnabled: true,
-    endpoints: getDefaultEndpoints()
+    erin: getDefaultEndpointConfig("erin"),
+    zora: getDefaultEndpointConfig("zora"),
+    sam: getDefaultEndpointConfig("sam"),
+    pav: getDefaultEndpointConfig("pav")
+  };
+}
+
+export function getDefaultConfig(rootDir = process.cwd()): AppConfig {
+  loadLocalEnv(rootDir);
+
+  return {
+    defaultEndpoint: getEnvString("CRUSTY_DEFAULT_ENDPOINT", "erin").toLowerCase(),
+    soundEnabled: getEnvBoolean("CRUSTY_SOUND_ENABLED", true),
+    endpoints: getDefaultEndpoints(rootDir)
   };
 }
 
@@ -214,6 +231,7 @@ export async function saveConfig(config: AppConfig, rootDir = process.cwd()): Pr
 }
 
 export async function loadConfig(rootDir = process.cwd()): Promise<AppConfig> {
+  loadLocalEnv(rootDir);
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
 
@@ -226,7 +244,7 @@ export async function loadConfig(rootDir = process.cwd()): Promise<AppConfig> {
     return normalized.config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      const config = getDefaultConfig();
+      const config = getDefaultConfig(rootDir);
       await saveConfig(config, rootDir);
       return config;
     }

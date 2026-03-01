@@ -1,3 +1,4 @@
+import { getEnvList, getEnvString, getOptionalEnvString, loadLocalEnv } from "./env.ts";
 import type { EndpointConfig } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
@@ -17,12 +18,14 @@ export interface ResourceProfile {
   notes: string[];
 }
 
-export const RESOURCE_PROFILES: Record<string, ResourceProfile> = {
+interface ResourceSeed extends ResourceProfile {}
+
+const RESOURCE_SEEDS: Record<string, ResourceSeed> = {
   air: {
     alias: "air",
     label: "Orchestrator / Hub",
     tier: "top",
-    baseUrl: "http://192.168.1.223:11434",
+    baseUrl: "http://127.0.0.1:11434",
     defaultModel: "llama3.1:8b",
     reasoningModel: "gpt-oss:20b",
     codingModel: "qwen3-coder:latest",
@@ -38,39 +41,39 @@ export const RESOURCE_PROFILES: Record<string, ResourceProfile> = {
       "embeddings"
     ],
     notes: [
-      "macOS 26.3 on Apple M4 with 32 GB RAM",
+      "Primary orchestration node; configure the real host and models with environment variables.",
       "Best default choice when task routing is ambiguous",
-      "Use qwen3-coder for patch-heavy work and gpt-oss for reasoning"
+      "Use the coding model for patch-heavy work and the reasoning model for verification"
     ]
   },
   vic: {
     alias: "vic",
     label: "Workhorse / GPU node",
     tier: "top",
-    baseUrl: "http://192.168.1.175:11434",
-    defaultModel: "llama3.1:latest",
+    baseUrl: "http://127.0.0.1:11434",
+    defaultModel: "llama3.1:8b",
     toolsModel: "gemma3:4b",
     embeddingModel: "nomic-embed-text:latest",
-    role: "GPU-backed generation workhorse for sustained drafting and heavier chat.",
+    role: "External generation workhorse for sustained drafting and heavier chat.",
     capabilities: ["chat", "drafting", "review", "parallel generation", "embeddings"],
     notes: [
-      "Windows 11 on i7-13700 with RTX 3060 12 GB",
-      "Good for heavier general generation without tying up air",
-      "Intended future landing zone for larger pulled models"
+      "Top-tier external node for sustained generation without tying up the orchestrator.",
+      "Good for heavier general generation and drafting",
+      "Tune concurrency with the benchmark scripts before raising queue pressure"
     ]
   },
   min: {
     alias: "min",
     label: "Lightweight / tools+embed node",
     tier: "mid",
-    baseUrl: "http://192.168.1.190:11434",
+    baseUrl: "http://127.0.0.1:11434",
     defaultModel: "llama3.2:1b",
     toolsModel: "qwen2.5:0.5b",
     embeddingModel: "granite-embedding:latest",
     role: "Cheap structured routing, lightweight indexing, and low-latency tool-shaped tasks.",
     capabilities: ["routing", "json", "classification", "light chat", "embeddings"],
     notes: [
-      "macOS 26.3 on Apple M2 with 8 GB RAM",
+      "Mid-tier helper for queue bookkeeping, indexing, and low-cost structured work.",
       "Best for low-cost structured outputs and queue/memory bookkeeping",
       "Keep prompts tight"
     ]
@@ -79,19 +82,69 @@ export const RESOURCE_PROFILES: Record<string, ResourceProfile> = {
     alias: "pav",
     label: "Legacy / constrained node",
     tier: "low",
-    baseUrl: "http://192.168.1.108:11434",
-    defaultModel: "llama3.2:latest",
+    baseUrl: "http://127.0.0.1:11434",
+    defaultModel: "llama3.2:3b",
     role: "Overflow capacity and alternate small-model perspective.",
     capabilities: ["small chat", "overflow", "alternate perspective"],
     notes: [
-      "Windows 10 with constrained C: drive and D: available",
+      "Low-tier overflow node for small-context isolated tasks.",
       "Not suitable for heavy inference",
       "Use sparingly for parallelism or simple alternate takes"
     ]
   }
 };
 
-function selectModel(profile: ResourceProfile, purpose: "default" | "reasoning" | "coding" | "tools"): string {
+function getTier(value: string | undefined, fallback: ResourceTier): ResourceTier {
+  if (value === "top" || value === "mid" || value === "low") {
+    return value;
+  }
+
+  return fallback;
+}
+
+function getResourceProfiles(rootDir = process.cwd()): Record<string, ResourceProfile> {
+  loadLocalEnv(rootDir);
+
+  return Object.fromEntries(
+    Object.entries(RESOURCE_SEEDS).map(([alias, seed]) => {
+      const prefix = `CRUSTY_RESOURCE_${alias.toUpperCase()}`;
+      const profile: ResourceProfile = {
+        alias: seed.alias,
+        label: getEnvString(`${prefix}_LABEL`, seed.label),
+        tier: getTier(getOptionalEnvString(`${prefix}_TIER`), seed.tier),
+        baseUrl: getEnvString(`${prefix}_BASE_URL`, seed.baseUrl),
+        defaultModel: getEnvString(`${prefix}_DEFAULT_MODEL`, seed.defaultModel),
+        role: getEnvString(`${prefix}_ROLE`, seed.role),
+        capabilities: getEnvList(`${prefix}_CAPABILITIES`, seed.capabilities),
+        notes: getEnvList(`${prefix}_NOTES`, seed.notes)
+      };
+
+      const reasoningModel = getOptionalEnvString(`${prefix}_REASONING_MODEL`, seed.reasoningModel);
+      const codingModel = getOptionalEnvString(`${prefix}_CODING_MODEL`, seed.codingModel);
+      const toolsModel = getOptionalEnvString(`${prefix}_TOOLS_MODEL`, seed.toolsModel);
+      const embeddingModel = getOptionalEnvString(
+        `${prefix}_EMBEDDING_MODEL`,
+        seed.embeddingModel
+      );
+
+      return [
+        alias,
+        {
+          ...profile,
+          ...(reasoningModel ? { reasoningModel } : {}),
+          ...(codingModel ? { codingModel } : {}),
+          ...(toolsModel ? { toolsModel } : {}),
+          ...(embeddingModel ? { embeddingModel } : {})
+        }
+      ];
+    })
+  );
+}
+
+function selectModel(
+  profile: ResourceProfile,
+  purpose: "default" | "reasoning" | "coding" | "tools"
+): string {
   if (purpose === "coding" && profile.codingModel) {
     return profile.codingModel;
   }
@@ -107,8 +160,8 @@ function selectModel(profile: ResourceProfile, purpose: "default" | "reasoning" 
   return profile.defaultModel;
 }
 
-export function getResourceProfile(alias: string): ResourceProfile {
-  const profile = RESOURCE_PROFILES[alias.toLowerCase()];
+export function getResourceProfile(alias: string, rootDir = process.cwd()): ResourceProfile {
+  const profile = getResourceProfiles(rootDir)[alias.toLowerCase()];
   if (!profile) {
     throw new Error(`Unknown resource "${alias}".`);
   }
@@ -117,9 +170,10 @@ export function getResourceProfile(alias: string): ResourceProfile {
 
 export function getResourceEndpoint(
   alias: string,
-  purpose: "default" | "reasoning" | "coding" | "tools" = "default"
+  purpose: "default" | "reasoning" | "coding" | "tools" = "default",
+  rootDir = process.cwd()
 ): EndpointConfig {
-  const profile = getResourceProfile(alias);
+  const profile = getResourceProfile(alias, rootDir);
 
   return {
     baseUrl: profile.baseUrl,
@@ -131,7 +185,8 @@ export function getResourceEndpoint(
 
 export function chooseResourceForTask(
   task: string,
-  preferredResource = "auto"
+  preferredResource = "auto",
+  rootDir = process.cwd()
 ): {
   alias: string;
   tier: ResourceTier;
@@ -141,7 +196,7 @@ export function chooseResourceForTask(
   const normalizedTask = task.toLowerCase();
 
   if (preferredResource !== "auto") {
-    const profile = getResourceProfile(preferredResource);
+    const profile = getResourceProfile(preferredResource, rootDir);
     return {
       alias: profile.alias,
       tier: profile.tier,
@@ -210,19 +265,23 @@ export function chooseResourceForTask(
   };
 }
 
-export function getResourceProfilesByTier(): Record<ResourceTier, ResourceProfile[]> {
+export function getResourceProfilesByTier(
+  rootDir = process.cwd()
+): Record<ResourceTier, ResourceProfile[]> {
+  const profiles = Object.values(getResourceProfiles(rootDir));
+
   return {
-    top: Object.values(RESOURCE_PROFILES).filter((profile) => profile.tier === "top"),
-    mid: Object.values(RESOURCE_PROFILES).filter((profile) => profile.tier === "mid"),
-    low: Object.values(RESOURCE_PROFILES).filter((profile) => profile.tier === "low")
+    top: profiles.filter((profile) => profile.tier === "top"),
+    mid: profiles.filter((profile) => profile.tier === "mid"),
+    low: profiles.filter((profile) => profile.tier === "low")
   };
 }
 
-export function renderResourceInventory(): string {
+export function renderResourceInventory(rootDir = process.cwd()): string {
   return [
     "# Device Inventory",
     "",
-    ...Object.values(RESOURCE_PROFILES).flatMap((profile) => [
+    ...Object.values(getResourceProfiles(rootDir)).flatMap((profile) => [
       `## ${profile.alias} (${profile.label})`,
       `- Tier: ${profile.tier}`,
       `- Base URL: ${profile.baseUrl}`,
@@ -239,6 +298,6 @@ export function renderResourceInventory(): string {
   ].join("\n");
 }
 
-export function getResourceAliases(): string[] {
-  return Object.keys(RESOURCE_PROFILES);
+export function getResourceAliases(rootDir = process.cwd()): string[] {
+  return Object.keys(getResourceProfiles(rootDir));
 }
