@@ -11,17 +11,21 @@
 
 1. Clone the repo and run `npm install`.
 2. On the best local device, run `npm run setup:crusty`. This primary device becomes the local agent orchestrator.
-3. Start Crusty with `npm run start`.
-4. Open the printed `Local UI` link or stay in the CLI.
+   - the setup flow prompts for the agent-orchestrator name
+   - when you rerun setup later, that prompt is prefilled from the existing local configuration
+   - after configuration, Crusty starts automatically in the same terminal unless you pass `--no-start`
+3. Open the printed `Local UI` link or stay in the CLI.
 5. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
    - `node scripts/setup-agent.js`
    - the Crusty setup output shows the full primary-device IP to remember
    - the script will prompt for `Orchestrator IP:` and prefill the first three IP numbers from the local network when available
    - confirm or enter the final number of the orchestrator IP before continuing
    - it immediately tests `http://<orchestrator-ip>:4310/api/health` before continuing
-   - it then prompts for a device nickname used in the orchestrator resource listing
+   - it then prompts for a device nickname used in the orchestrator resource listing and reuses the prior local nickname when available
    - it prints a verified configuration summary before syncing
    - re-running it on the same device replaces the prior synced listing for that device instead of creating duplicates
+   - for local agent endpoints, the script keeps running as a local monitor by default; use `--once` to skip the persistent monitor
+   - that monitor exposes a narrow LAN gateway for the orchestrator and limits access to the configured orchestrator IP instead of requiring broad LAN exposure of the local inference service
    - for OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync
    - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`
    - or use the `Resources` section in `/ui`

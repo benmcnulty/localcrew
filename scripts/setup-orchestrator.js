@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { cpus, hostname, networkInterfaces, platform, totalmem } from "node:os";
+import { createInterface } from "node:readline";
+import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
 
 function trimTrailingSlash(value) {
@@ -66,7 +69,8 @@ function getStoragePaths(rootDir) {
   const storageDir = join(rootDir, ".crusty");
   return {
     storageDir,
-    resourcesPath: join(storageDir, "resources.json")
+    resourcesPath: join(storageDir, "resources.json"),
+    configPath: join(storageDir, "config.json")
   };
 }
 
@@ -159,12 +163,14 @@ function parseArgs(argv) {
   let apiStyle = "ollama";
   let apiKeyEnv;
   let name = "Orchestrator";
+  let nameProvided = false;
   let alias = "orchestrator";
   let label = "Local Orchestrator";
   let tier = "top";
   let bindHost = "0.0.0.0";
   let publicHost = detectedIp;
   let apiPort = 4310;
+  let noStart = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -196,6 +202,7 @@ function parseArgs(argv) {
     }
     if (arg === "--name" && next) {
       name = next;
+      nameProvided = true;
       index += 1;
       continue;
     }
@@ -231,6 +238,11 @@ function parseArgs(argv) {
       }
       apiPort = parsed;
       index += 1;
+      continue;
+    }
+    if (arg === "--no-start") {
+      noStart = true;
+      continue;
     }
   }
 
@@ -240,12 +252,165 @@ function parseArgs(argv) {
     apiStyle,
     apiKeyEnv,
     name,
+    nameProvided,
     alias,
     label,
     tier,
     bindHost,
     publicHost,
-    apiPort
+    apiPort,
+    noStart
+  };
+}
+
+function parseEnvAssignments(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .reduce((accumulator, line) => {
+      const separator = line.indexOf("=");
+      if (separator <= 0) {
+        return accumulator;
+      }
+
+      const key = line.slice(0, separator).trim();
+      const value = line.slice(separator + 1).trim();
+      if (key !== "") {
+        accumulator[key] = value;
+      }
+      return accumulator;
+    }, {});
+}
+
+async function loadExistingPrimaryResource(rootDir, machine) {
+  const paths = getStoragePaths(rootDir);
+  if (!existsSync(paths.resourcesPath)) {
+    return undefined;
+  }
+
+  try {
+    const rawResources = await readFile(paths.resourcesPath, "utf8");
+    const parsedResources = JSON.parse(rawResources);
+    const resources =
+      parsedResources && typeof parsedResources.resources === "object"
+        ? Object.values(parsedResources.resources)
+        : [];
+
+    const deviceId = getDeviceId(machine);
+    return resources.find((resource) => {
+      if (!resource || typeof resource !== "object") {
+        return false;
+      }
+
+      if (typeof resource.deviceId === "string" && resource.deviceId === deviceId) {
+        return true;
+      }
+
+      return resource.hostName === machine.hostName && resource.platform === machine.platform;
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadExistingOrchestratorName(rootDir) {
+  const paths = getStoragePaths(rootDir);
+
+  if (existsSync(paths.configPath)) {
+    try {
+      const rawConfig = await readFile(paths.configPath, "utf8");
+      const parsedConfig = JSON.parse(rawConfig);
+      if (
+        parsedConfig &&
+        typeof parsedConfig === "object" &&
+        typeof parsedConfig.orchestratorName === "string" &&
+        parsedConfig.orchestratorName.trim() !== ""
+      ) {
+        return parsedConfig.orchestratorName.trim();
+      }
+    } catch {
+      // Fall through to env-backed defaults.
+    }
+  }
+
+  const envPath = join(rootDir, ".env.local");
+  if (!existsSync(envPath)) {
+    return undefined;
+  }
+
+  try {
+    const rawEnv = await readFile(envPath, "utf8");
+    const match = rawEnv.match(
+      /# >>> crusty orchestrator setup >>>([\s\S]*?)# <<< crusty orchestrator setup <<</
+    );
+    const assignments = parseEnvAssignments(match ? match[1] : rawEnv);
+    const configuredName = assignments.CRUSTY_ORCHESTRATOR_NAME;
+    return typeof configuredName === "string" && configuredName.trim() !== ""
+      ? configuredName.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function promptWithPrefill(promptText, initialValue = "") {
+  return new Promise((resolvePrompt) => {
+    const readline = createInterface({ input, output });
+    readline.setPrompt(promptText);
+    readline.prompt();
+    if (initialValue) {
+      readline.write(initialValue);
+    }
+    readline.on("line", (line) => {
+      readline.close();
+      resolvePrompt(line.trim());
+    });
+  });
+}
+
+async function resolveSetupOptions(setup) {
+  const machine = detectLocalMachineProfile();
+  const existingResource = await loadExistingPrimaryResource(setup.rootDir, machine);
+  const existingName = await loadExistingOrchestratorName(setup.rootDir);
+  const initialName = setup.nameProvided ? setup.name : existingName ?? setup.name;
+  const nextSetup = {
+    ...setup,
+    alias:
+      setup.alias !== "orchestrator"
+        ? setup.alias
+        : existingResource && typeof existingResource.alias === "string" && existingResource.alias.trim() !== ""
+          ? existingResource.alias.trim().toLowerCase()
+          : setup.alias,
+    label:
+      setup.label !== "Local Orchestrator"
+        ? setup.label
+        : existingResource && typeof existingResource.label === "string" && existingResource.label.trim() !== ""
+          ? existingResource.label.trim()
+          : setup.label,
+    tier:
+      setup.tier !== "top"
+        ? setup.tier
+        : existingResource && (existingResource.tier === "top" || existingResource.tier === "mid" || existingResource.tier === "low")
+          ? existingResource.tier
+          : setup.tier
+  };
+
+  if (!input.isTTY || !output.isTTY) {
+    return {
+      ...nextSetup,
+      name: initialName
+    };
+  }
+
+  console.log(
+    "Name this primary device. This is the agent orchestrator profile shown in the CLI, Local UI, and future remote views."
+  );
+  const promptedName = await promptWithPrefill("Agent orchestrator name: ", initialName);
+
+  return {
+    ...nextSetup,
+    name: promptedName || initialName
   };
 }
 
@@ -339,8 +504,64 @@ async function saveResources(resources, rootDir) {
   await writeFile(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`, "utf8");
 }
 
+async function syncExistingConfigName(rootDir, name) {
+  const paths = getStoragePaths(rootDir);
+  if (!existsSync(paths.configPath)) {
+    return;
+  }
+
+  try {
+    const rawConfig = await readFile(paths.configPath, "utf8");
+    const parsedConfig = JSON.parse(rawConfig);
+    if (!parsedConfig || typeof parsedConfig !== "object") {
+      return;
+    }
+
+    const nextConfig = {
+      ...parsedConfig,
+      orchestratorName: name
+    };
+    await writeFile(paths.configPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+  } catch {
+    // Leave existing config untouched if it cannot be parsed safely here.
+  }
+}
+
+async function startCrustyProcess(rootDir) {
+  const command = process.platform === "win32" ? "npm.cmd" : "npm";
+
+  await new Promise((resolveStart, rejectStart) => {
+    const child = spawn(command, ["run", "start"], {
+      cwd: rootDir,
+      stdio: "inherit"
+    });
+
+    child.on("error", rejectStart);
+    child.on("exit", (code) => {
+      if (typeof code === "number" && code !== 0) {
+        rejectStart(new Error(`npm run start exited with code ${code}.`));
+        return;
+      }
+      resolveStart(undefined);
+    });
+  });
+}
+
 async function syncResourceInventory({ setup, machine, discovered }) {
   const resources = await loadResources(setup.rootDir);
+  const deviceId = getDeviceId(machine);
+  for (const [alias, resource] of Object.entries(resources)) {
+    if (!resource || typeof resource !== "object" || alias === setup.alias) {
+      continue;
+    }
+
+    if (
+      (typeof resource.deviceId === "string" && resource.deviceId === deviceId) ||
+      (resource.hostName === machine.hostName && resource.platform === machine.platform)
+    ) {
+      delete resources[alias];
+    }
+  }
   resources[setup.alias] = {
     alias: setup.alias,
     label: setup.label,
@@ -348,7 +569,7 @@ async function syncResourceInventory({ setup, machine, discovered }) {
     baseUrl: setup.endpointUrl,
     apiStyle: setup.apiStyle,
     ...(setup.apiKeyEnv ? { apiKeyEnv: setup.apiKeyEnv } : {}),
-    deviceId: getDeviceId(machine),
+    deviceId,
     hostName: machine.hostName,
     platform: machine.platform,
     cpuLogicalCores: machine.cpuLogicalCores,
@@ -381,7 +602,8 @@ async function syncResourceInventory({ setup, machine, discovered }) {
 }
 
 async function main() {
-  const setup = parseArgs(process.argv.slice(2));
+  const parsedSetup = parseArgs(process.argv.slice(2));
+  const setup = await resolveSetupOptions(parsedSetup);
   const machine = detectLocalMachineProfile();
   const discovered = await probeResourceModels(
     setup.endpointUrl,
@@ -401,6 +623,7 @@ async function main() {
     machine,
     discovered
   });
+  await syncExistingConfigName(setup.rootDir, setup.name);
 
   const localUiUrl = `http://127.0.0.1:${setup.apiPort}/ui`;
   const lanUiUrl =
@@ -440,8 +663,13 @@ async function main() {
   }
   console.log("");
   console.log("Next steps:");
-  console.log("1. Start Crusty with: npm run start");
-  console.log("2. Open the Local UI link above after startup.");
+  if (setup.noStart) {
+    console.log("1. Start Crusty with: npm run start");
+    console.log("2. Open the Local UI link above after startup.");
+  } else {
+    console.log("1. Crusty will start now in this terminal.");
+    console.log("2. Open the Local UI link above after startup.");
+  }
   console.log("3. Remember this orchestrator address for agent setup:");
   console.log(`   ${setup.publicHost ?? machine.localIp ?? "the LAN IP shown above"}`);
   console.log("4. On the next agent device, run: node scripts/setup-agent.js");
@@ -462,6 +690,12 @@ async function main() {
     );
   }
   console.log("5. Review and refresh agent resources later with /resource refresh <alias> when models change.");
+
+  if (!setup.noStart) {
+    console.log("");
+    console.log("Starting Crusty now: npm run start");
+    await startCrustyProcess(setup.rootDir);
+  }
 }
 
 main().catch((error) => {

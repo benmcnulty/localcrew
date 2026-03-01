@@ -1,4 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, createWriteStream } from "node:fs";
+import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
@@ -66,8 +69,35 @@ function getStoragePaths(rootDir) {
   return {
     storageDir,
     identityDir,
-    deviceIdPath: join(identityDir, "agent-device-id")
+    deviceIdPath: join(identityDir, "agent-device-id"),
+    persistentReportPath: join(identityDir, "agent-setup-report.json"),
+    monitorStatePath: join(identityDir, "agent-monitor-state.json"),
+    monitorLogPath: join(identityDir, "agent-monitor.log")
   };
+}
+
+function getLoopbackHosts() {
+  return new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+}
+
+function normalizeRemoteAddress(value) {
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("::ffff:") ? value.slice("::ffff:".length) : value;
+}
+
+function getPlatformFirewallGuidance(platformName, port, allowedHost) {
+  if (platformName === "darwin") {
+    return `If the orchestrator cannot reach this agent gateway on port ${port}, allow Node or Terminal in macOS Firewall and keep access limited to your private network. Expected orchestrator host: ${allowedHost}.`;
+  }
+
+  if (platformName === "win32") {
+    return `If the orchestrator cannot reach this agent gateway on port ${port}, allow node.exe through Windows Defender Firewall on Private networks only and restrict access to ${allowedHost}.`;
+  }
+
+  return `If the orchestrator cannot reach this agent gateway on port ${port}, allow TCP ${port} from ${allowedHost} only in your local firewall (for example with ufw or firewalld).`;
 }
 
 function getAuthHeaders(apiStyle, apiKeyEnv) {
@@ -202,6 +232,8 @@ function parseArgs(argv) {
   let tier;
   let orchestratorUrl;
   let apiKeyEnv;
+  let agentPort;
+  let once = false;
   let gpuModel;
   let gpuCount;
   let totalVramGb;
@@ -235,6 +267,11 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--agent-port" && next) {
+      agentPort = Number(next);
+      index += 1;
+      continue;
+    }
     if (arg === "--alias" && next) {
       alias = normalizeAlias(next);
       index += 1;
@@ -253,6 +290,10 @@ function parseArgs(argv) {
     if (arg === "--orchestrator" && next) {
       orchestratorUrl = next;
       index += 1;
+      continue;
+    }
+    if (arg === "--once") {
+      once = true;
       continue;
     }
     if (arg === "--gpu-model" && next) {
@@ -281,6 +322,7 @@ function parseArgs(argv) {
     endpointUrl,
     apiStyle,
     apiKeyEnv,
+    agentPort,
     alias,
     nickname,
     tier,
@@ -288,7 +330,8 @@ function parseArgs(argv) {
     gpuModel,
     gpuCount,
     totalVramGb,
-    maxContextTokens
+    maxContextTokens,
+    once
   };
 }
 
@@ -307,11 +350,74 @@ function promptWithPrefill(promptText, initialValue = "") {
   });
 }
 
-async function promptForSetup(options, machine) {
+async function readExistingAgentReport(rootDir) {
+  const paths = getStoragePaths(rootDir);
+  const candidates = [paths.persistentReportPath, join(paths.storageDir, "agent-setup-report.json")];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      const raw = await readFile(candidate, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // Ignore unreadable prior reports and continue.
+    }
+  }
+
+  return undefined;
+}
+
+function getGatewayPort(options, existingReport) {
+  if (typeof options.agentPort === "number" && Number.isFinite(options.agentPort)) {
+    return options.agentPort;
+  }
+
+  if (
+    existingReport &&
+    typeof existingReport.gatewayPort === "number" &&
+    Number.isFinite(existingReport.gatewayPort)
+  ) {
+    return existingReport.gatewayPort;
+  }
+
+  return 4311;
+}
+
+function getAdvertisedBaseUrl(machine, gatewayPort, localEndpoint) {
+  if (!machine.localIp) {
+    return trimTrailingSlash(localEndpoint);
+  }
+
+  return `http://${machine.localIp}:${gatewayPort}`;
+}
+
+function getPromptSeedOrchestratorIp(existingReport, machine) {
+  if (existingReport && typeof existingReport.orchestratorUrl === "string") {
+    try {
+      return new URL(existingReport.orchestratorUrl).hostname;
+    } catch {
+      // Fall through to subnet prefix.
+    }
+  }
+
+  return parseSubnetPrefix(machine.localIp);
+}
+
+async function promptForSetup(options, machine, existingReport) {
   let nickname = options.nickname;
 
   if (!nickname && input.isTTY && output.isTTY) {
-    nickname = await promptWithPrefill("Nickname: ", titleCase(machine.hostName));
+    const initialNickname =
+      existingReport && typeof existingReport.label === "string" && existingReport.label.trim() !== ""
+        ? existingReport.label.trim()
+        : titleCase(machine.hostName);
+    nickname = await promptWithPrefill("Nickname: ", initialNickname);
   }
 
   return {
@@ -340,11 +446,12 @@ async function verifyOrchestratorConnection(orchestratorUrl) {
   return {
     baseUrl: trimmedBase,
     healthUrl,
-    statusUrl
+    statusUrl,
+    orchestratorHost: new URL(trimmedBase).hostname
   };
 }
 
-async function resolveVerifiedOrchestratorUrl(initialUrl, machine) {
+async function resolveVerifiedOrchestratorUrl(initialUrl, machine, existingReport) {
   if (initialUrl) {
     return {
       orchestratorUrl: initialUrl,
@@ -359,18 +466,18 @@ async function resolveVerifiedOrchestratorUrl(initialUrl, machine) {
     };
   }
 
-  const subnetPrefix = parseSubnetPrefix(machine.localIp);
+  const promptSeed = getPromptSeedOrchestratorIp(existingReport, machine);
   while (true) {
-    if (subnetPrefix) {
+    if (promptSeed.includes(".")) {
       console.log(
-        `Enter the orchestrator IP. This prompt starts with ${subnetPrefix}; confirm or edit the final number.`
+        `Enter the orchestrator IP. This prompt starts with ${promptSeed}; confirm or edit the final number.`
       );
     } else {
       console.log(
         "Enter the full orchestrator IP address shown during orchestrator setup before continuing."
       );
     }
-    const orchestratorIp = await promptWithPrefill("Orchestrator IP: ", subnetPrefix);
+    const orchestratorIp = await promptWithPrefill("Orchestrator IP: ", promptSeed);
     if (!orchestratorIp) {
       return {
         orchestratorUrl: undefined,
@@ -397,8 +504,11 @@ async function resolveVerifiedOrchestratorUrl(initialUrl, machine) {
 async function writeLocalReport(rootDir, report) {
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
+  await mkdir(paths.identityDir, { recursive: true });
   const reportPath = join(paths.storageDir, "agent-setup-report.json");
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const payload = `${JSON.stringify(report, null, 2)}\n`;
+  await writeFile(reportPath, payload, "utf8");
+  await writeFile(paths.persistentReportPath, payload, "utf8");
   return reportPath;
 }
 
@@ -449,25 +559,326 @@ async function syncToOrchestrator(orchestratorUrl, report) {
   return payload.result?.lines?.join(" ") ?? "Resource sync complete.";
 }
 
+async function writeMonitorState(rootDir, state) {
+  const paths = getStoragePaths(rootDir);
+  await mkdir(paths.identityDir, { recursive: true });
+  await writeFile(paths.monitorStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+async function logMonitorLine(rootDir, line) {
+  const paths = getStoragePaths(rootDir);
+  await mkdir(paths.identityDir, { recursive: true });
+  const nextLine = `[${new Date().toISOString()}] ${line}\n`;
+  await appendFile(paths.monitorLogPath, nextLine, "utf8");
+  console.log(nextLine.trimEnd());
+}
+
+async function collectRequestBody(request) {
+  return await new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    request.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    request.on("end", () => {
+      resolveBody(chunks.length > 0 ? Buffer.concat(chunks) : undefined);
+    });
+    request.on("error", rejectBody);
+  });
+}
+
+function getProxyHeaders(requestHeaders, apiStyle, apiKeyEnv) {
+  const headers = {};
+  const contentType = requestHeaders["content-type"];
+  if (typeof contentType === "string" && contentType.trim() !== "") {
+    headers["content-type"] = contentType;
+  }
+
+  return {
+    ...headers,
+    ...getAuthHeaders(apiStyle, apiKeyEnv)
+  };
+}
+
+function isAllowedProxyPath(pathname, apiStyle) {
+  const ollamaPaths = new Set([
+    "/api/version",
+    "/api/tags",
+    "/api/chat",
+    "/api/ps",
+    "/api/show",
+    "/api/pull",
+    "/api/delete"
+  ]);
+  const openAiPaths = new Set(["/v1/models", "/v1/chat/completions"]);
+  const anthropicPaths = new Set(["/v1/models", "/v1/messages"]);
+
+  if (apiStyle === "ollama") {
+    return ollamaPaths.has(pathname);
+  }
+
+  if (apiStyle === "anthropic") {
+    return anthropicPaths.has(pathname);
+  }
+
+  return openAiPaths.has(pathname);
+}
+
+async function startAgentGateway(context) {
+  const { rootDir, localEndpoint, apiStyle, apiKeyEnv, machine, allowedHost, gatewayPort } = context;
+
+  const server = createServer(async (request, response) => {
+    const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress);
+    const allowedRemoteHosts = new Set([
+      allowedHost,
+      machine.localIp ?? "",
+      ...getLoopbackHosts()
+    ]);
+
+    if (!allowedRemoteHosts.has(remoteAddress)) {
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: `Access denied for ${remoteAddress || "unknown remote host"}. This agent gateway only accepts the configured orchestrator host.`
+        })
+      );
+      return;
+    }
+
+    const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (!isAllowedProxyPath(requestUrl.pathname, apiStyle)) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: `Unsupported agent gateway path ${requestUrl.pathname}.` }));
+      return;
+    }
+
+    try {
+      const body = await collectRequestBody(request);
+      const targetUrl = `${trimTrailingSlash(localEndpoint)}${requestUrl.pathname}${requestUrl.search}`;
+      const proxied = await fetch(targetUrl, {
+        method: request.method,
+        headers: getProxyHeaders(request.headers, apiStyle, apiKeyEnv),
+        body
+      });
+      const responseBody = Buffer.from(await proxied.arrayBuffer());
+      const responseContentType = proxied.headers.get("content-type") ?? "application/json";
+      response.writeHead(proxied.status, { "content-type": responseContentType });
+      response.end(responseBody);
+    } catch (error) {
+      await logMonitorLine(rootDir, `Gateway proxy error: ${error.message}`);
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: `Agent gateway proxy failed: ${error.message}` }));
+    }
+  });
+
+  let boundPort;
+  let lastError;
+  for (let candidatePort = gatewayPort; candidatePort < gatewayPort + 5; candidatePort += 1) {
+    try {
+      boundPort = await new Promise((resolvePort, rejectPort) => {
+        const handleError = (error) => {
+          server.off("listening", handleListening);
+          rejectPort(error);
+        };
+        const handleListening = () => {
+          server.off("error", handleError);
+          const address = server.address();
+          if (!address || typeof address === "string") {
+            rejectPort(new Error("Agent gateway did not return a numeric listen port."));
+            return;
+          }
+          resolvePort(address.port);
+        };
+
+        server.once("error", handleError);
+        server.once("listening", handleListening);
+        server.listen(candidatePort, "0.0.0.0");
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      if (server.listening) {
+        await new Promise((resolveClose) => server.close(resolveClose));
+      }
+      if (error?.code !== "EADDRINUSE") {
+        break;
+      }
+    }
+  }
+
+  if (typeof boundPort !== "number") {
+    throw new Error(
+      `Unable to start the agent gateway. ${lastError?.message ?? "Unknown listen error."} ${getPlatformFirewallGuidance(machine.platform, gatewayPort, allowedHost)}`
+    );
+  }
+
+  await logMonitorLine(
+    rootDir,
+    `Agent gateway listening on http://${machine.localIp ?? "127.0.0.1"}:${boundPort} and restricted to ${allowedHost}.`
+  );
+  await logMonitorLine(rootDir, getPlatformFirewallGuidance(machine.platform, boundPort, allowedHost));
+  return {
+    server,
+    port: boundPort
+  };
+}
+
+async function isEndpointHealthy(baseUrl, apiStyle, apiKeyEnv) {
+  try {
+    if (apiStyle === "ollama") {
+      const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/version`);
+      return response.ok;
+    }
+
+    const headers = getAuthHeaders(apiStyle, apiKeyEnv);
+    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`, { headers });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function startOllamaServe(rootDir) {
+  const command = process.platform === "win32" ? "ollama.exe" : "ollama";
+  const child = spawn(command, ["serve"], {
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const paths = getStoragePaths(rootDir);
+  const logStream = createWriteStream(paths.monitorLogPath, {
+    flags: "a"
+  });
+  const prefix = `[${new Date().toISOString()}] [ollama-serve]`;
+
+  child.stdout?.on("data", (chunk) => {
+    const text = chunk.toString();
+    logStream.write(`${prefix} ${text}`);
+  });
+  child.stderr?.on("data", (chunk) => {
+    const text = chunk.toString();
+    logStream.write(`${prefix} ${text}`);
+  });
+  child.on("close", () => {
+    logStream.end();
+  });
+
+  return child;
+}
+
+async function runAgentMonitor(context) {
+  const {
+    rootDir,
+    localEndpoint,
+    apiStyle,
+    apiKeyEnv,
+    orchestratorUrl,
+    buildReport,
+    machine,
+    gatewayPort,
+    allowedHost
+  } = context;
+  let localServerProcess;
+  let lastSyncSignature = "";
+  let lastSyncAt = 0;
+  const gateway = await startAgentGateway({
+    rootDir,
+    localEndpoint,
+    apiStyle,
+    apiKeyEnv,
+    machine,
+    allowedHost,
+    gatewayPort
+  });
+
+  await logMonitorLine(
+    rootDir,
+    apiStyle === "ollama"
+      ? "Agent monitor active. Watching local Ollama health, model changes, and orchestrator sync."
+      : "Agent monitor active. Watching endpoint health, model changes, and orchestrator sync."
+  );
+
+  while (true) {
+    const healthy = await isEndpointHealthy(localEndpoint, apiStyle, apiKeyEnv);
+    const nextState = {
+      updatedAt: new Date().toISOString(),
+      apiStyle,
+      localEndpoint,
+      gatewayUrl: `http://${machine.localIp ?? "127.0.0.1"}:${gateway.port}`,
+      allowedHost,
+      healthy,
+      childPid: localServerProcess?.pid ?? null,
+      orchestratorUrl: orchestratorUrl ?? null,
+      lastSyncAt: lastSyncAt > 0 ? new Date(lastSyncAt).toISOString() : null
+    };
+
+    if (!healthy && apiStyle === "ollama" && !localServerProcess) {
+      try {
+        await logMonitorLine(rootDir, `Local Ollama is not responding at ${localEndpoint}; starting \`ollama serve\`.`);
+        localServerProcess = startOllamaServe(rootDir);
+      } catch (error) {
+        await logMonitorLine(rootDir, `Failed to start local Ollama: ${error.message}`);
+      }
+    }
+
+    if (localServerProcess && localServerProcess.exitCode !== null) {
+      await logMonitorLine(rootDir, `Local Ollama monitor process exited with code ${localServerProcess.exitCode}.`);
+      localServerProcess = undefined;
+    }
+
+    if (healthy && orchestratorUrl) {
+      try {
+        const discovered = await probeResourceModels(localEndpoint, apiStyle, apiKeyEnv);
+        const report = await buildReport(discovered);
+        const signature = JSON.stringify({
+          alias: report.alias,
+          baseUrl: report.baseUrl,
+          models: report.availableModels
+        });
+        if (signature !== lastSyncSignature || Date.now() - lastSyncAt > 5 * 60 * 1000) {
+          const syncSummary = await syncToOrchestrator(orchestratorUrl, report);
+          lastSyncSignature = signature;
+          lastSyncAt = Date.now();
+          await logMonitorLine(rootDir, `Monitor sync: ${syncSummary}`);
+        }
+      } catch (error) {
+        await logMonitorLine(rootDir, `Monitor sync failed: ${error.message}`);
+      }
+    }
+
+    await writeMonitorState(rootDir, nextState);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 15000));
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const machine = detectLocalMachineProfile();
-  const verifiedOrchestrator = await resolveVerifiedOrchestratorUrl(options.orchestratorUrl, machine);
-  const prompted = await promptForSetup(options, machine);
+  const existingReport = await readExistingAgentReport(options.rootDir);
+  const verifiedOrchestrator = await resolveVerifiedOrchestratorUrl(
+    options.orchestratorUrl,
+    machine,
+    existingReport
+  );
+  const prompted = await promptForSetup(options, machine, existingReport);
+  const localEndpoint = trimTrailingSlash(options.endpointUrl);
+  const gatewayPort = getGatewayPort(options, existingReport);
+  const advertisedBaseUrl = getAdvertisedBaseUrl(machine, gatewayPort, localEndpoint);
   const discovered = await probeResourceModels(
-    options.endpointUrl,
+    localEndpoint,
     options.apiStyle,
     options.apiKeyEnv
   );
   const nickname = prompted.nickname || titleCase(machine.hostName);
-  const alias = options.alias ?? normalizeAlias(machine.hostName);
+  const alias =
+    options.alias ??
+    (existingReport && typeof existingReport.alias === "string" && existingReport.alias.trim() !== ""
+      ? normalizeAlias(existingReport.alias)
+      : normalizeAlias(machine.hostName));
   const tier = options.tier ?? autoTier(machine);
   const deviceId = await getStableDeviceId(options.rootDir, machine);
 
-  const report = {
+  const buildReport = async (latestDiscovered = discovered) => ({
     alias,
     label: nickname,
-    baseUrl: options.endpointUrl,
+    baseUrl: advertisedBaseUrl,
     apiStyle: options.apiStyle,
     ...(options.apiKeyEnv ? { apiKeyEnv: options.apiKeyEnv } : {}),
     deviceId,
@@ -486,25 +897,31 @@ async function main() {
     ...(typeof options.maxContextTokens === "number" && Number.isFinite(options.maxContextTokens)
       ? { maxContextTokens: options.maxContextTokens }
       : {}),
-    ...(discovered.defaultModel ? { defaultModel: discovered.defaultModel } : {}),
-    ...(discovered.reasoningModel ? { reasoningModel: discovered.reasoningModel } : {}),
-    ...(discovered.codingModel ? { codingModel: discovered.codingModel } : {}),
-    ...(discovered.toolsModel ? { toolsModel: discovered.toolsModel } : {}),
-    ...(discovered.embeddingModel ? { embeddingModel: discovered.embeddingModel } : {}),
-    availableModels: discovered.availableModels,
-    ...(discovered.endpointVersion ? { endpointVersion: discovered.endpointVersion } : {}),
+    ...(latestDiscovered.defaultModel ? { defaultModel: latestDiscovered.defaultModel } : {}),
+    ...(latestDiscovered.reasoningModel ? { reasoningModel: latestDiscovered.reasoningModel } : {}),
+    ...(latestDiscovered.codingModel ? { codingModel: latestDiscovered.codingModel } : {}),
+    ...(latestDiscovered.toolsModel ? { toolsModel: latestDiscovered.toolsModel } : {}),
+    ...(latestDiscovered.embeddingModel ? { embeddingModel: latestDiscovered.embeddingModel } : {}),
+    availableModels: latestDiscovered.availableModels,
+    ...(latestDiscovered.endpointVersion ? { endpointVersion: latestDiscovered.endpointVersion } : {}),
+    gatewayPort,
     capabilities: [
       "chat",
-      ...(discovered.reasoningModel ? ["reasoning"] : []),
-      ...(discovered.codingModel ? ["code generation"] : []),
-      ...(discovered.toolsModel ? ["structured output"] : []),
-      ...(discovered.embeddingModel ? ["embeddings"] : [])
+      ...(latestDiscovered.reasoningModel ? ["reasoning"] : []),
+      ...(latestDiscovered.codingModel ? ["code generation"] : []),
+      ...(latestDiscovered.toolsModel ? ["structured output"] : []),
+      ...(latestDiscovered.embeddingModel ? ["embeddings"] : [])
     ],
     notes: [
       "Synced from setup-agent.",
       "Refresh this agent later if models or endpoint settings change."
-    ]
-  };
+    ],
+    localEndpoint,
+    ...(verifiedOrchestrator.orchestratorUrl
+      ? { orchestratorUrl: verifiedOrchestrator.orchestratorUrl }
+      : {})
+  });
+  const report = await buildReport();
 
   const reportPath = await writeLocalReport(options.rootDir, report);
 
@@ -514,7 +931,8 @@ async function main() {
   console.log(`Device nickname: ${nickname}`);
   console.log(`Agent alias: @${alias}`);
   console.log(`Device ID: ${deviceId}`);
-  console.log(`Local endpoint: ${options.endpointUrl}`);
+  console.log(`Local endpoint: ${localEndpoint}`);
+  console.log(`Advertised endpoint: ${advertisedBaseUrl}`);
   console.log(`Detected host name: ${machine.hostName}`);
   if (machine.localIp) {
     console.log(`Detected LAN IP: ${machine.localIp}`);
@@ -537,7 +955,8 @@ async function main() {
   console.log(`- Device nickname: ${nickname}`);
   console.log(`- Agent alias: @${alias}`);
   console.log(`- Device ID: ${deviceId}`);
-  console.log(`- Local endpoint: ${options.endpointUrl}`);
+  console.log(`- Local endpoint: ${localEndpoint}`);
+  console.log(`- Advertised endpoint: ${advertisedBaseUrl}`);
   console.log(`- API style: ${options.apiStyle}`);
   if (options.apiKeyEnv) {
     console.log(`- API key env: ${options.apiKeyEnv}`);
@@ -547,6 +966,7 @@ async function main() {
     console.log(`- Orchestrator: ${verifiedOrchestrator.verification.baseUrl}`);
     console.log(`- Orchestrator health: ${verifiedOrchestrator.verification.healthUrl}`);
     console.log(`- Orchestrator status: ${verifiedOrchestrator.verification.statusUrl}`);
+    console.log(`- Allowed orchestrator host: ${verifiedOrchestrator.verification.orchestratorHost}`);
   } else {
     console.log("- Orchestrator sync: skipped");
   }
@@ -561,6 +981,28 @@ async function main() {
   );
   const syncSummary = await syncToOrchestrator(verifiedOrchestrator.orchestratorUrl, report);
   console.log(`Orchestrator sync: ${syncSummary}`);
+
+  if (options.once) {
+    if (options.once) {
+      console.log(
+        `One-shot setup complete. For secure persistent access, rerun without --once so the agent gateway can stay online at ${advertisedBaseUrl}.`
+      );
+    }
+    return;
+  }
+
+  console.log("Agent monitor: running. Leave this terminal open to keep watching the local Ollama service.");
+  await runAgentMonitor({
+    rootDir: options.rootDir,
+    localEndpoint,
+    apiStyle: options.apiStyle,
+    apiKeyEnv: options.apiKeyEnv,
+    orchestratorUrl: verifiedOrchestrator.orchestratorUrl,
+    buildReport,
+    machine,
+    gatewayPort,
+    allowedHost: verifiedOrchestrator.verification?.orchestratorHost ?? "127.0.0.1"
+  });
 }
 
 main().catch((error) => {
