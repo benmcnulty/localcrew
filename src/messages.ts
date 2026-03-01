@@ -254,9 +254,10 @@ export function buildQueueFillMessages(options: {
         `You are ${options.orchestratorName}, the orchestrator identity.`,
         "The queue is currently empty.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
-        "Propose a brief self-improvement backlog for the local orchestration system only.",
+        "Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
         "Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
+        "This draft will be critiqued by the standing secondary reviewer before any tasks are finalized.",
         "If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query.",
         "Output only task lines in the exact format [medium] task or [low] task.",
         "Prefer 2-3 tasks total with at least one medium and one low.",
@@ -286,6 +287,120 @@ export function buildQueueFillMessages(options: {
     {
       role: "system",
       content: `Resource inventory:\n${options.inventory.trim()}`
+    }
+  ];
+}
+
+export function buildQueueFillReviewMessages(options: {
+  orchestratorName: string;
+  reviewerAlias: string;
+  draftTasks: string;
+  inventory: string;
+  roadmap: string;
+  focusTodo: string;
+  changelog: string;
+}): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        `You are @${options.reviewerAlias}, the secondary reviewer for ${options.orchestratorName}'s auto-mode planning.`,
+        "Critique the proposed self-improvement backlog before anything is queued.",
+        "Apply a measure twice, cut once standard: reject vague, duplicative, over-broad, or low-leverage work.",
+        "Prefer fewer, narrower, higher-impact tasks over many speculative tasks.",
+        "Call out documentation churn, memory churn, and process sprawl when the plan does not first justify the added complexity.",
+        "Do not propose external deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
+        'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query.',
+        "Respond with a short critique followed by one final verdict line exactly in the form VERDICT: approve or VERDICT: revise."
+      ].join(" ")
+    },
+    {
+      role: "system",
+      content: `Roadmap:\n${options.roadmap.trim()}`
+    },
+    {
+      role: "system",
+      content: `In-focus todo:\n${options.focusTodo.trim()}`
+    },
+    {
+      role: "system",
+      content: `Recent changelog:\n${options.changelog.trim()}`
+    },
+    {
+      role: "system",
+      content: `Resource inventory:\n${options.inventory.trim()}`
+    },
+    {
+      role: "user",
+      content: `Draft backlog to review:\n${options.draftTasks.trim() || "(none)"}`
+    }
+  ];
+}
+
+export function buildQueueFillFinalizeMessages(options: {
+  directives: string;
+  inventory: string;
+  roadmap: string;
+  focusTodo: string;
+  changelog: string;
+  orchestratorSummary: string;
+  orchestratorName: string;
+  agents: string[];
+  draftTasks: string;
+  reviewFeedback: string;
+}): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: options.directives.trim()
+    },
+    {
+      role: "system",
+      content: [
+        `You are ${options.orchestratorName}, the orchestrator identity.`,
+        "The queue is currently empty.",
+        "Self-aware self-improvement of the local orchestration system is your default stance right now.",
+        "You already drafted a provisional backlog and received a critique from the secondary reviewer.",
+        "Finalize the queue only after applying that critique and tightening scope, ordering, and expected impact.",
+        "Apply a measure twice, cut once standard: prefer fewer, narrower, better-justified tasks over a larger speculative backlog.",
+        "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
+        'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query.',
+        "Output only approved task lines in the exact format [medium] task or [low] task.",
+        "Prefer 1-3 tasks total with at least one medium task when meaningful.",
+        "Do not output any explanation before or after the task lines."
+      ].join(" ")
+    },
+    {
+      role: "system",
+      content: `Available agents: ${options.agents.length > 0 ? options.agents.join(", ") : "(none)"}`
+    },
+    {
+      role: "system",
+      content: `Orchestrator memory summary:\n${options.orchestratorSummary.trim() || "(none)"}`
+    },
+    {
+      role: "system",
+      content: `Roadmap:\n${options.roadmap.trim()}`
+    },
+    {
+      role: "system",
+      content: `In-focus todo:\n${options.focusTodo.trim()}`
+    },
+    {
+      role: "system",
+      content: `Recent changelog:\n${options.changelog.trim()}`
+    },
+    {
+      role: "system",
+      content: `Resource inventory:\n${options.inventory.trim()}`
+    },
+    {
+      role: "system",
+      content: `Draft backlog:\n${options.draftTasks.trim() || "(none)"}`
+    },
+    {
+      role: "system",
+      content: `Reviewer critique:\n${options.reviewFeedback.trim() || "(none)"}`
     }
   ];
 }
