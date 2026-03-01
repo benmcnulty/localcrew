@@ -411,6 +411,16 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     if (apiServer) {
       writeLine(stdout, `HTTP API: ${apiServer.url}/api/status`);
       writeLine(stdout, `Local UI: ${apiServer.url}/ui`);
+      if (apiServer.publicUrl && apiServer.publicUrl !== apiServer.url) {
+        writeLine(stdout, `LAN UI: ${apiServer.publicUrl}/ui`);
+      }
+    }
+    const resources = await app.getResourcesSnapshot();
+    if (resources.length <= 1) {
+      writeLine(
+        stdout,
+        'Onboarding: this install has one resource. Run `bun run setup:node` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
+      );
     }
 
     while (true) {
@@ -461,16 +471,23 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
             result.editRequest.prompt,
             result.editRequest.initialText
           );
-          result =
-            result.editRequest.kind === "instructions"
-              ? await app.updateInstructions(result.editRequest.target, updatedText)
-              : await app.updateAgentSpec(result.editRequest.target, updatedText);
+          result = result.editRequest.kind === "instructions"
+            ? await app.updateInstructions(result.editRequest.target, updatedText)
+            : result.editRequest.kind === "resource"
+              ? await app.updateResourceSpec(result.editRequest.target, updatedText)
+              : result.editRequest.kind === "participant"
+                ? await app.updateParticipantSpec(result.editRequest.target, updatedText)
+                : await app.updateAgentSpec(result.editRequest.target, updatedText);
         } catch {
           result = {
             lines: [],
             errors: [
               result.editRequest.kind === "instructions"
                 ? "Instruction edit cancelled."
+                : result.editRequest.kind === "resource"
+                  ? "Resource edit cancelled."
+                  : result.editRequest.kind === "participant"
+                    ? "Participant edit cancelled."
                 : "Agent spec edit cancelled."
             ],
             shouldExit: false

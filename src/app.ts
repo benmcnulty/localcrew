@@ -1,11 +1,20 @@
+import { readFile, writeFile } from "node:fs/promises";
+
 import { compactConversation } from "./compact.ts";
 import {
+  addEndpoint,
   ensureEndpointAlias,
   getDefaultConfig,
   isValidAlias,
   loadConfig,
+  removeEndpoint,
+  resolveEndpointConfig,
   saveConfig,
+  setEndpointModel,
+  setEndpointNickname,
+  setEndpointResourceAlias,
   setEndpointInstructions,
+  setOrchestratorName,
   setEndpointVoicePreset
 } from "./config.ts";
 import {
@@ -49,11 +58,20 @@ import {
   buildChatMessages,
   buildQueueFillMessages
 } from "./messages.ts";
-import { chatWithOllamaDetailed, type FetchFn } from "./ollama.ts";
+import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
+import { probeResourceModels } from "./resource-discovery.ts";
 import {
+  addResource,
+  chooseResourceForTask,
+  getResourceCapacitySummary,
+  getOrchestratorResourceAlias,
   getResourceEndpoint,
+  getResourceProfile,
   getResourceProfilesByTier,
-  chooseResourceForTask
+  listResources,
+  removeResource,
+  renderResourceInventory,
+  updateResource
 } from "./resources.ts";
 import {
   appendConversationMessages,
@@ -67,7 +85,7 @@ import {
   saveSessions,
   setConversationCompaction
 } from "./session-store.ts";
-import { speakText, type WarnFn } from "./speech.ts";
+import { isSpeechSupported, speakText, type WarnFn } from "./speech.ts";
 import { getStoragePaths } from "./storage.ts";
 import { appendAuditEvent, loadTelemetrySummary, readRecentAuditEvents } from "./telemetry.ts";
 import type {
@@ -91,7 +109,8 @@ import type {
   WorkflowQuestion,
   WorkflowRequest,
   ChatMessage,
-  OllamaChatResult
+  OllamaChatResult,
+  ResourceSyncReport
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
@@ -188,6 +207,7 @@ function parseQueuedTasks(content: string): {
   queuedTasks: Array<{
     priority: TaskPriority;
     content: string;
+    delegationRole?: string;
     requestedResource?: string;
     requestedModel?: string;
   }>;
@@ -201,6 +221,7 @@ function parseQueuedTasks(content: string): {
   const queuedTasks: Array<{
     priority: TaskPriority;
     content: string;
+    delegationRole?: string;
     requestedResource?: string;
     requestedModel?: string;
   }> = [];
@@ -226,13 +247,16 @@ function parseQueuedTasks(content: string): {
   for (const line of workingContent.split("\n")) {
     const match = line
       .trim()
-      .match(/^QUEUE\[(high|medium|low)\](?:\[(air|vic|min|pav)\])?(?:\[([^\]]+)\])?:\s*(.+)$/i);
+      .match(
+        /^QUEUE\[(high|medium|low)\](?:\[([a-z][a-z0-9_-]*)\])?(?:\[([^\]]+)\])?(?:\{([^}\n]+)\})?:\s*(.+)$/i
+      );
     if (match) {
       queuedTasks.push({
         priority: match[1].toLowerCase() as TaskPriority,
         ...(match[2] ? { requestedResource: match[2].toLowerCase() } : {}),
         ...(match[3] ? { requestedModel: match[3].trim() } : {}),
-        content: match[4].trim()
+        ...(match[4] ? { delegationRole: match[4].trim() } : {}),
+        content: match[5].trim()
       });
       continue;
     }
@@ -347,14 +371,16 @@ function truncateForPrompt(content: string, limit: number): { text: string; trun
   };
 }
 
-function getAgentCreationQuestions(): WorkflowQuestion[] {
+function getAgentCreationQuestions(resourceAliases: string[]): WorkflowQuestion[] {
+  const label =
+    resourceAliases.length > 0 ? `${resourceAliases.join("|")}|auto` : "resource-alias|auto";
   return [
     { key: "name", prompt: "Agent name> " },
     { key: "summary", prompt: "One-line summary> " },
     { key: "mission", prompt: "Mission and responsibility> " },
     { key: "style", prompt: "Personality and response style> " },
     { key: "skills", prompt: "Tool-use and skills guidance> " },
-    { key: "preferredResource", prompt: "Preferred resource (air|vic|min|pav|auto)> " }
+    { key: "preferredResource", prompt: `Preferred resource (${label})> ` }
   ];
 }
 
@@ -374,6 +400,7 @@ export type SpeakFn = (
     enabled: boolean;
     voice?: string;
     warn: WarnFn;
+    platform?: NodeJS.Platform;
   }
 ) => void;
 
@@ -382,6 +409,7 @@ export interface ExecuteOptions {
   rootDir?: string;
   speakFn?: SpeakFn;
   warn?: WarnFn;
+  platform?: NodeJS.Platform;
 }
 
 function defaultSpeakFn(
@@ -390,6 +418,7 @@ function defaultSpeakFn(
     enabled: boolean;
     voice?: string;
     warn: WarnFn;
+    platform?: NodeJS.Platform;
   }
 ): void {
   speakText(text, options);
@@ -404,6 +433,7 @@ export class CrustyApp {
   private readonly fetchFn?: FetchFn;
   private readonly speakFn: SpeakFn;
   private readonly warn: WarnFn;
+  private readonly platform: NodeJS.Platform;
   private autoCyclePromise: Promise<CommandResult> | null;
 
   private constructor(
@@ -419,6 +449,7 @@ export class CrustyApp {
     this.fetchFn = options.fetchFn;
     this.speakFn = options.speakFn ?? defaultSpeakFn;
     this.warn = options.warn ?? (() => {});
+    this.platform = options.platform ?? process.platform;
     this.autoCyclePromise = null;
     this.runtime = {
       mode: "command",
@@ -466,12 +497,14 @@ export class CrustyApp {
   }
 
   async getStatusLines(): Promise<string[]> {
-    const [agents, internalFiles, telemetry, dropbox] = await Promise.all([
+    const [agents, internalFiles, telemetry, dropbox, resources] = await Promise.all([
       listAgents(this.rootDir),
       getInternalFileDetails(this.rootDir),
       loadTelemetrySummary(this.rootDir),
-      getDropboxSnapshot(this.rootDir)
+      getDropboxSnapshot(this.rootDir),
+      this.getResourcesSnapshot()
     ]);
+    const capacity = getResourceCapacitySummary(this.rootDir);
     const nextTask = this.sortPendingTasks(this.systemState.auto.pending)[0];
     const lastCompleted = this.systemState.auto.completed.at(-1);
     const tiers = getResourceProfilesByTier(this.rootDir);
@@ -484,26 +517,47 @@ export class CrustyApp {
     return [
       "Crusty Status",
       "",
+      `Orchestrator profile: ${this.config.orchestratorName}`,
       `Mode: /${this.runtime.mode}`,
       `Auto pulse: ${this.isAutoMode() ? `active every ${AUTO_PULSE_INTERVAL_MS}ms` : "stopped"}`,
       `Orchestrator state: ${this.isAutoBusy() ? "busy" : "idle"}`,
       `Queue: ${this.systemState.auto.pending.length} pending / ${this.systemState.auto.completed.length} completed`,
+      `Cluster capacity: ${[
+        `${capacity.resourceCount} resource${capacity.resourceCount === 1 ? "" : "s"}`,
+        capacity.knownCpuLogicalCores > 0 ? `${capacity.knownCpuLogicalCores} CPU threads` : "",
+        capacity.knownRamGb > 0 ? `${capacity.knownRamGb} GB RAM` : "",
+        capacity.knownGpuCount > 0
+          ? `${capacity.knownGpuCount} GPU${capacity.knownGpuCount === 1 ? "" : "s"}`
+          : "",
+        capacity.knownTotalVramGb > 0 ? `${capacity.knownTotalVramGb} GB VRAM` : "",
+        capacity.highestKnownContextTokens > 0
+          ? `max context ${capacity.highestKnownContextTokens} tokens`
+          : ""
+      ]
+        .filter(Boolean)
+        .join(" | ")}`,
       `Default auto priority: ${this.systemState.auto.defaultPriority}`,
       `Next task: ${
         nextTask
-          ? `#${nextTask.id} [${nextTask.priority}]${
+          ? `#${nextTask.id} [${nextTask.priority}]${nextTask.delegationRole ? ` {${nextTask.delegationRole}}` : ""}${
               nextTask.requestedResource ? ` -> ${nextTask.requestedResource}` : ""
             }${nextTask.requestedModel ? `/${nextTask.requestedModel}` : ""} ${nextTask.content}`
           : "(none queued)"
       }`,
       `Last completed: ${
         lastCompleted
-          ? `#${lastCompleted.id} via ${lastCompleted.assignedResource ?? "?"}/${lastCompleted.assignedModel ?? "?"}`
+          ? `#${lastCompleted.id}${lastCompleted.delegationRole ? ` {${lastCompleted.delegationRole}}` : ""} via ${lastCompleted.assignedResource ?? "?"}/${lastCompleted.assignedModel ?? "?"}`
           : "(none yet)"
       }`,
       `Top tier: ${tiers.top.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Mid tier: ${tiers.mid.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Low tier: ${tiers.low.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
+      `Resources: ${resources.length}`,
+      ...(resources.length <= 1
+        ? [
+            'Onboarding: run `bun run setup:node` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
+          ]
+        : []),
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
       `Dropbox: ${dropbox.inbox.length} inbox / ${dropbox.active.length} active / ${dropbox.outbox.length} outbox`,
       `Telemetry: ${telemetry.totalEvents} events, ${telemetry.byKind["ollama.chat"] ?? 0} model calls, ${telemetry.wikipedia.calls} wiki searches`,
@@ -518,6 +572,7 @@ export class CrustyApp {
   }
 
   async getStatusSnapshot(): Promise<{
+    orchestratorName: string;
     mode: ReplMode;
     prompt: string;
     currentEndpoint: string;
@@ -533,6 +588,7 @@ export class CrustyApp {
     nextTask?: AutoQueueTask;
     lastCompleted?: AutoQueueTask;
     tiers: ReturnType<typeof getResourceProfilesByTier>;
+    capacity: ReturnType<typeof getResourceCapacitySummary>;
     agents: AgentMeta[];
     docs: Awaited<ReturnType<typeof getInternalFileDetails>>;
     telemetry: TelemetrySummary;
@@ -546,6 +602,7 @@ export class CrustyApp {
     ]);
 
     return {
+      orchestratorName: this.config.orchestratorName,
       mode: this.runtime.mode,
       prompt: this.getPrompt(),
       currentEndpoint: this.runtime.currentEndpoint,
@@ -561,6 +618,7 @@ export class CrustyApp {
       nextTask: this.sortPendingTasks(this.systemState.auto.pending)[0],
       lastCompleted: this.systemState.auto.completed.at(-1),
       tiers: getResourceProfilesByTier(this.rootDir),
+      capacity: getResourceCapacitySummary(this.rootDir),
       agents,
       docs,
       telemetry,
@@ -600,6 +658,60 @@ export class CrustyApp {
     return getDropboxSnapshot(this.rootDir);
   }
 
+  async getResourcesSnapshot() {
+    return listResources(this.rootDir);
+  }
+
+  private speechUnavailableLine(): string {
+    return "Speech controls are available only on macOS. Chat text output still works everywhere.";
+  }
+
+  async getParticipantsSnapshot() {
+    return Object.entries(this.config.endpoints)
+      .map(([alias, endpoint]) => ({
+        alias,
+        ...endpoint
+      }))
+      .sort((left, right) => left.alias.localeCompare(right.alias));
+  }
+
+  async getChatConfigSnapshot() {
+    return {
+      orchestratorName: this.config.orchestratorName,
+      defaultEndpoint: this.config.defaultEndpoint,
+      currentEndpoint: this.runtime.currentEndpoint,
+      participants: await this.getParticipantsSnapshot()
+    };
+  }
+
+  async getModelsSnapshot(target?: string) {
+    const normalizedTarget = target?.trim();
+    const endpointAlias =
+      normalizedTarget && normalizedTarget.startsWith("@")
+        ? this.getResolvedAlias(normalizedTarget)
+        : normalizedTarget && this.config.endpoints[normalizedTarget.toLowerCase()]
+          ? normalizedTarget.toLowerCase()
+          : undefined;
+    const resourceAlias = endpointAlias
+      ? this.config.endpoints[endpointAlias].resourceAlias
+      : normalizedTarget
+        ? normalizedTarget.replace(/^@/, "").toLowerCase()
+        : this.config.endpoints[this.runtime.currentEndpoint]?.resourceAlias;
+    const resource = getResourceProfile(resourceAlias ?? getOrchestratorResourceAlias(this.rootDir), this.rootDir);
+    const models = await listOllamaModels(
+      resource.baseUrl,
+      this.fetchFn,
+      resource.apiStyle ?? "ollama",
+      resource.apiKeyEnv
+    );
+    return {
+      resourceAlias: resource.alias,
+      baseUrl: resource.baseUrl,
+      apiStyle: resource.apiStyle ?? "ollama",
+      models
+    };
+  }
+
   async createInboxDocument(filename: string, content: string): Promise<CommandResult> {
     const entry = await writeInboxDocument(filename, content, this.rootDir);
     await appendAuditEvent(
@@ -621,6 +733,441 @@ export class CrustyApp {
     await appendChangelogEntry(`Wrote inbox document ${entry.relativePath}.`, this.rootDir);
     return {
       lines: [`Wrote inbox document: ${entry.path}`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async addResourceFromInput(
+    alias: string,
+    label: string,
+    baseUrl: string,
+    tier: "top" | "mid" | "low" = "mid",
+    apiStyle: "ollama" | "openai" = "ollama"
+  ): Promise<CommandResult> {
+    let discovered:
+      | Awaited<ReturnType<typeof probeResourceModels>>
+      | undefined;
+
+    try {
+      discovered = await probeResourceModels(baseUrl, apiStyle, this.fetchFn, undefined);
+    } catch {}
+
+    const resource = await addResource(
+      {
+        alias,
+        label,
+        tier,
+        baseUrl,
+        apiStyle,
+        defaultModel: discovered?.defaultModel ?? "llama3.1:8b",
+        ...(discovered?.reasoningModel ? { reasoningModel: discovered.reasoningModel } : {}),
+        ...(discovered?.codingModel ? { codingModel: discovered.codingModel } : {}),
+        ...(discovered?.toolsModel ? { toolsModel: discovered.toolsModel } : {}),
+        ...(discovered?.embeddingModel ? { embeddingModel: discovered.embeddingModel } : {}),
+        ...(discovered?.availableModels?.length
+          ? { availableModels: discovered.availableModels }
+          : {}),
+        ...(discovered?.endpointVersion ? { endpointVersion: discovered.endpointVersion } : {}),
+        ...(discovered ? { lastRefreshedAt: new Date().toISOString() } : {}),
+        role: "User-added inference resource.",
+        capabilities: [],
+        notes: [
+          "Review and edit this resource after adding it to set its models and capabilities.",
+          discovered
+            ? "Initial models were discovered from the endpoint during resource setup."
+            : "Discovery did not run during setup. Use /resource refresh <alias> after the endpoint is reachable."
+        ]
+      },
+      this.rootDir
+    );
+    if (!this.config.endpoints[resource.alias]) {
+      this.config = addEndpoint(this.config, resource.alias, resource.alias, label, this.rootDir);
+      await this.persistConfig();
+    }
+    await this.syncSystemFiles();
+    await appendChangelogEntry(`Added resource ${resource.alias}.`, this.rootDir);
+    return {
+      lines: [
+        `Added resource @${resource.alias} (${resource.apiStyle ?? "ollama"}).`,
+        discovered
+          ? `Discovered ${resource.availableModels?.length ?? 0} model(s) on the endpoint.`
+          : `Edit it with /resource edit ${resource.alias} to set models, notes, and capabilities.`
+      ],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async refreshResourceFromEndpoint(alias: string): Promise<CommandResult> {
+    const current = getResourceProfile(alias, this.rootDir);
+    const discovered = await probeResourceModels(
+      current.baseUrl,
+      current.apiStyle ?? "ollama",
+      this.fetchFn,
+      current.apiKeyEnv
+    );
+    const availableModels = discovered.availableModels;
+    const keepIfPresent = (value?: string): string | undefined =>
+      value && availableModels.includes(value) ? value : undefined;
+    const next = await updateResource(
+      alias,
+      {
+        ...current,
+        defaultModel:
+          keepIfPresent(current.defaultModel) ??
+          discovered.defaultModel ??
+          current.defaultModel,
+        reasoningModel:
+          keepIfPresent(current.reasoningModel) ?? discovered.reasoningModel ?? undefined,
+        codingModel: keepIfPresent(current.codingModel) ?? discovered.codingModel ?? undefined,
+        toolsModel: keepIfPresent(current.toolsModel) ?? discovered.toolsModel ?? undefined,
+        embeddingModel:
+          keepIfPresent(current.embeddingModel) ?? discovered.embeddingModel ?? undefined,
+        availableModels,
+        ...(discovered.endpointVersion ? { endpointVersion: discovered.endpointVersion } : {}),
+        lastRefreshedAt: new Date().toISOString()
+      },
+      this.rootDir
+    );
+    await this.syncSystemFiles();
+    await appendChangelogEntry(`Refreshed resource ${next.alias} from its live endpoint.`, this.rootDir);
+    return {
+      lines: [
+        `Refreshed @${next.alias} from ${next.baseUrl}.`,
+        `API style: ${next.apiStyle ?? "ollama"} | models discovered: ${next.availableModels?.length ?? 0}`
+      ],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async syncResourceReport(report: ResourceSyncReport): Promise<CommandResult> {
+    const alias = report.alias.trim().toLowerCase();
+    const existing = listResources(this.rootDir).find((resource) => resource.alias === alias);
+    const nextResource = {
+      ...(existing ?? {
+        alias,
+        label: report.label,
+        tier: report.tier ?? "mid",
+        baseUrl: report.baseUrl,
+        defaultModel: report.defaultModel ?? "llama3.1:8b",
+        role: "Synced from a node setup report.",
+        capabilities: [],
+        notes: []
+      }),
+      alias,
+      label: report.label.trim(),
+      baseUrl: report.baseUrl.trim(),
+      apiStyle: report.apiStyle ?? existing?.apiStyle ?? "ollama",
+      ...(report.apiKeyEnv ? { apiKeyEnv: report.apiKeyEnv.trim() } : {}),
+      ...(report.hostName ? { hostName: report.hostName.trim() } : {}),
+      ...(report.platform ? { platform: report.platform.trim() } : {}),
+      tier: report.tier ?? existing?.tier ?? "mid",
+      ...(typeof report.cpuLogicalCores === "number" ? { cpuLogicalCores: report.cpuLogicalCores } : {}),
+      ...(typeof report.ramGb === "number" ? { ramGb: report.ramGb } : {}),
+      ...(typeof report.gpuModel === "string" ? { gpuModel: report.gpuModel.trim() } : {}),
+      ...(typeof report.gpuCount === "number" ? { gpuCount: report.gpuCount } : {}),
+      ...(typeof report.totalVramGb === "number" ? { totalVramGb: report.totalVramGb } : {}),
+      ...(typeof report.maxContextTokens === "number"
+        ? { maxContextTokens: report.maxContextTokens }
+        : {}),
+      defaultModel: report.defaultModel ?? existing?.defaultModel ?? "llama3.1:8b",
+      ...(report.reasoningModel ? { reasoningModel: report.reasoningModel } : {}),
+      ...(report.codingModel ? { codingModel: report.codingModel } : {}),
+      ...(report.toolsModel ? { toolsModel: report.toolsModel } : {}),
+      ...(report.embeddingModel ? { embeddingModel: report.embeddingModel } : {}),
+      availableModels: report.availableModels ?? existing?.availableModels ?? [],
+      ...(report.endpointVersion ? { endpointVersion: report.endpointVersion } : {}),
+      lastRefreshedAt: new Date().toISOString(),
+      role:
+        existing?.role ??
+        "Network-connected inference resource discovered and synced from a node setup report.",
+      capabilities: report.capabilities ?? existing?.capabilities ?? [],
+      notes: report.notes ?? existing?.notes ?? []
+    };
+
+    if (existing) {
+      await updateResource(alias, nextResource, this.rootDir);
+    } else {
+      await addResource(nextResource, this.rootDir);
+    }
+
+    await this.syncSystemFiles();
+    await appendChangelogEntry(`Synced resource report for ${alias}.`, this.rootDir);
+    return {
+      lines: [
+        `${existing ? "Updated" : "Added"} resource @${alias} from node sync.`,
+        `Models: ${(report.availableModels ?? []).length} | tier: ${nextResource.tier} | API: ${nextResource.apiStyle ?? "ollama"}`
+      ],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async updateResourceSpec(alias: string, text: string): Promise<CommandResult> {
+    const parsed = JSON.parse(text) as {
+      label?: unknown;
+      tier?: unknown;
+      baseUrl?: unknown;
+      apiStyle?: unknown;
+      apiKeyEnv?: unknown;
+      hostName?: unknown;
+      platform?: unknown;
+      defaultModel?: unknown;
+      reasoningModel?: unknown;
+      codingModel?: unknown;
+      toolsModel?: unknown;
+      embeddingModel?: unknown;
+      role?: unknown;
+      capabilities?: unknown;
+      notes?: unknown;
+      cpuLogicalCores?: unknown;
+      ramGb?: unknown;
+      gpuModel?: unknown;
+      gpuCount?: unknown;
+      totalVramGb?: unknown;
+      maxContextTokens?: unknown;
+      availableModels?: unknown;
+      lastRefreshedAt?: unknown;
+      endpointVersion?: unknown;
+    };
+    const current = getResourceProfile(alias, this.rootDir);
+    const resource = await updateResource(
+      alias,
+      {
+        ...current,
+        ...(typeof parsed.label === "string" ? { label: parsed.label } : {}),
+        ...(parsed.tier === "top" || parsed.tier === "mid" || parsed.tier === "low"
+          ? { tier: parsed.tier }
+          : {}),
+        ...(typeof parsed.baseUrl === "string" ? { baseUrl: parsed.baseUrl } : {}),
+        ...(parsed.apiStyle === "ollama" || parsed.apiStyle === "openai"
+          ? { apiStyle: parsed.apiStyle }
+          : {}),
+        ...(typeof parsed.apiKeyEnv === "string" || parsed.apiKeyEnv === null
+          ? { apiKeyEnv: parsed.apiKeyEnv ?? undefined }
+          : {}),
+        ...(typeof parsed.hostName === "string" || parsed.hostName === null
+          ? { hostName: parsed.hostName ?? undefined }
+          : {}),
+        ...(typeof parsed.platform === "string" || parsed.platform === null
+          ? { platform: parsed.platform ?? undefined }
+          : {}),
+        ...(typeof parsed.defaultModel === "string" ? { defaultModel: parsed.defaultModel } : {}),
+        ...(typeof parsed.reasoningModel === "string" || parsed.reasoningModel === null
+          ? { reasoningModel: parsed.reasoningModel ?? undefined }
+          : {}),
+        ...(typeof parsed.codingModel === "string" || parsed.codingModel === null
+          ? { codingModel: parsed.codingModel ?? undefined }
+          : {}),
+        ...(typeof parsed.toolsModel === "string" || parsed.toolsModel === null
+          ? { toolsModel: parsed.toolsModel ?? undefined }
+          : {}),
+        ...(typeof parsed.embeddingModel === "string" || parsed.embeddingModel === null
+          ? { embeddingModel: parsed.embeddingModel ?? undefined }
+          : {}),
+        ...(typeof parsed.role === "string" ? { role: parsed.role } : {}),
+        ...(Array.isArray(parsed.capabilities)
+          ? {
+              capabilities: parsed.capabilities.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {}),
+        ...(Array.isArray(parsed.notes)
+          ? {
+              notes: parsed.notes.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {}),
+        ...(typeof parsed.cpuLogicalCores === "number" ? { cpuLogicalCores: parsed.cpuLogicalCores } : {}),
+        ...(typeof parsed.ramGb === "number" ? { ramGb: parsed.ramGb } : {}),
+        ...(typeof parsed.gpuModel === "string" || parsed.gpuModel === null
+          ? { gpuModel: parsed.gpuModel ?? undefined }
+          : {}),
+        ...(typeof parsed.gpuCount === "number" ? { gpuCount: parsed.gpuCount } : {}),
+        ...(typeof parsed.totalVramGb === "number" ? { totalVramGb: parsed.totalVramGb } : {}),
+        ...(typeof parsed.maxContextTokens === "number"
+          ? { maxContextTokens: parsed.maxContextTokens }
+          : {}),
+        ...(Array.isArray(parsed.availableModels)
+          ? {
+              availableModels: parsed.availableModels.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {}),
+        ...(typeof parsed.lastRefreshedAt === "string" || parsed.lastRefreshedAt === null
+          ? { lastRefreshedAt: parsed.lastRefreshedAt ?? undefined }
+          : {}),
+        ...(typeof parsed.endpointVersion === "string" || parsed.endpointVersion === null
+          ? { endpointVersion: parsed.endpointVersion ?? undefined }
+          : {})
+      },
+      this.rootDir
+    );
+    await this.syncSystemFiles();
+    await appendChangelogEntry(`Updated resource ${resource.alias}.`, this.rootDir);
+    return {
+      lines: [`Updated resource @${resource.alias}.`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async removeResourceConfig(alias: string): Promise<CommandResult> {
+    const boundParticipants = Object.entries(this.config.endpoints)
+      .filter(([, endpoint]) => endpoint.resourceAlias === alias)
+      .map(([participantAlias]) => participantAlias);
+    if (boundParticipants.some((participantAlias) => participantAlias !== alias)) {
+      throw new Error(
+        `Resource "@${alias}" is still bound to participant(s): ${boundParticipants
+          .map((participantAlias) => `@${participantAlias}`)
+          .join(", ")}. Rebind or remove those participants first.`
+      );
+    }
+
+    await removeResource(alias, this.rootDir);
+    if (this.config.endpoints[alias]) {
+      this.config = removeEndpoint(this.config, alias);
+      await this.persistConfig();
+    }
+    await this.syncSystemFiles();
+    await appendChangelogEntry(`Removed resource ${alias}.`, this.rootDir);
+    return {
+      lines: [`Removed resource @${alias}.`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async addParticipantFromInput(
+    alias: string,
+    resourceAlias: string,
+    nickname?: string
+  ): Promise<CommandResult> {
+    this.config = addEndpoint(this.config, alias, resourceAlias, nickname, this.rootDir);
+    await this.persistConfig();
+    return {
+      lines: [
+        `Added participant @${alias} bound to @${resourceAlias}.`,
+        `Edit it with /participant edit ${alias} or adjust its model with /model ${alias} <model>.`
+      ],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async updateParticipantSpec(alias: string, text: string): Promise<CommandResult> {
+    const parsed = JSON.parse(text) as {
+      nickname?: unknown;
+      resourceAlias?: unknown;
+      model?: unknown;
+      instructions?: unknown;
+      voicePreset?: unknown;
+    };
+    let next = this.config;
+    if (typeof parsed.resourceAlias === "string" && parsed.resourceAlias.trim() !== "") {
+      next = setEndpointResourceAlias(next, alias, parsed.resourceAlias.trim().toLowerCase(), this.rootDir);
+    }
+    if (typeof parsed.nickname === "string" && parsed.nickname.trim() !== "") {
+      next = setEndpointNickname(next, alias, parsed.nickname);
+    }
+    if (typeof parsed.model === "string" && parsed.model.trim() !== "") {
+      next = setEndpointModel(next, alias, parsed.model);
+    }
+    if (typeof parsed.instructions === "string") {
+      next = setEndpointInstructions(next, alias, parsed.instructions);
+    }
+    if (typeof parsed.voicePreset === "string" && parsed.voicePreset.trim() !== "") {
+      next = setEndpointVoicePreset(next, alias, parsed.voicePreset);
+    }
+    this.config = next;
+    await this.persistConfig();
+    return {
+      lines: [`Updated participant @${alias}.`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async removeParticipantConfig(alias: string): Promise<CommandResult> {
+    this.config = removeEndpoint(this.config, alias);
+    await this.persistConfig();
+    return {
+      lines: [`Removed participant @${alias}.`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  private async syncOrchestratorNameInLocalDocs(): Promise<void> {
+    const directivesPath = getStoragePaths(this.rootDir).directivesPath;
+
+    try {
+      const current = await readFile(directivesPath, "utf8");
+      const orchestratorName = this.getOrchestratorName();
+      const next = current
+        .replace(/^# .* Directives$/m, `# ${orchestratorName} Directives`)
+        .replace(
+          /^You are .*?, the orchestrator and conscience of this local agent swarm\.$/m,
+          `You are ${orchestratorName}, the orchestrator and conscience of this local agent swarm.`
+        )
+        .replace(
+          /^- In `\/auto`, self-aware self-improvement is .*?'s default operating stance whenever the user has not given a more urgent direct task\.$/m,
+          `- In \`/auto\`, self-aware self-improvement is ${orchestratorName}'s default operating stance whenever the user has not given a more urgent direct task.`
+        );
+
+      if (next !== current) {
+        await writeFile(directivesPath, next, "utf8");
+      }
+    } catch {
+      return;
+    }
+  }
+
+  async updateOrchestratorProfileName(name: string): Promise<CommandResult> {
+    this.config = setOrchestratorName(this.config, name);
+    await this.persistConfig();
+    await this.syncOrchestratorNameInLocalDocs();
+    await this.syncSystemFiles();
+    return {
+      lines: [`Orchestrator profile name is now ${this.config.orchestratorName}.`],
+      errors: [],
+      shouldExit: false
+    };
+  }
+
+  async runDirectResourceChat(
+    resourceAlias: string,
+    message: string,
+    model?: string
+  ): Promise<CommandResult> {
+    const resource = getResourceProfile(resourceAlias, this.rootDir);
+    const endpoint: EndpointConfig = {
+      resourceAlias: resource.alias,
+      nickname: resource.label,
+      baseUrl: resource.baseUrl,
+      apiStyle: resource.apiStyle ?? "ollama",
+      ...(resource.apiKeyEnv ? { apiKeyEnv: resource.apiKeyEnv } : {}),
+      model: model?.trim() || resource.defaultModel,
+      instructions: "",
+      voicePreset: ""
+    };
+    const reply = await this.callModel({
+      scope: "chat.direct",
+      actor: "user",
+      endpoint,
+      resourceAlias: resource.alias,
+      target: resource.alias,
+      messages: [{ role: "user", content: message }],
+      summary: `Direct test chat against @${resource.alias}.`
+    });
+
+    return {
+      lines: [`@${resource.alias}/${endpoint.model}: ${reply.text}`],
       errors: [],
       shouldExit: false
     };
@@ -685,7 +1232,7 @@ export class CrustyApp {
         ...(pending.length > 0
           ? pending.map(
               (task) =>
-                `#${task.id} [${task.priority}]${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""} ${task.content}`
+                `#${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""} ${task.content}`
             )
           : ["(none pending)"]),
         "",
@@ -693,7 +1240,7 @@ export class CrustyApp {
         ...(completed.length > 0
           ? completed.map(
               (task) =>
-                `#${task.id} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"} ${task.content}`
+                `#${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"} ${task.content}`
             )
           : ["(none completed yet)"]),
         "",
@@ -751,6 +1298,7 @@ export class CrustyApp {
         ([key, bucket]) =>
           `@${key}: ${bucket.calls} call(s), ${bucket.errors} error(s), avg ${bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0}ms`
       );
+    const capacity = getResourceCapacitySummary(this.rootDir);
 
     return [
       [
@@ -768,17 +1316,25 @@ export class CrustyApp {
         ...(pending.length > 0
           ? pending.map(
               (task) =>
-                `- Pending #${task.id} [${task.priority}]${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""}: ${task.content}`
+                `- Pending #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""}: ${task.content}`
             )
           : ["- Pending: (none)"]),
         ...(completed.length > 0
           ? completed.map(
               (task) =>
-                `- Completed #${task.id} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"}: ${task.content}`
+                `- Completed #${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"}: ${task.content}`
             )
           : ["- Completed: (none recent)"])
       ].join("\n"),
       [
+        "Resource capacity:",
+        `- Resources: ${capacity.resourceCount}`,
+        `- Known CPU threads: ${capacity.knownCpuLogicalCores || "(unknown)"}`,
+        `- Known RAM (GB): ${capacity.knownRamGb || "(unknown)"}`,
+        `- Known GPUs: ${capacity.knownGpuCount || "(unknown)"}`,
+        `- Known VRAM (GB): ${capacity.knownTotalVramGb || "(unknown)"}`,
+        `- Highest known context tokens: ${capacity.highestKnownContextTokens || "(unknown)"}`,
+        "",
         "Recent audit events:",
         ...(recentAudit.length > 0
           ? recentAudit.map(
@@ -853,6 +1409,11 @@ export class CrustyApp {
 
   private async syncSystemFiles(): Promise<void> {
     await saveFocusTodo(this.systemState.auto.pending, this.rootDir);
+    await writeFile(
+      getStoragePaths(this.rootDir).deviceInventoryPath,
+      `${renderResourceInventory(this.rootDir).trimEnd()}\n`,
+      "utf8"
+    );
     const agents = await listAgents(this.rootDir);
     await updateOrchestratorIndex({
       rootDir: this.rootDir,
@@ -862,6 +1423,7 @@ export class CrustyApp {
   }
 
   getHelpLines(): string[] {
+    const orchestratorName = this.getOrchestratorName();
     const modeSummary =
       this.runtime.mode === "chat"
         ? "Current mode: /chat."
@@ -875,7 +1437,7 @@ export class CrustyApp {
 
     const firstLine =
       this.runtime.mode === "auto"
-        ? `${modeSummary} Plain messages are queued for Erin at ${this.systemState.auto.defaultPriority} priority, and the background pulse keeps the queue moving until /stop.`
+        ? `${modeSummary} Plain messages are queued for ${orchestratorName} at ${this.systemState.auto.defaultPriority} priority, and the background pulse keeps the queue moving until /stop.`
         : this.runtime.mode === "agent"
           ? `${modeSummary} Plain messages go to the active agent identity.`
           : `${modeSummary} Plain messages go to @${this.config.defaultEndpoint}, and @alias messages go directly to that participant.`;
@@ -887,14 +1449,26 @@ export class CrustyApp {
       `Direct message: @alias message`,
       `Crosstalk: @from to @to: "message"`,
       `Commands: /help, /status, /hud, /explore, /login, /chat, /group, /auto, /stop, /agent list, /agent new, /agent edit <name>, /agent <name>, /end`,
-      `Commands: /priority [high|medium|low], /model [alias], /default [alias], /rename <old> <new>`,
-      `Commands: /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset], /sound [on|off]`,
+      `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
+      `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
+      `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
       "Commands: /compact, /reset, /clear, /exit"
     ];
   }
 
   private getResolvedAlias(alias?: string): string {
-    return ensureEndpointAlias(this.config, alias ?? this.runtime.currentEndpoint);
+    return ensureEndpointAlias(
+      this.config,
+      (alias ?? this.runtime.currentEndpoint).replace(/^@/, "")
+    );
+  }
+
+  private getOrchestratorName(): string {
+    return this.config.orchestratorName;
+  }
+
+  private getEndpoint(alias: string): EndpointConfig {
+    return resolveEndpointConfig(this.config, alias, this.rootDir);
   }
 
   private getMessageTarget(alias?: string): string {
@@ -1100,7 +1674,7 @@ export class CrustyApp {
 
   private async compactIfNeeded(force = false): Promise<boolean> {
     const summaryAlias = this.config.defaultEndpoint;
-    const endpoint = this.config.endpoints[summaryAlias];
+    const endpoint = this.getEndpoint(summaryAlias);
     const conversationMessages = getConversationMessages(this.sessions);
     const unsummarizedMessages = conversationMessages.slice(
       getConversationCompactedUntil(this.sessions)
@@ -1122,9 +1696,9 @@ export class CrustyApp {
         (
           await this.callModel({
             scope: "compact.shared",
-            actor: "erin",
+            actor: "orchestrator",
             endpoint: selectedEndpoint,
-            resourceAlias: this.config.defaultEndpoint,
+            resourceAlias: endpoint.resourceAlias,
             target: this.config.defaultEndpoint,
             messages,
             summary: "Compacting the shared conversation summary."
@@ -1207,13 +1781,16 @@ export class CrustyApp {
       );
     }
 
-    const endpoint = this.config.endpoints[normalizedAlias];
+    const endpoint = this.getEndpoint(normalizedAlias);
     const recentMessages = getConversationMessages(this.sessions).slice(
       getConversationCompactedUntil(this.sessions)
     );
     const outgoingMessages = buildChatMessages({
       alias: normalizedAlias,
-      participants: Object.keys(this.config.endpoints),
+      participants: Object.entries(this.config.endpoints).map(([alias, endpointConfig]) => ({
+        alias,
+        nickname: endpointConfig.nickname
+      })),
       instructions: endpoint.instructions,
       summary: getConversationSummary(this.sessions),
       recentMessages,
@@ -1227,7 +1804,7 @@ export class CrustyApp {
           scope: "chat.participant",
           actor: `participant:${normalizedAlias}`,
           endpoint,
-          resourceAlias: normalizedAlias,
+          resourceAlias: endpoint.resourceAlias,
           target: normalizedAlias,
           messages: outgoingMessages,
           summary: `Participant reply requested from @${normalizedAlias}.`
@@ -1237,7 +1814,7 @@ export class CrustyApp {
         scope: "chat.participant",
         actor: `participant:${normalizedAlias}`,
         endpoint,
-        resourceAlias: normalizedAlias,
+        resourceAlias: endpoint.resourceAlias,
         target: normalizedAlias,
         messages: outgoingMessages,
         rawReply: rawAssistantReply
@@ -1270,7 +1847,8 @@ export class CrustyApp {
       this.speakFn(parsedReply.replyText, {
         enabled: this.config.soundEnabled,
         voice: preset?.voice,
-        warn: this.warn
+        warn: this.warn,
+        platform: this.platform
       });
     } catch (error) {
       this.warn(`Speech failed: ${(error as Error).message}`);
@@ -1318,6 +1896,7 @@ export class CrustyApp {
     createdBy: string,
     options: {
       agentName?: string;
+      delegationRole?: string;
       requestedResource?: string;
       requestedModel?: string;
       sourceDocumentRelativePath?: string;
@@ -1331,6 +1910,7 @@ export class CrustyApp {
       createdAt: new Date().toISOString(),
       createdBy,
       status: "queued",
+      ...(options.delegationRole ? { delegationRole: options.delegationRole } : {}),
       ...(options.requestedResource ? { requestedResource: options.requestedResource } : {}),
       ...(options.requestedModel ? { requestedModel: options.requestedModel } : {}),
       ...(options.agentName ? { agentName: options.agentName } : {}),
@@ -1355,6 +1935,7 @@ export class CrustyApp {
     queuedTasks: Array<{
       priority: TaskPriority;
       content: string;
+      delegationRole?: string;
       requestedResource?: string;
       requestedModel?: string;
     }>,
@@ -1375,6 +1956,7 @@ export class CrustyApp {
       addedTasks.push(
         await this.enqueueAutoTask(task.content, task.priority, createdBy, {
           ...options,
+          delegationRole: task.delegationRole,
           requestedResource: task.requestedResource,
           requestedModel: task.requestedModel
         })
@@ -1411,7 +1993,7 @@ export class CrustyApp {
           scope: "dropbox.write",
           summary: `Wrote ${fileWrite.stage} dropbox file ${entry.relativePath}.`,
           success: true,
-          actor: "erin",
+          actor: "orchestrator",
           target: entry.relativePath,
           metadata: {
             stage: fileWrite.stage,
@@ -1427,14 +2009,37 @@ export class CrustyApp {
   }
 
   private async getAutoTaskExtraContext(task: AutoQueueTask): Promise<string[]> {
+    const resources = listResources(this.rootDir);
+    const capacity = getResourceCapacitySummary(this.rootDir);
+    const pendingByResource = resources.map((resource) => {
+      const pendingCount = this.systemState.auto.pending.filter(
+        (pendingTask) => pendingTask.requestedResource === resource.alias
+      ).length;
+      return `- @${resource.alias}: ${pendingCount} explicitly queued task(s), tier=${resource.tier}, default=${resource.defaultModel}${
+        resource.maxContextTokens ? `, maxContext=${resource.maxContextTokens}` : ""
+      }`;
+    });
+
+    const blocks: string[] = [
+      [
+        "Routing context:",
+        "- The highest-value self-improvement work is better configuration, context budgeting, delegation, and task decomposition for this specific local network.",
+        "- Prefer queueing precise subtasks for currently lighter resources when a stronger node is better reserved for a later reasoning or drafting step.",
+        "- For collaborative work, decompose into multiple QUEUE lines with resource aliases and optional role tags so different nodes can contribute complementary outputs.",
+        `- Known cluster capacity: ${capacity.resourceCount} resource(s), ${capacity.knownCpuLogicalCores || "(unknown)"} CPU threads, ${capacity.knownRamGb || "(unknown)"} GB RAM, ${capacity.knownGpuCount || "(unknown)"} GPU(s), ${capacity.knownTotalVramGb || "(unknown)"} GB VRAM, max context ${capacity.highestKnownContextTokens || "(unknown)"}.`,
+        "- Current explicit queue pressure by resource:",
+        ...(pendingByResource.length > 0 ? pendingByResource : ["- (none)"])
+      ].join("\n")
+    ];
+
     if (!task.sourceDocumentRelativePath) {
-      return [];
+      return blocks;
     }
 
     const source = await readActiveDropboxDocument(task.sourceDocumentRelativePath, this.rootDir);
     const truncated = truncateForPrompt(source.content, AUTO_SOURCE_DOCUMENT_CHAR_LIMIT);
 
-    return [
+    blocks.push(
       [
         "External dropbox document:",
         `- Source document: ${task.sourceDocumentName ?? task.sourceDocumentRelativePath}`,
@@ -1447,7 +2052,9 @@ export class CrustyApp {
         .filter(Boolean)
         .join("\n"),
       `External document body:\n${truncated.text}`
-    ];
+    );
+
+    return blocks;
   }
 
   private async ingestNextInboxDocumentTask(): Promise<{
@@ -1477,7 +2084,7 @@ export class CrustyApp {
         scope: "dropbox.ingest",
         summary: `Moved external document ${ingested.relativePath} from inbox to active and queued task #${task.id}.`,
         success: true,
-        actor: "erin",
+        actor: "orchestrator",
         target: ingested.relativePath,
         metadata: {
           sourceStage: ingested.sourceStage,
@@ -1517,6 +2124,7 @@ export class CrustyApp {
       agentName: agent.name,
       agentSlug: agent.slug,
       preferredResource: agent.preferredResource,
+      orchestratorName: this.getOrchestratorName(),
       spec,
       summary: memory.conversation.summary,
       recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
@@ -1599,7 +2207,7 @@ export class CrustyApp {
         ...writtenFiles,
         ...queued.map(
           (task) =>
-            `Queued #${task.id} [${task.priority}]${
+            `Queued #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${
               task.requestedResource ? ` -> ${task.requestedResource}` : ""
             }${task.requestedModel ? `/${task.requestedModel}` : ""} from @${agent.slug}: ${task.content}`
         )
@@ -1618,7 +2226,8 @@ export class CrustyApp {
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
-    const endpoint = getResourceEndpoint("air", "reasoning", this.rootDir);
+    const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
+    const endpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
     const outgoingMessages = buildQueueFillMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -1626,6 +2235,7 @@ export class CrustyApp {
       focusTodo: documents.focusTodo,
       changelog: documents.changelog,
       orchestratorSummary: documents.orchestratorSummary,
+      orchestratorName: this.getOrchestratorName(),
       agents: agents.map((agent) => `@${agent.slug}`)
     });
 
@@ -1634,20 +2244,20 @@ export class CrustyApp {
       rawReply = (
         await this.callModel({
           scope: "auto.queue-fill",
-          actor: "erin",
+          actor: "orchestrator",
           endpoint,
-          resourceAlias: "air",
-          target: "erin",
+          resourceAlias: orchestratorAlias,
+          target: this.getOrchestratorName(),
           messages: outgoingMessages,
           summary: "Filling the auto queue."
         })
       ).text;
       rawReply = await this.resolveWikipediaTool({
         scope: "auto.queue-fill",
-        actor: "erin",
+        actor: "orchestrator",
         endpoint,
-        resourceAlias: "air",
-        target: "erin",
+        resourceAlias: orchestratorAlias,
+        target: this.getOrchestratorName(),
         messages: outgoingMessages,
         rawReply
       });
@@ -1656,12 +2266,12 @@ export class CrustyApp {
         await this.enqueueAutoTask(
           "Review the orchestrator prompts and tighten queue fill guidance after the failed auto-fill attempt.",
           "medium",
-          "erin:auto-fill-fallback"
+          "orchestrator:auto-fill-fallback"
         ),
         await this.enqueueAutoTask(
           `Inspect the last auto-fill failure and capture it in the changelog. Error: ${(error as Error).message}`,
           "low",
-          "erin:auto-fill-fallback"
+          "orchestrator:auto-fill-fallback"
         )
       ];
     }
@@ -1681,7 +2291,7 @@ export class CrustyApp {
             }
           ];
 
-    return this.queueParsedTasks(tasks, "erin:auto-fill");
+    return this.queueParsedTasks(tasks, "orchestrator:auto-fill");
   }
 
   private async processNextAutoTask(): Promise<CommandResult> {
@@ -1698,10 +2308,21 @@ export class CrustyApp {
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
+    const resourceLoad = this.systemState.auto.pending.reduce<Record<string, number>>(
+      (accumulator, pendingTask) => {
+        if (pendingTask.requestedResource) {
+          accumulator[pendingTask.requestedResource] =
+            (accumulator[pendingTask.requestedResource] ?? 0) + 1;
+        }
+        return accumulator;
+      },
+      {}
+    );
     const selection = chooseResourceForTask(
       task.content,
       task.requestedResource ?? "auto",
-      this.rootDir
+      this.rootDir,
+      { resourceLoad }
     );
     const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
     if (task.requestedModel) {
@@ -1715,6 +2336,7 @@ export class CrustyApp {
       focusTodo: documents.focusTodo,
       changelog: documents.changelog,
       orchestratorSummary: documents.orchestratorSummary,
+      orchestratorName: this.getOrchestratorName(),
       agents: agents.map((agent) => `@${agent.slug}`),
       task: task.content,
       priority: task.priority,
@@ -1729,7 +2351,7 @@ export class CrustyApp {
       rawReply = (
         await this.callModel({
           scope: "auto.task",
-          actor: "erin",
+          actor: "orchestrator",
           endpoint,
           resourceAlias: selection.alias,
           target: `task:${task.id}`,
@@ -1739,7 +2361,7 @@ export class CrustyApp {
       ).text;
       rawReply = await this.resolveWikipediaTool({
         scope: "auto.task",
-        actor: "erin",
+        actor: "orchestrator",
         endpoint,
         resourceAlias: selection.alias,
         target: `task:${task.id}`,
@@ -1784,7 +2406,7 @@ export class CrustyApp {
       }
     };
     await this.persistSystemState();
-    const queued = await this.queueParsedTasks(parsed.queuedTasks, "erin:auto-processed");
+    const queued = await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed");
     let movedSourceLine: string | null = null;
     if (task.sourceDocumentRelativePath) {
       try {
@@ -1797,7 +2419,7 @@ export class CrustyApp {
             scope: "dropbox.complete",
             summary: `Moved source document ${task.sourceDocumentRelativePath} from active to outbox after task #${task.id}.`,
             success: true,
-            actor: "erin",
+            actor: "orchestrator",
             target: task.sourceDocumentRelativePath,
             metadata: {
               taskId: task.id,
@@ -1817,13 +2439,13 @@ export class CrustyApp {
 
     return {
       lines: [
-        `Erin completed #${task.id} [${task.priority}] via ${selection.alias}/${endpoint.model}.`,
+        `${this.getOrchestratorName()} completed #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
         replyText,
         ...writtenFiles,
         ...(movedSourceLine ? [movedSourceLine] : []),
         ...queued.map(
           (queuedTask) =>
-            `Queued #${queuedTask.id} [${queuedTask.priority}]${
+            `Queued #${queuedTask.id} [${queuedTask.priority}]${queuedTask.delegationRole ? ` {${queuedTask.delegationRole}}` : ""}${
               queuedTask.requestedResource ? ` -> ${queuedTask.requestedResource}` : ""
             }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
         )
@@ -1861,7 +2483,7 @@ export class CrustyApp {
         if (filled.length > 0) {
           return {
             lines: [
-              `Erin filled the queue with ${filled.length} self-improvement task${filled.length === 1 ? "" : "s"}.`,
+              `${this.getOrchestratorName()} filled the queue with ${filled.length} self-improvement task${filled.length === 1 ? "" : "s"}.`,
               ...filled.map((task) => `Queued #${task.id} [${task.priority}]: ${task.content}`)
             ],
             errors: [],
@@ -1914,7 +2536,12 @@ export class CrustyApp {
     if (!isValidPreferredResource(normalizedAnswers.preferredResource, this.rootDir)) {
       return {
         lines: [],
-        errors: ['Preferred resource must be one of "air", "vic", "min", "pav", or "auto".'],
+        errors: [
+          `Preferred resource must be one of ${[
+            ...listResources(this.rootDir).map((resource) => `"${resource.alias}"`),
+            '"auto"'
+          ].join(", ")}.`
+        ],
         shouldExit: false
       };
     }
@@ -1922,12 +2549,13 @@ export class CrustyApp {
     let generatedSpec: string | undefined;
     try {
       const documents = await loadSystemDocuments(this.rootDir);
-      const endpoint = getResourceEndpoint("air", "reasoning", this.rootDir);
+      const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
+      const endpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
       const specMessages: ChatMessage[] = [
           {
             role: "system",
             content: [
-              "You are Erin, the orchestrator identity.",
+              `You are ${this.getOrchestratorName()}, the orchestrator identity.`,
               "Draft a concise markdown agent specification from the provided workflow answers.",
               "Preserve the exact agent name.",
               "Include sections for Summary, Mission, Personality And Response Guidance, Tool Use And Skills Training, Preferred Resource, and Queue Delegation Guidance.",
@@ -1953,9 +2581,9 @@ export class CrustyApp {
       generatedSpec = (
         await this.callModel({
           scope: "agent.create",
-          actor: "erin",
+          actor: "orchestrator",
           endpoint,
-          resourceAlias: "air",
+          resourceAlias: orchestratorAlias,
           target: normalizedAnswers.name,
           messages: specMessages,
           summary: `Generating the initial specification for @${normalizedAnswers.name}.`
@@ -2191,7 +2819,7 @@ export class CrustyApp {
         return {
           lines: [
             `Entered auto mode. Plain messages are queued at ${this.systemState.auto.defaultPriority} priority.`,
-            "The background pulse will keep Erin moving until /stop."
+            `The background pulse will keep ${this.getOrchestratorName()} moving until /stop.`
           ],
           errors: [],
           shouldExit: false
@@ -2277,7 +2905,7 @@ export class CrustyApp {
           workflowRequest: {
             kind: "agent.create",
             introLines,
-            questions: getAgentCreationQuestions()
+            questions: getAgentCreationQuestions(listResources(this.rootDir).map((resource) => resource.alias))
           }
         };
       }
@@ -2315,10 +2943,183 @@ export class CrustyApp {
         };
       }
 
+      if (command.type === "participant.list") {
+        const participants = await this.getParticipantsSnapshot();
+        return {
+          lines:
+            participants.length === 0
+              ? ["No participants configured."]
+              : participants.map(
+                  (participant) =>
+                    `@${participant.alias}: nickname="${participant.nickname}" resource=@${participant.resourceAlias} model=${participant.model}`
+                ),
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "participant.add") {
+        try {
+          return await this.addParticipantFromInput(
+            command.alias,
+            command.resourceAlias,
+            command.nickname
+          );
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "participant.edit") {
+        const alias = this.getResolvedAlias(command.alias);
+        return {
+          lines: [],
+          errors: [],
+          shouldExit: false,
+          editRequest: {
+            kind: "participant",
+            target: alias,
+            prompt: `participant[@${alias}]> `,
+            initialText: JSON.stringify(this.config.endpoints[alias], null, 2)
+          }
+        };
+      }
+
+      if (command.type === "participant.remove") {
+        try {
+          return await this.removeParticipantConfig(command.alias);
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "resource.list") {
+        const resources = listResources(this.rootDir);
+        return {
+          lines:
+            resources.length === 0
+              ? ["No resources configured."]
+              : resources.map(
+                  (resource) =>
+                    `@${resource.alias}: ${resource.label} (${resource.tier}, ${resource.apiStyle ?? "ollama"}) ${resource.baseUrl} model=${resource.defaultModel}${resource.lastRefreshedAt ? ` refreshed=${resource.lastRefreshedAt}` : ""}`
+                ),
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "resource.add") {
+        try {
+          return await this.addResourceFromInput(
+            command.alias,
+            command.label,
+            command.baseUrl,
+            command.tier ?? "mid",
+            command.apiStyle ?? "ollama"
+          );
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "resource.refresh") {
+        try {
+          return await this.refreshResourceFromEndpoint(command.alias);
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "resource.edit") {
+        const resource = getResourceProfile(command.alias, this.rootDir);
+        return {
+          lines: [],
+          errors: [],
+          shouldExit: false,
+          editRequest: {
+            kind: "resource",
+            target: resource.alias,
+            prompt: `resource[@${resource.alias}]> `,
+            initialText: JSON.stringify(resource, null, 2)
+          }
+        };
+      }
+
+      if (command.type === "resource.remove") {
+        try {
+          return await this.removeResourceConfig(command.alias);
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "models.list") {
+        try {
+          const snapshot = await this.getModelsSnapshot(command.target);
+          return {
+            lines:
+              snapshot.models.length === 0
+                ? [`No models found on @${snapshot.resourceAlias}.`]
+                : [
+                    `Models on @${snapshot.resourceAlias} (${snapshot.baseUrl}):`,
+                    ...snapshot.models.map(
+                      (model) =>
+                        `${model.name}${
+                          model.parameterSize || model.quantizationLevel
+                            ? ` (${[model.parameterSize, model.quantizationLevel].filter(Boolean).join(", ")})`
+                            : ""
+                        }`
+                    )
+                  ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "directChat") {
+        try {
+          return await this.runDirectResourceChat(command.resourceAlias, command.text, command.model);
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
       if (command.type === "model.get") {
+        const endpoint = this.config.endpoints[this.runtime.currentEndpoint];
         return {
           lines: [
-            `Current participant: @${this.runtime.currentEndpoint}. Plain messages still go to @${this.config.defaultEndpoint}.`
+            `Current participant: @${this.runtime.currentEndpoint} (${endpoint.nickname}) using @${endpoint.resourceAlias}/${endpoint.model}. Plain messages still go to @${this.config.defaultEndpoint}.`
           ],
           errors: [],
           shouldExit: false
@@ -2334,6 +3135,24 @@ export class CrustyApp {
           errors: [],
           shouldExit: false
         };
+      }
+
+      if (command.type === "model.assign") {
+        try {
+          this.config = setEndpointModel(this.config, command.alias, command.model);
+          await this.persistConfig();
+          return {
+            lines: [`Model for @${command.alias} is now ${this.config.endpoints[command.alias].model}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
       }
 
       if (command.type === "default.get") {
@@ -2355,6 +3174,82 @@ export class CrustyApp {
           errors: [],
           shouldExit: false
         };
+      }
+
+      if (command.type === "nickname.get") {
+        const alias = this.getResolvedAlias(command.alias);
+        return {
+          lines: [`Nickname for @${alias}: ${this.config.endpoints[alias].nickname}`],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "nickname.set") {
+        try {
+          const alias = this.getResolvedAlias(command.alias);
+          this.config = setEndpointNickname(this.config, alias, command.nickname);
+          await this.persistConfig();
+          return {
+            lines: [`Nickname for @${alias} is now ${this.config.endpoints[alias].nickname}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "bind.get") {
+        const alias = this.getResolvedAlias(command.alias);
+        return {
+          lines: [`@${alias} is bound to resource @${this.config.endpoints[alias].resourceAlias}.`],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "bind.set") {
+        try {
+          const alias = this.getResolvedAlias(command.alias);
+          this.config = setEndpointResourceAlias(this.config, alias, command.resourceAlias, this.rootDir);
+          await this.persistConfig();
+          return {
+            lines: [`@${alias} is now bound to resource @${this.config.endpoints[alias].resourceAlias}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "orchestrator.get") {
+        return {
+          lines: [`Orchestrator profile name: ${this.config.orchestratorName}`],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "orchestrator.set") {
+        try {
+          return await this.updateOrchestratorProfileName(command.name);
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
       }
 
       if (command.type === "rename") {
@@ -2393,6 +3288,8 @@ export class CrustyApp {
           fromAlias,
           toAlias
         );
+        const defaultOldNickname = titleCase(fromAlias);
+        const defaultNewNickname = titleCase(toAlias);
 
         this.config = {
           ...this.config,
@@ -2403,6 +3300,10 @@ export class CrustyApp {
               if (alias === fromAlias) {
                 accumulator[toAlias] = {
                   ...endpoint,
+                  nickname:
+                    endpoint.nickname === defaultOldNickname
+                      ? defaultNewNickname
+                      : replaceAliasReferences(endpoint.nickname, fromAlias, toAlias),
                   instructions: renamedInstructions
                 };
                 return accumulator;
@@ -2433,6 +3334,13 @@ export class CrustyApp {
       }
 
       if (command.type === "sound.toggle" || command.type === "sound.set") {
+        if (!isSpeechSupported(this.platform)) {
+          return {
+            lines: [this.speechUnavailableLine()],
+            errors: [],
+            shouldExit: false
+          };
+        }
         this.config = {
           ...this.config,
           soundEnabled:
@@ -2447,6 +3355,13 @@ export class CrustyApp {
       }
 
       if (command.type === "voice.list") {
+        if (!isSpeechSupported(this.platform)) {
+          return {
+            lines: [this.speechUnavailableLine()],
+            errors: [],
+            shouldExit: false
+          };
+        }
         return {
           lines: VOICE_PRESETS.map(
             (preset) => `${preset.key}: ${preset.description} (${preset.voice})`
@@ -2457,6 +3372,13 @@ export class CrustyApp {
       }
 
       if (command.type === "voice.get") {
+        if (!isSpeechSupported(this.platform)) {
+          return {
+            lines: [this.speechUnavailableLine()],
+            errors: [],
+            shouldExit: false
+          };
+        }
         const alias = this.getResolvedAlias(command.alias);
         const preset = getVoicePreset(this.config.endpoints[alias].voicePreset);
         return {
@@ -2471,6 +3393,13 @@ export class CrustyApp {
       }
 
       if (command.type === "voice.set") {
+        if (!isSpeechSupported(this.platform)) {
+          return {
+            lines: [this.speechUnavailableLine()],
+            errors: [],
+            shouldExit: false
+          };
+        }
         const alias = this.getResolvedAlias(command.alias);
         try {
           this.config = setEndpointVoicePreset(this.config, alias, command.preset);

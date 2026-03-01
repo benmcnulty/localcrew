@@ -2,62 +2,119 @@
 
 ## Requirements
 
-- Bun 1.3+ or Node.js with TypeScript execution enabled in your local workflow
-- Ollama reachable from the machine running Crusty
-- macOS only for `say` voice playback; the rest of the CLI works cross-platform
+- Bun 1.3+ is recommended for setup, testing, and the default runtime
+- Node.js can run the main app entrypoint if you prefer `node src/index.ts`
+- Ollama or another compatible local OpenAI-style inference endpoint reachable from the machine running Crusty
+- macOS only for `say` voice playback; the rest of the CLI and Local UI are cross-platform
 
-## Configuration
+## First-Run Flow
 
-1. Copy `.env.example` to `.env` or `.env.local`.
-2. Set the participant endpoints used for normal chat:
-   - `CRUSTY_ENDPOINT_ERIN_BASE_URL`
-   - `CRUSTY_ENDPOINT_ZORA_BASE_URL`
-   - `CRUSTY_ENDPOINT_SAM_BASE_URL`
-   - `CRUSTY_ENDPOINT_PAV_BASE_URL`
-3. Set the resource inventory used by Erin in `/auto`:
-   - `CRUSTY_RESOURCE_AIR_*`
-   - `CRUSTY_RESOURCE_VIC_*`
-   - `CRUSTY_RESOURCE_MIN_*`
-   - `CRUSTY_RESOURCE_PAV_*`
-4. Optionally expose the local browser-facing API:
-   - `CRUSTY_API_ENABLED`
-   - `CRUSTY_API_HOST`
-   - `CRUSTY_API_PORT`
+1. Clone the repo and run `bun install`.
+2. On the best local device, run `bun run setup:orchestrator`.
+3. Start Crusty with `bun run src/index.ts`.
+4. Open the printed `Local UI` link or stay in the CLI.
+5. Bring a second device online, benchmark it with the platform script on that device if needed, then run:
+   - `bun run setup:node --orchestrator http://your-orchestrator-ip:4310`
+   - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`
+   - or use the `Resources` section in `/ui`
+6. Configure the starter chat roster and test the network:
+   - `/participant list`
+   - `/nickname @erin "Your Preferred Name"`
+   - `/bind @erin orchestrator`
+   - `/models @erin`
+   - `/model erin llama3.1:8b`
+   - `/direct orchestrator "Ping test"`
+   - or use the matching forms in `/ui`
 
-Environment variables provided by the shell take precedence over values loaded from `.env` and `.env.local`.
+The first-run goal is a single working orchestrator resource. Once that is stable, add more devices and let the orchestrator delegate across them.
 
-The durable external system memory lives in the committed `external-memory/` directory. Local internal memory, queue state, agent memory, and telemetry stay under ignored `.crusty/`.
-The external dropbox folders live under `external-memory/inbox`, `external-memory/active`, and `external-memory/outbox`; their contents are intentionally local and untracked.
+## Configuration Model
 
-## Running
+Crusty keeps a strict split between committed external system memory and ignored local runtime state.
 
-- `bun run src/index.ts`
-- `node src/index.ts`
-- `bun test`
-- open `/ui` from the printed local API URL for the browser prototype
+- `external-memory/` is committed and contains durable orchestrator directives, workflows, and built-in agent specs.
+- `.crusty/` is ignored and contains local queue state, internal memory, telemetry, and resource inventory.
+- `.env` and `.env.local` are ignored and can hold machine-specific overrides.
 
-## Support Scripts
+The orchestrator bootstrap script writes a managed block to `.env.local` and seeds `.crusty/resources.json` for the first local resource. The node bootstrap script writes a local node report and can sync it directly into the orchestrator over the local API.
 
-### macOS
+## Environment Variables
 
-Run `scripts/ollama-optimize-macos.sh` to benchmark a local node and print recommended `OLLAMA_*` settings.
+The main public-safe env surface is:
 
-### Windows 11
+- `CRUSTY_API_ENABLED`
+- `CRUSTY_API_BIND_HOST`
+- `CRUSTY_API_PUBLIC_HOST`
+- `CRUSTY_API_PORT`
+- `CRUSTY_ORCHESTRATOR_NAME`
+- `CRUSTY_ORCHESTRATOR_ALIAS`
+- `CRUSTY_ORCHESTRATOR_LABEL`
+- `CRUSTY_ORCHESTRATOR_TIER`
+- `CRUSTY_ORCHESTRATOR_BASE_URL`
+- `CRUSTY_ORCHESTRATOR_API_STYLE`
+- `CRUSTY_ORCHESTRATOR_HOST_NAME`
+- `CRUSTY_ORCHESTRATOR_PLATFORM`
+- `CRUSTY_ORCHESTRATOR_DEFAULT_MODEL`
+- `CRUSTY_ORCHESTRATOR_REASONING_MODEL`
+- `CRUSTY_ORCHESTRATOR_CODING_MODEL`
+- `CRUSTY_ORCHESTRATOR_TOOLS_MODEL`
+- `CRUSTY_ORCHESTRATOR_EMBEDDING_MODEL`
+- `CRUSTY_ORCHESTRATOR_ROLE`
+- `CRUSTY_ORCHESTRATOR_CAPABILITIES`
+- `CRUSTY_ORCHESTRATOR_NOTES`
 
-Run `scripts/ollama-optimize-windows.ps1` in PowerShell to benchmark a local node and emit recommended `setx` commands.
+Participant routing still supports optional env overrides such as `CRUSTY_ENDPOINT_ERIN_RESOURCE`, `CRUSTY_ENDPOINT_ERIN_NICKNAME`, and `CRUSTY_ENDPOINT_ERIN_MODEL`, but the preferred path for ongoing device management is `/resource`, `/participant`, `/nickname`, `/bind`, and `/model` in the CLI or Local UI.
 
-### Linux
+Resource hardware and context metadata can also be kept local and dynamic:
 
-Run `scripts/ollama-optimize-linux.sh` to benchmark a local node and write `ollama-recommended.env`.
+- `CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES`
+- `CRUSTY_ORCHESTRATOR_RAM_GB`
+- `CRUSTY_ORCHESTRATOR_GPU_MODEL`
+- `CRUSTY_ORCHESTRATOR_GPU_COUNT`
+- `CRUSTY_ORCHESTRATOR_TOTAL_VRAM_GB`
+- `CRUSTY_ORCHESTRATOR_MAX_CONTEXT_TOKENS`
 
-## First Useful Commands
+For non-orchestrator devices, the preferred path is `/resource refresh <alias>` for live model discovery and `/resource edit <alias>` for extra hardware metadata so those values stay in `.crusty/resources.json` instead of env files.
+
+Shell env values take precedence over `.env`, which takes precedence over `.env.local`.
+
+If you want a non-default orchestrator identity name during install, run:
+
+- `bun run setup:orchestrator --name "Aster"`
+
+## Device Benchmark Scripts
+
+Run the benchmark script locally on each device before adding it as a resource:
+
+- macOS: `scripts/ollama-optimize-macos.sh`
+- Windows 11: `scripts/ollama-optimize-windows.ps1`
+- Linux: `scripts/ollama-optimize-linux.sh`
+
+Use the script output to decide the device tier:
+
+- `top`: best reasoning/drafting node outside or alongside the orchestrator
+- `mid`: structured work, indexing, queue support, moderate drafting
+- `low`: small-context isolated work and overflow
+
+## Useful Commands
 
 - `/help`
+- `/resource list`
+- `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`
+- `/resource edit <alias>`
+- `/resource refresh <alias>`
+- `/participant list`
+- `/participant add <alias> <resourceAlias> ["nickname"]`
+- `/participant edit <alias>`
+- `/nickname [@alias] ["name"]`
+- `/bind [@alias] [resourceAlias]`
+- `/models [resourceAlias|@participantAlias]`
+- `/direct <resourceAlias> "message" [model]`
+- `/orchestrator ["name"]`
 - `/chat`
 - `/group`
 - `/auto`
 - `/status`
 - `/hud`
 - `/explore`
-- `/login` placeholder for the future remote auth flow
-- `/agent list`
+- `/clear`

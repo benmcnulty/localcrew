@@ -13,7 +13,13 @@ import {
   formatConversationTranscript
 } from "../src/messages.ts";
 import { loadSystemDocuments, loadSystemState } from "../src/orchestrator-store.ts";
-import { chooseResourceForTask, getResourceProfilesByTier } from "../src/resources.ts";
+import {
+  chooseResourceForTask,
+  getResourceCapacitySummary,
+  getResourceProfilesByTier,
+  saveResources,
+  type ResourceProfile
+} from "../src/resources.ts";
 import {
   getConversationCompactedUntil,
   getConversationMessages,
@@ -34,6 +40,74 @@ async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<voi
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }
+}
+
+async function seedResourceInventory(rootDir: string): Promise<void> {
+  const resources: Record<string, ResourceProfile> = {
+    orchestrator: {
+      alias: "orchestrator",
+      label: "Local Orchestrator",
+      tier: "top",
+      baseUrl: "http://127.0.0.1:11434",
+      defaultModel: "llama3.1:8b",
+      reasoningModel: "gpt-oss:20b",
+      codingModel: "qwen3-coder:latest",
+      toolsModel: "gemma3:4b",
+      embeddingModel: "nomic-embed-text:latest",
+      role: "Primary orchestration resource.",
+      capabilities: ["reasoning", "planning", "chat", "code generation", "tool formatting"],
+      notes: ["Bootstrapped in tests."],
+      cpuLogicalCores: 10,
+      ramGb: 32,
+      maxContextTokens: 65536
+    },
+    workhorse: {
+      alias: "workhorse",
+      label: "Second Device",
+      tier: "top",
+      baseUrl: "http://127.0.0.1:11435",
+      defaultModel: "llama3.1:8b",
+      toolsModel: "gemma3:4b",
+      embeddingModel: "nomic-embed-text:latest",
+      role: "Top-tier drafting resource.",
+      capabilities: ["chat", "drafting"],
+      notes: [],
+      cpuLogicalCores: 24,
+      ramGb: 16,
+      gpuModel: "RTX 3060",
+      gpuCount: 1,
+      totalVramGb: 12,
+      maxContextTokens: 131072
+    },
+    helper: {
+      alias: "helper",
+      label: "Structured Helper",
+      tier: "mid",
+      baseUrl: "http://127.0.0.1:11436",
+      defaultModel: "llama3.2:1b",
+      toolsModel: "qwen2.5:0.5b",
+      embeddingModel: "granite-embedding:latest",
+      role: "Structured and indexing support.",
+      capabilities: ["routing", "indexing"],
+      notes: [],
+      cpuLogicalCores: 8,
+      ramGb: 8,
+      maxContextTokens: 16384
+    },
+    overflow: {
+      alias: "overflow",
+      label: "Overflow Node",
+      tier: "low",
+      baseUrl: "http://127.0.0.1:11437",
+      defaultModel: "llama3.2:3b",
+      role: "Small-context overflow.",
+      capabilities: ["small tasks"],
+      notes: [],
+      maxContextTokens: 8192
+    }
+  };
+
+  await saveResources(resources, rootDir);
 }
 
 describe("config bootstrap", () => {
@@ -141,52 +215,104 @@ describe("config bootstrap", () => {
 });
 
 describe("system bootstrap", () => {
-  test("creates the orchestrator state and default documents", async () => {
+  test("creates the orchestrator state and default documents with the configured orchestrator name", async () => {
     await withTempDir(async (rootDir) => {
-      const state = await loadSystemState(rootDir);
-      const docs = await loadSystemDocuments(rootDir);
-      const paths = getStoragePaths(rootDir);
-      const rawState = await readFile(paths.systemStatePath, "utf8");
+      const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
+      process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
 
-      expect(state.auto.enabled).toBe(false);
-      expect(state.auto.defaultPriority).toBe("high");
-      expect(JSON.parse(rawState).auto.pending).toEqual([]);
-      expect(docs.directives).toContain("Erin, the orchestrator");
-      expect(docs.directives).toContain("self-aware self-improvement");
-      expect(docs.inventory).toContain("air (Orchestrator / Hub)");
-      expect(docs.workflow).toContain("Agent Creation Workflow");
+      try {
+        const state = await loadSystemState(rootDir);
+        const docs = await loadSystemDocuments(rootDir);
+        const paths = getStoragePaths(rootDir);
+        const rawState = await readFile(paths.systemStatePath, "utf8");
+
+        expect(state.auto.enabled).toBe(false);
+        expect(state.auto.defaultPriority).toBe("high");
+        expect(JSON.parse(rawState).auto.pending).toEqual([]);
+        expect(docs.directives).toContain("Aster, the orchestrator");
+        expect(docs.directives).toContain("self-aware self-improvement");
+        expect(docs.inventory).toContain("## orchestrator (Local Orchestrator)");
+        expect(docs.workflow).toContain("Agent Creation Workflow");
+      } finally {
+        if (previousName === undefined) {
+          delete process.env.CRUSTY_ORCHESTRATOR_NAME;
+        } else {
+          process.env.CRUSTY_ORCHESTRATOR_NAME = previousName;
+        }
+      }
     });
   });
 });
 
 describe("resource routing", () => {
-  test("classifies available resources into top, mid, and low tiers", () => {
-    const tiers = getResourceProfilesByTier();
+  test("classifies available resources into top, mid, and low tiers", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const tiers = getResourceProfilesByTier(rootDir);
 
-    expect(tiers.top.map((profile) => profile.alias)).toEqual(["air", "vic"]);
-    expect(tiers.mid.map((profile) => profile.alias)).toEqual(["min"]);
-    expect(tiers.low.map((profile) => profile.alias)).toEqual(["pav"]);
+      expect(tiers.top.map((profile) => profile.alias)).toEqual(["orchestrator", "workhorse"]);
+      expect(tiers.mid.map((profile) => profile.alias)).toEqual(["helper"]);
+      expect(tiers.low.map((profile) => profile.alias)).toEqual(["overflow"]);
+    });
   });
 
-  test("routes work away from min and pav for heavier tasks", () => {
-    expect(chooseResourceForTask("Draft a detailed delegation plan for the queue.")).toEqual(
-      expect.objectContaining({
-        alias: "vic",
-        tier: "top"
-      })
-    );
-    expect(chooseResourceForTask("Update the memory index metadata as JSON.")).toEqual(
-      expect.objectContaining({
-        alias: "min",
-        tier: "mid"
-      })
-    );
-    expect(chooseResourceForTask("Run a small context sanity check.")).toEqual(
-      expect.objectContaining({
-        alias: "pav",
-        tier: "low"
-      })
-    );
+  test("routes work by tier for heavier and lighter tasks", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      expect(chooseResourceForTask("Draft a detailed delegation plan for the queue.", "auto", rootDir)).toEqual(
+        expect.objectContaining({
+          alias: "workhorse",
+          tier: "top"
+        })
+      );
+      expect(chooseResourceForTask("Update the memory index metadata as JSON.", "auto", rootDir)).toEqual(
+        expect.objectContaining({
+          alias: "helper",
+          tier: "mid"
+        })
+      );
+      expect(chooseResourceForTask("Run a small context sanity check.", "auto", rootDir)).toEqual(
+        expect.objectContaining({
+          alias: "overflow",
+          tier: "low"
+        })
+      );
+    });
+  });
+
+  test("summarizes known hardware capacity and prefers higher-context resources for context-heavy work", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      const capacity = getResourceCapacitySummary(rootDir);
+      const selection = chooseResourceForTask(
+        "Review a long context transcript across many files.",
+        "auto",
+        rootDir,
+        {
+          resourceLoad: {
+            orchestrator: 1,
+            workhorse: 0
+          }
+        }
+      );
+
+      expect(capacity).toEqual({
+        resourceCount: 4,
+        knownCpuLogicalCores: 42,
+        knownRamGb: 56,
+        knownGpuCount: 1,
+        knownTotalVramGb: 12,
+        highestKnownContextTokens: 131072
+      });
+      expect(selection).toEqual(
+        expect.objectContaining({
+          alias: "workhorse",
+          tier: "top"
+        })
+      );
+    });
   });
 });
 
@@ -327,7 +453,12 @@ describe("message assembly", () => {
     expect(
       buildChatMessages({
         alias: "erin",
-        participants: ["erin", "zora", "sam", "pav"],
+        participants: [
+          { alias: "erin", nickname: "Erin" },
+          { alias: "zora", nickname: "Zora" },
+          { alias: "sam", nickname: "Sam" },
+          { alias: "pav", nickname: "Pav" }
+        ],
         instructions: "Reply clearly.",
         summary: "The user is comparing endpoints.",
         recentMessages: [
@@ -384,7 +515,8 @@ describe("message assembly", () => {
       buildAgentChatMessages({
         agentName: "Reviewer",
         agentSlug: "reviewer",
-        preferredResource: "vic",
+        preferredResource: "workhorse",
+        orchestratorName: "Aster",
         spec: "# Reviewer\n\nSummary: Reviews delegation plans.",
         summary: "The agent has been evaluating queue flow.",
         recentMessages: [{ speaker: "user", target: "reviewer", content: "Review this queue." }],
@@ -398,7 +530,7 @@ describe("message assembly", () => {
       {
         role: "system",
         content:
-          "You are Reviewer (@reviewer), a persistent agent identity managed by Erin, the orchestrator. Your preferred inference resource is vic. Stay aligned with your specification and maintain continuity with your private memory. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable. Do not emit queue lines unless a concrete asynchronous follow-up is useful."
+          "You are Reviewer (@reviewer), a persistent agent identity managed by Aster, the orchestrator. Your preferred inference resource is workhorse. Stay aligned with your specification and maintain continuity with your private memory. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or add an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable. Do not emit queue lines unless a concrete asynchronous follow-up is useful."
       },
       {
         role: "system",
@@ -423,18 +555,19 @@ describe("message assembly", () => {
       focusTodo: "Focus",
       changelog: "Changelog",
       orchestratorSummary: "Summary",
+      orchestratorName: "Aster",
       agents: ["@reviewer"],
       task: "Inspect the queue.",
       priority: "high",
       createdBy: "user",
-      resourceAlias: "air",
+      resourceAlias: "orchestrator",
       resourceRationale: "Use the strongest reasoning node."
     });
 
     expect(autoTaskMessages[1]).toEqual({
       role: "system",
       content:
-        'You are Erin, the orchestrator identity. The selected inference resource for this task is @air. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Erin. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable. Do not wrap WRITE blocks in markdown fences.'
+        'You are Aster, the orchestrator identity. The selected inference resource for this task is @orchestrator. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Aster. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. Prioritize self-improvement work that better understands and exploits the current local hardware profile, context limits, and delegation opportunities of this specific network. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or include an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[active][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[outbox][relative/path.ext] for a final deliverable. Do not wrap WRITE blocks in markdown fences.'
     });
 
     expect(autoTaskMessages.at(-1)).toEqual({
@@ -450,12 +583,13 @@ describe("message assembly", () => {
         focusTodo: "Focus",
         changelog: "Changelog",
         orchestratorSummary: "Summary",
+        orchestratorName: "Aster",
         agents: ["@reviewer"]
       })[1]
     ).toEqual({
       role: "system",
       content:
-        "You are Erin, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Propose a brief self-improvement backlog for the local orchestration system only. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
+        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Propose a brief self-improvement backlog for the local orchestration system only. Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
     });
   });
 });

@@ -21,7 +21,7 @@ Those live in the ignored `.crusty/` directory as internal system memory.
 
 ## Dropbox Folders
 
-- `inbox/`: untracked user-supplied documents waiting for Erin to ingest
+- `inbox/`: untracked user-supplied documents waiting for the orchestrator to ingest
 - `active/`: untracked source documents and rough drafts currently being worked
 - `outbox/`: untracked finalized source documents and final deliverables
 

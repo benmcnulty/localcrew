@@ -10,6 +10,7 @@ import { getGuiHtml, getGuiScript, getGuiStyles } from "./gui.ts";
 
 export interface ApiServerHandle {
   url: string;
+  publicUrl?: string;
   close(): Promise<void>;
 }
 
@@ -154,6 +155,23 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
     return jsonResponse(200, await app.getAgentsSnapshot());
   }
 
+  if (request.method === "GET" && request.url.pathname === "/api/chat-config") {
+    return jsonResponse(200, await app.getChatConfigSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/resources") {
+    return jsonResponse(200, await app.getResourcesSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/participants") {
+    return jsonResponse(200, await app.getParticipantsSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/models") {
+    const target = request.url.searchParams.get("target") ?? undefined;
+    return jsonResponse(200, await app.getModelsSnapshot(target));
+  }
+
   if (request.method === "GET" && request.url.pathname === "/api/dropbox") {
     return jsonResponse(200, await app.getDropboxSnapshot());
   }
@@ -206,6 +224,18 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
       });
     }
 
+    if (body.kind === "resource") {
+      return jsonResponse(200, {
+        result: await app.updateResourceSpec(body.target, body.text)
+      });
+    }
+
+    if (body.kind === "participant") {
+      return jsonResponse(200, {
+        result: await app.updateParticipantSpec(body.target, body.text)
+      });
+    }
+
     return jsonResponse(400, { error: "Unknown edit kind." });
   }
 
@@ -241,6 +271,203 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
     });
   }
 
+  if (request.method === "POST" && request.url.pathname === "/api/direct-chat") {
+    const body = parseJsonBody<{ resourceAlias?: unknown; model?: unknown; message?: unknown }>(
+      request.bodyText
+    );
+    if (typeof body.resourceAlias !== "string" || typeof body.message !== "string") {
+      return jsonResponse(400, { error: "The resourceAlias and message fields are required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.runDirectResourceChat(
+        body.resourceAlias,
+        body.message,
+        typeof body.model === "string" ? body.model : undefined
+      )
+    });
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/resources") {
+    const body = parseJsonBody<{
+      alias?: unknown;
+      label?: unknown;
+      baseUrl?: unknown;
+      tier?: unknown;
+      apiStyle?: unknown;
+    }>(request.bodyText);
+    if (
+      typeof body.alias !== "string" ||
+      typeof body.label !== "string" ||
+      typeof body.baseUrl !== "string"
+    ) {
+      return jsonResponse(400, { error: "The alias, label, and baseUrl fields are required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.addResourceFromInput(
+        body.alias,
+        body.label,
+        body.baseUrl,
+        body.tier === "top" || body.tier === "mid" || body.tier === "low" ? body.tier : "mid",
+        body.apiStyle === "openai" ? "openai" : "ollama"
+      )
+    });
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/resources/refresh") {
+    const body = parseJsonBody<{ alias?: unknown }>(request.bodyText);
+    if (typeof body.alias !== "string") {
+      return jsonResponse(400, { error: "The alias field is required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.refreshResourceFromEndpoint(body.alias)
+    });
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/resources/sync") {
+    const body = parseJsonBody<{
+      alias?: unknown;
+      label?: unknown;
+      baseUrl?: unknown;
+      apiStyle?: unknown;
+      tier?: unknown;
+      hostName?: unknown;
+      platform?: unknown;
+      cpuLogicalCores?: unknown;
+      ramGb?: unknown;
+      gpuModel?: unknown;
+      gpuCount?: unknown;
+      totalVramGb?: unknown;
+      maxContextTokens?: unknown;
+      defaultModel?: unknown;
+      reasoningModel?: unknown;
+      codingModel?: unknown;
+      toolsModel?: unknown;
+      embeddingModel?: unknown;
+      availableModels?: unknown;
+      endpointVersion?: unknown;
+      capabilities?: unknown;
+      notes?: unknown;
+    }>(request.bodyText);
+
+    if (
+      typeof body.alias !== "string" ||
+      typeof body.label !== "string" ||
+      typeof body.baseUrl !== "string"
+    ) {
+      return jsonResponse(400, { error: "The alias, label, and baseUrl fields are required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.syncResourceReport({
+        alias: body.alias,
+        label: body.label,
+        baseUrl: body.baseUrl,
+        ...(body.apiStyle === "openai" || body.apiStyle === "ollama"
+          ? { apiStyle: body.apiStyle }
+          : {}),
+        ...(body.tier === "top" || body.tier === "mid" || body.tier === "low"
+          ? { tier: body.tier }
+          : {}),
+        ...(typeof body.hostName === "string" ? { hostName: body.hostName } : {}),
+        ...(typeof body.platform === "string" ? { platform: body.platform } : {}),
+        ...(typeof body.cpuLogicalCores === "number"
+          ? { cpuLogicalCores: body.cpuLogicalCores }
+          : {}),
+        ...(typeof body.ramGb === "number" ? { ramGb: body.ramGb } : {}),
+        ...(typeof body.gpuModel === "string" ? { gpuModel: body.gpuModel } : {}),
+        ...(typeof body.gpuCount === "number" ? { gpuCount: body.gpuCount } : {}),
+        ...(typeof body.totalVramGb === "number" ? { totalVramGb: body.totalVramGb } : {}),
+        ...(typeof body.maxContextTokens === "number"
+          ? { maxContextTokens: body.maxContextTokens }
+          : {}),
+        ...(typeof body.defaultModel === "string" ? { defaultModel: body.defaultModel } : {}),
+        ...(typeof body.reasoningModel === "string" ? { reasoningModel: body.reasoningModel } : {}),
+        ...(typeof body.codingModel === "string" ? { codingModel: body.codingModel } : {}),
+        ...(typeof body.toolsModel === "string" ? { toolsModel: body.toolsModel } : {}),
+        ...(typeof body.embeddingModel === "string"
+          ? { embeddingModel: body.embeddingModel }
+          : {}),
+        ...(Array.isArray(body.availableModels)
+          ? {
+              availableModels: body.availableModels.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {}),
+        ...(typeof body.endpointVersion === "string"
+          ? { endpointVersion: body.endpointVersion }
+          : {}),
+        ...(Array.isArray(body.capabilities)
+          ? {
+              capabilities: body.capabilities.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {}),
+        ...(Array.isArray(body.notes)
+          ? {
+              notes: body.notes.filter(
+                (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+              )
+            }
+          : {})
+      })
+    });
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/participants") {
+    const body = parseJsonBody<{ alias?: unknown; resourceAlias?: unknown; nickname?: unknown }>(
+      request.bodyText
+    );
+    if (typeof body.alias !== "string" || typeof body.resourceAlias !== "string") {
+      return jsonResponse(400, { error: "The alias and resourceAlias fields are required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.addParticipantFromInput(
+        body.alias,
+        body.resourceAlias,
+        typeof body.nickname === "string" ? body.nickname : undefined
+      )
+    });
+  }
+
+  if (request.method === "POST" && request.url.pathname === "/api/orchestrator") {
+    const body = parseJsonBody<{ name?: unknown }>(request.bodyText);
+    if (typeof body.name !== "string") {
+      return jsonResponse(400, { error: "The name field is required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.updateOrchestratorProfileName(body.name)
+    });
+  }
+
+  if (request.method === "DELETE" && request.url.pathname === "/api/resources") {
+    const alias = request.url.searchParams.get("alias");
+    if (!alias) {
+      return jsonResponse(400, { error: "The alias query parameter is required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.removeResourceConfig(alias)
+    });
+  }
+
+  if (request.method === "DELETE" && request.url.pathname === "/api/participants") {
+    const alias = request.url.searchParams.get("alias");
+    if (!alias) {
+      return jsonResponse(400, { error: "The alias query parameter is required." });
+    }
+
+    return jsonResponse(200, {
+      result: await app.removeParticipantConfig(alias)
+    });
+  }
+
   if (request.method === "POST" && request.url.pathname === "/api/login") {
     return jsonResponse(501, {
       error: "Remote login is not implemented in local Crusty yet. See the remote portal docs and handoff spec."
@@ -252,12 +479,14 @@ async function buildApiResponse(app: CrustyApp, request: ApiRequest): Promise<Ap
 
 async function startNodeWorkerApi(
   app: CrustyApp,
-  host: string,
+  bindHost: string,
   requestedPort: number,
+  localHost: string,
+  publicHost: string | undefined,
   warn: (message: string) => void
 ): Promise<ApiServerHandle | null> {
   const workerPath = resolve(dirname(fileURLToPath(import.meta.url)), "api-worker.js");
-  const child = fork(workerPath, [host, String(requestedPort)], {
+  const child = fork(workerPath, [bindHost, String(requestedPort)], {
     execPath: "node",
     stdio: ["ignore", "ignore", "ignore", "ipc"]
   });
@@ -316,14 +545,17 @@ async function startNodeWorkerApi(
       }
 
       if (message.type === "error") {
-        warn(`HTTP API failed to start on ${host}:${requestedPort}: ${message.message}`);
+        warn(`HTTP API failed to start on ${bindHost}:${requestedPort}: ${message.message}`);
         finish(null);
         return;
       }
 
       if (message.type === "ready") {
         finish({
-          url: `http://${host}:${message.port}`,
+          url: `http://${localHost}:${message.port}`,
+          ...(publicHost && publicHost !== localHost
+            ? { publicUrl: `http://${publicHost}:${message.port}` }
+            : {}),
           close: async () =>
             await new Promise<void>((resolveClose) => {
               const handleExit = (): void => {
@@ -344,7 +576,7 @@ async function startNodeWorkerApi(
     };
 
     const onError = (error: Error): void => {
-      warn(`HTTP API failed to start on ${host}:${requestedPort}: ${error.message}`);
+      warn(`HTTP API failed to start on ${bindHost}:${requestedPort}: ${error.message}`);
       finish(null);
     };
 
@@ -354,7 +586,7 @@ async function startNodeWorkerApi(
       }
 
       warn(
-        `HTTP API failed to start on ${host}:${requestedPort}: worker exited (${signal ?? code ?? "unknown"}).`
+        `HTTP API failed to start on ${bindHost}:${requestedPort}: worker exited (${signal ?? code ?? "unknown"}).`
       );
       finish(null);
     };
@@ -444,11 +676,13 @@ export async function startApiServer(
     return null;
   }
 
-  const host = getEnvString("CRUSTY_API_HOST", "127.0.0.1");
+  const bindHost = getEnvString("CRUSTY_API_BIND_HOST", getEnvString("CRUSTY_API_HOST", "127.0.0.1"));
+  const localHost = bindHost === "0.0.0.0" || bindHost === "::" ? "127.0.0.1" : bindHost;
+  const publicHost = getEnvString("CRUSTY_API_PUBLIC_HOST", localHost);
   const requestedPort = getEnvNumber("CRUSTY_API_PORT", 4310);
   const bunRuntime = (globalThis as { Bun?: object }).Bun;
   if (bunRuntime) {
-    const handle = await startNodeWorkerApi(app, host, requestedPort, warn);
+    const handle = await startNodeWorkerApi(app, bindHost, requestedPort, localHost, publicHost, warn);
     if (handle) {
       return handle;
     }
@@ -458,7 +692,7 @@ export async function startApiServer(
 
   const server = createServer(async (request, response) => {
     try {
-      const url = new URL(request.url ?? "/", `http://${host}:${requestedPort}`);
+      const url = new URL(request.url ?? "/", `http://${localHost}:${requestedPort}`);
       const bodyText = await new Promise<string>((resolveBody, rejectBody) => {
         const chunks: Buffer[] = [];
         request.on("data", (chunk) => {
@@ -499,12 +733,12 @@ export async function startApiServer(
 
     server.once("error", handleError);
     server.once("listening", handleListening);
-    server.listen(requestedPort, host);
+    server.listen(requestedPort, bindHost);
   });
 
   if (!listeningServer) {
     warn(
-      `HTTP API failed to start on ${host}:${requestedPort}: ${lastError?.message ?? "Unknown error."}`
+      `HTTP API failed to start on ${bindHost}:${requestedPort}: ${lastError?.message ?? "Unknown error."}`
     );
     return null;
   }
@@ -512,7 +746,8 @@ export async function startApiServer(
   const address = listeningServer.address();
   const port = typeof address === "object" && address ? address.port : requestedPort;
   return {
-    url: `http://${host}:${port}`,
+    url: `http://${localHost}:${port}`,
+    ...(publicHost && publicHost !== localHost ? { publicUrl: `http://${publicHost}:${port}` } : {}),
     close: async () =>
       new Promise<void>((resolve, reject) => {
         listeningServer.close((error) => {

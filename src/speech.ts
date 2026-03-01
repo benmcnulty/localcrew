@@ -15,6 +15,10 @@ export type SpawnFn = (
   options?: SpawnOptions
 ) => ChildProcessLike;
 
+export function isSpeechSupported(platformName: NodeJS.Platform = process.platform): boolean {
+  return platformName === "darwin";
+}
+
 export function speakText(
   text: string,
   options: {
@@ -22,11 +26,12 @@ export function speakText(
     voice?: string;
     spawnFn?: SpawnFn;
     warn?: WarnFn;
+    platform?: NodeJS.Platform;
   } = {}
 ): void {
   const trimmedText = text.trim();
 
-  if (!trimmedText || options.enabled === false) {
+  if (!trimmedText || options.enabled === false || !isSpeechSupported(options.platform)) {
     return;
   }
 

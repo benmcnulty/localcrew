@@ -53,6 +53,94 @@ export function getGuiHtml(): string {
       </section>
 
       <section>
+        <h2>Resources</h2>
+        <p id="resource-summary"></p>
+        <div id="resource-list"></div>
+        <form id="resource-form">
+          <label>
+            Alias
+            <input id="resource-alias" name="alias" type="text" value="agent-2">
+          </label>
+          <label>
+            Label
+            <input id="resource-label" name="label" type="text" value="Second Device">
+          </label>
+          <label>
+            Base URL
+            <input id="resource-base-url" name="baseUrl" type="text" value="http://127.0.0.1:11434">
+          </label>
+          <label>
+            Tier
+            <select id="resource-tier" name="tier">
+              <option value="top">top</option>
+              <option value="mid" selected>mid</option>
+              <option value="low">low</option>
+            </select>
+          </label>
+          <label>
+            API style
+            <select id="resource-api-style" name="apiStyle">
+              <option value="ollama" selected>ollama</option>
+              <option value="openai">openai-compatible</option>
+            </select>
+          </label>
+          <button type="submit">Add resource</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Orchestrator</h2>
+        <p id="orchestrator-summary"></p>
+        <form id="orchestrator-form">
+          <label>
+            Profile name
+            <input id="orchestrator-name" name="name" type="text" value="Orchestrator">
+          </label>
+          <button type="submit">Save orchestrator name</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Participants</h2>
+        <p id="participant-summary"></p>
+        <div id="participant-list"></div>
+        <form id="participant-form">
+          <label>
+            Alias
+            <input id="participant-alias" name="alias" type="text" value="workhorse-chat">
+          </label>
+          <label>
+            Resource
+            <select id="participant-resource" name="resourceAlias"></select>
+          </label>
+          <label>
+            Nickname
+            <input id="participant-nickname" name="nickname" type="text" value="Second Voice">
+          </label>
+          <button type="submit">Add participant</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Direct Chat</h2>
+        <form id="direct-chat-form">
+          <label>
+            Resource
+            <select id="direct-resource" name="resourceAlias"></select>
+          </label>
+          <label>
+            Model
+            <select id="direct-model" name="model"></select>
+          </label>
+          <label>
+            Message
+            <textarea id="direct-message" name="message" rows="6"></textarea>
+          </label>
+          <button type="submit">Send direct chat</button>
+        </form>
+      </section>
+
+      <section>
         <h2>Dropbox Inbox</h2>
         <form id="inbox-form">
           <label>
@@ -109,6 +197,7 @@ export function getGuiStyles(): string {
 main {
   display: grid;
   gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 section {
@@ -118,7 +207,9 @@ section {
 
 form,
 #command-buttons,
-#tab-buttons {
+#tab-buttons,
+#resource-list,
+#participant-list {
   display: grid;
   gap: 0.5rem;
 }
@@ -135,8 +226,37 @@ pre {
 }
 
 #tab-buttons,
-#command-buttons {
+#command-buttons,
+#resource-list,
+#participant-list {
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
+
+textarea {
+  width: 100%;
+}
+
+input,
+select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#result-output,
+#view-output,
+#tree-output,
+#file-output {
+  min-height: 8rem;
+}
+
+@media (max-width: 720px) {
+  body {
+    margin: 0.5rem;
+  }
+
+  main {
+    grid-template-columns: 1fr;
+  }
 }
 `;
 }
@@ -156,6 +276,27 @@ const els = {
   commandInput: document.getElementById("command-input"),
   resultOutput: document.getElementById("result-output"),
   viewOutput: document.getElementById("view-output"),
+  orchestratorSummary: document.getElementById("orchestrator-summary"),
+  orchestratorForm: document.getElementById("orchestrator-form"),
+  orchestratorName: document.getElementById("orchestrator-name"),
+  resourceSummary: document.getElementById("resource-summary"),
+  resourceList: document.getElementById("resource-list"),
+  resourceForm: document.getElementById("resource-form"),
+  resourceAlias: document.getElementById("resource-alias"),
+  resourceLabel: document.getElementById("resource-label"),
+  resourceBaseUrl: document.getElementById("resource-base-url"),
+  resourceTier: document.getElementById("resource-tier"),
+  resourceApiStyle: document.getElementById("resource-api-style"),
+  participantSummary: document.getElementById("participant-summary"),
+  participantList: document.getElementById("participant-list"),
+  participantForm: document.getElementById("participant-form"),
+  participantAlias: document.getElementById("participant-alias"),
+  participantResource: document.getElementById("participant-resource"),
+  participantNickname: document.getElementById("participant-nickname"),
+  directChatForm: document.getElementById("direct-chat-form"),
+  directResource: document.getElementById("direct-resource"),
+  directModel: document.getElementById("direct-model"),
+  directMessage: document.getElementById("direct-message"),
   treeOutput: document.getElementById("tree-output"),
   fileOutput: document.getElementById("file-output"),
   fileOpenForm: document.getElementById("file-open-form"),
@@ -253,14 +394,204 @@ function renderEdit(request) {
   els.editText.value = request.initialText || "";
 }
 
+function renderResources(resources) {
+  els.resourceList.replaceChildren();
+  els.resourceSummary.textContent =
+    resources.length <= 1
+      ? "One resource is configured. Run setup:node on the next device, then add or sync it here."
+      : resources.length + " resources configured.";
+
+  for (const resource of resources) {
+    const card = document.createElement("div");
+    const summary = document.createElement("pre");
+    summary.textContent = [
+      "@" + resource.alias + " - " + resource.label,
+      "tier: " + resource.tier,
+      "api: " + (resource.apiStyle || "ollama"),
+      "baseUrl: " + resource.baseUrl,
+      "defaultModel: " + resource.defaultModel,
+      resource.hostName ? "host: " + resource.hostName : "",
+      resource.platform ? "platform: " + resource.platform : "",
+      resource.lastRefreshedAt ? "refreshed: " + resource.lastRefreshedAt : ""
+    ]
+      .filter(Boolean)
+      .join("\\n");
+    card.appendChild(summary);
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.textContent = "Edit " + resource.alias;
+    editButton.addEventListener("click", async () => {
+      await submitCommand("/resource edit " + resource.alias);
+    });
+    card.appendChild(editButton);
+
+    const refreshButton = document.createElement("button");
+    refreshButton.type = "button";
+    refreshButton.textContent = "Refresh models";
+    refreshButton.addEventListener("click", async () => {
+      const payload = await postJson("/api/resources/refresh", {
+        alias: resource.alias
+      });
+      renderResult(payload);
+      await refreshView();
+    });
+    card.appendChild(refreshButton);
+
+    if (resources.length > 1) {
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.textContent = "Remove " + resource.alias;
+      removeButton.addEventListener("click", async () => {
+        const payload = await fetch("/api/resources?alias=" + encodeURIComponent(resource.alias), {
+          method: "DELETE"
+        }).then((response) => response.json());
+        renderResult(payload);
+        renderEdit(null);
+        await refreshView();
+      });
+      card.appendChild(removeButton);
+    }
+
+    els.resourceList.appendChild(card);
+  }
+}
+
+function renderResourceOptions(select, resources, selectedAlias) {
+  select.replaceChildren();
+  for (const resource of resources) {
+    const option = document.createElement("option");
+    option.value = resource.alias;
+    option.textContent = "@" + resource.alias + " - " + resource.label;
+    option.selected = resource.alias === selectedAlias;
+    select.appendChild(option);
+  }
+}
+
+function renderModelOptions(select, models, selectedModel) {
+  select.replaceChildren();
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model.name;
+    option.textContent = model.name;
+    option.selected = model.name === selectedModel;
+    select.appendChild(option);
+  }
+}
+
+async function loadModelsIntoSelect(target, select, selectedModel) {
+  const snapshot = await getJson("/api/models?target=" + encodeURIComponent(target));
+  renderModelOptions(select, snapshot.models || [], selectedModel);
+}
+
+async function renderParticipants(participants, resources) {
+  els.participantList.replaceChildren();
+  els.participantSummary.textContent =
+    participants.length === 0
+      ? "No group participants are configured yet."
+      : participants.length + " participants configured for chat/group modes.";
+
+  renderResourceOptions(els.participantResource, resources, resources[0] ? resources[0].alias : "");
+
+  for (const participant of participants) {
+    const card = document.createElement("div");
+    const header = document.createElement("strong");
+    header.textContent = "@" + participant.alias;
+    card.appendChild(header);
+
+    const nicknameLabel = document.createElement("label");
+    nicknameLabel.textContent = "Nickname";
+    const nicknameInput = document.createElement("input");
+    nicknameInput.value = participant.nickname || participant.alias;
+    nicknameLabel.appendChild(nicknameInput);
+    card.appendChild(nicknameLabel);
+
+    const resourceLabel = document.createElement("label");
+    resourceLabel.textContent = "Resource";
+    const resourceSelect = document.createElement("select");
+    renderResourceOptions(resourceSelect, resources, participant.resourceAlias);
+    resourceLabel.appendChild(resourceSelect);
+    card.appendChild(resourceLabel);
+
+    const modelLabel = document.createElement("label");
+    modelLabel.textContent = "Model";
+    const modelSelect = document.createElement("select");
+    modelLabel.appendChild(modelSelect);
+    card.appendChild(modelLabel);
+
+    await loadModelsIntoSelect(participant.resourceAlias, modelSelect, participant.model);
+
+    resourceSelect.addEventListener("change", async () => {
+      await loadModelsIntoSelect(resourceSelect.value, modelSelect, "");
+    });
+
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.textContent = "Save " + participant.alias;
+    saveButton.addEventListener("click", async () => {
+      const payload = await postJson("/api/edit", {
+        kind: "participant",
+        target: participant.alias,
+        text: JSON.stringify(
+          {
+            nickname: nicknameInput.value,
+            resourceAlias: resourceSelect.value,
+            model: modelSelect.value
+          },
+          null,
+          2
+        )
+      });
+      renderResult(payload);
+      await refreshView();
+    });
+    card.appendChild(saveButton);
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.textContent = "Advanced edit";
+    editButton.addEventListener("click", async () => {
+      await submitCommand("/participant edit " + participant.alias);
+    });
+    card.appendChild(editButton);
+
+    if (participants.length > 1) {
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.textContent = "Remove";
+      removeButton.addEventListener("click", async () => {
+        const payload = await fetch("/api/participants?alias=" + encodeURIComponent(participant.alias), {
+          method: "DELETE"
+        }).then((response) => response.json());
+        renderResult(payload);
+        await refreshView();
+      });
+      card.appendChild(removeButton);
+    }
+
+    els.participantList.appendChild(card);
+  }
+}
+
 async function refreshView() {
-  const [status, hud, dropbox] = await Promise.all([
+  const [status, chatConfig, hud, dropbox, resources] = await Promise.all([
     getJson("/api/status"),
+    getJson("/api/chat-config"),
     state.selectedTab === "files" ? Promise.resolve(null) : getJson("/api/hud?tab=" + encodeURIComponent(state.selectedTab)),
-    getJson("/api/dropbox")
+    getJson("/api/dropbox"),
+    getJson("/api/resources")
   ]);
 
   els.connectionLine.textContent = "Prompt: " + status.prompt;
+  els.orchestratorSummary.textContent =
+    "Orchestrator: " + chatConfig.orchestratorName + " | default participant: @" + chatConfig.defaultEndpoint;
+  els.orchestratorName.value = chatConfig.orchestratorName;
+  renderResources(resources);
+  await renderParticipants(chatConfig.participants, resources);
+  renderResourceOptions(els.directResource, resources, resources[0] ? resources[0].alias : "");
+  if (els.directResource.value) {
+    await loadModelsIntoSelect(els.directResource.value, els.directModel, els.directModel.value);
+  }
 
   if (state.selectedTab === "files") {
     els.filesPanel.hidden = false;
@@ -343,6 +674,77 @@ els.inboxForm.addEventListener("submit", async (event) => {
     renderResult(payload);
     els.inboxContent.value = "";
     await refreshView();
+  } catch (error) {
+    els.resultOutput.textContent = String(error);
+  }
+});
+
+els.resourceForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await postJson("/api/resources", {
+      alias: els.resourceAlias.value,
+      label: els.resourceLabel.value,
+      baseUrl: els.resourceBaseUrl.value,
+      tier: els.resourceTier.value,
+      apiStyle: els.resourceApiStyle.value
+    });
+    renderResult(payload);
+    els.resourceAlias.value = "agent-" + String(Math.max(2, Date.now() % 1000));
+    els.resourceLabel.value = "Additional Device";
+    await refreshView();
+  } catch (error) {
+    els.resultOutput.textContent = String(error);
+  }
+});
+
+els.orchestratorForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await postJson("/api/orchestrator", {
+      name: els.orchestratorName.value
+    });
+    renderResult(payload);
+    await refreshView();
+  } catch (error) {
+    els.resultOutput.textContent = String(error);
+  }
+});
+
+els.participantForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await postJson("/api/participants", {
+      alias: els.participantAlias.value,
+      resourceAlias: els.participantResource.value,
+      nickname: els.participantNickname.value
+    });
+    renderResult(payload);
+    els.participantAlias.value = "participant-" + String(Math.max(2, Date.now() % 1000));
+    els.participantNickname.value = "Additional Participant";
+    await refreshView();
+  } catch (error) {
+    els.resultOutput.textContent = String(error);
+  }
+});
+
+els.directResource.addEventListener("change", async () => {
+  try {
+    await loadModelsIntoSelect(els.directResource.value, els.directModel, "");
+  } catch (error) {
+    els.resultOutput.textContent = String(error);
+  }
+});
+
+els.directChatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const payload = await postJson("/api/direct-chat", {
+      resourceAlias: els.directResource.value,
+      model: els.directModel.value,
+      message: els.directMessage.value
+    });
+    renderResult(payload);
   } catch (error) {
     els.resultOutput.textContent = String(error);
   }

@@ -4,8 +4,8 @@
 
 Crusty has two related but separate concepts:
 
-- Participants: `@erin`, `@zora`, `@sam`, `@pav` are the personalities used in direct chat and group chat.
-- Resources: `air`, `vic`, `min`, `pav` are the underlying inference nodes Erin can delegate work to in `/auto`.
+- Participants: `@erin`, `@zora`, `@sam`, `@pav` are the starter personalities used in direct chat and group chat. Their nicknames, resource bindings, instructions, and models are editable at runtime.
+- Resources: local Ollama or OpenAI-compatible endpoints registered in `.crusty/resources.json` are the underlying inference nodes the orchestrator can delegate work to in `/auto`.
 
 ## Storage
 
@@ -19,32 +19,52 @@ Committed external system memory lives in `external-memory/` and seeds durable b
 
 Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 
-- `.crusty/config.json`: participant routing, voices, instructions
+- `.crusty/config.json`: participant routing, nicknames, voices, instructions, and orchestrator profile name
+- `.crusty/resources.json`: local resource inventory, tiers, provider style, models, hardware hints, and roles
 - `.crusty/sessions.json`: shared chat transcript and compaction state
 - `.crusty/system/state.json`: auto queue and completion history
-- `.crusty/system/secure/orchestrator/*.md`: Erin directives, roadmap, focus todo, changelog, workflow, inventory
+- `.crusty/system/secure/orchestrator/*.md`: orchestrator directives, roadmap, focus todo, changelog, workflow, inventory
 - `.crusty/system/secure/orchestrator/telemetry/audit-log.jsonl`: append-only transaction log
 - `.crusty/system/secure/orchestrator/telemetry/summary.json`: indexed telemetry summary for fast reads
 - `.crusty/system/secure/agents/*`: per-agent specs and memory
 
 ## Configuration
 
-The committed code now uses public-safe defaults. Real node URLs, model assignments, and hardware notes should be provided through ignored env files or system environment variables.
+The committed code now uses public-safe defaults. Real node URLs, model assignments, and hardware notes should be provided through ignored env files, the orchestrator setup script, or runtime resource editing in the CLI and Local UI.
+
+For the prototype chat surfaces, the intended layering is:
+
+- one resource can host several participants with different nicknames, instructions, and model selections
+- participant aliases remain the stable routing keys in shared chat transcripts
+- resource aliases remain the stable routing keys for capability-aware delegation, telemetry, and future remote swarm reporting
+- optional hardware metadata on resources lets the orchestrator reason about total RAM, CPU threads, GPU capacity, VRAM, and known context ceilings for the current network
+- resource refresh and node sync let the orchestrator keep model inventories current without baking host specifics into the repo
 
 The local browser-facing API is also env-driven:
 
 - `CRUSTY_API_ENABLED`
-- `CRUSTY_API_HOST`
+- `CRUSTY_API_BIND_HOST`
+- `CRUSTY_API_PUBLIC_HOST`
 - `CRUSTY_API_PORT`
 
 ## Queue And Delegation
 
-- High-value reasoning and code work defaults to `air`
-- Heavy drafting defaults to `vic`
-- Medium structured/indexing tasks default to `min`
-- Small isolated overflow work defaults to `pav`
+Routing is tier-based rather than alias-based:
+
+- the orchestrator resource remains the default reasoning and verification fallback
+- top-tier external resources are preferred for heavier drafting and sustained generation
+- mid-tier resources are preferred for structured outputs, indexing, and queue support
+- low-tier resources are reserved for small isolated work and overflow
 
 This tiering is intentionally simple today. The next meaningful upgrade is telemetry-backed routing based on real latency, token, and model-load data rather than static heuristics alone.
+
+The longer-term routing policy also needs:
+
+- context-window awareness per resource and per selected model
+- reload-cost awareness when switching models on a device
+- explicit handling for metered remote inference providers where context size and token price matter as much as latency
+
+The current implementation now carries optional per-resource hardware/context metadata and exposes aggregate capacity in status/API snapshots so this information can flow into later portal profiles and routing policy.
 
 ## Observability
 
@@ -54,25 +74,27 @@ Current observability surfaces:
 - `/hud`: live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs
 - `/explore`: internal and external-memory file browser
 - local HTTP API for browser-based status, queue, telemetry, audit, explorer, command, and edit flows
+- local HTTP API for browser-based participant/resource config, direct chat, and orchestrator profile editing
 - `/ui`: local browser prototype backed by the same API routes
 - terminal background output in `/auto`
 - append-only audit logging for Ollama and Wikipedia transactions
 
 ## Dropbox Workflow
 
-When `/auto` is idle and the queue is empty, Erin checks `external-memory/inbox` before generating self-improvement work.
+When `/auto` is idle and the queue is empty, the orchestrator checks `external-memory/inbox` before generating self-improvement work.
 
 - The next inbox document is moved into `external-memory/active`
 - its `Crusty-Status:` tag is updated to `active`
-- Erin queues a high-priority task against that active document
+- the orchestrator queues a high-priority task against that active document
 - the task receives the active document body as prompt context
-- Erin can emit `WRITE[active][path] ... ENDWRITE` for rough drafts and `WRITE[outbox][path] ... ENDWRITE` for final deliverables
+- the orchestrator can emit `WRITE[active][path] ... ENDWRITE` for rough drafts and `WRITE[outbox][path] ... ENDWRITE` for final deliverables
 - after a successful source-document task, the source document is moved from `active` to `outbox` and retagged as `outbox`
 
 ## Grounding
 
-Erin and agent identities can now request grounded factual context from Wikipedia through a constrained tool workflow. The model emits a `WIKIPEDIA: query` line, Crusty fetches and chunks the results, logs the transaction, and then re-prompts the same model to continue with the retrieved context.
+The orchestrator and agent identities can now request grounded factual context from Wikipedia through a constrained tool workflow. The model emits a `WIKIPEDIA: query` line, Crusty fetches and chunks the results, logs the transaction, and then re-prompts the same model to continue with the retrieved context.
 
 Planned observability surfaces:
 
 - browser-based GUI with queue, agents, telemetry, and transcript parity
+- richer live HUD layers for direct chat, participant config, and subscription-aware remote connection state

@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { CrustyApp } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { getDefaultInstruction, loadConfig } from "../src/config.ts";
+import { saveResources, type ResourceProfile } from "../src/resources.ts";
 import {
   createAgent,
   listAgents,
@@ -31,6 +32,61 @@ async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<voi
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }
+}
+
+async function seedResourceInventory(rootDir: string): Promise<void> {
+  const resources: Record<string, ResourceProfile> = {
+    orchestrator: {
+      alias: "orchestrator",
+      label: "Local Orchestrator",
+      tier: "top",
+      baseUrl: "http://127.0.0.1:11434",
+      defaultModel: "llama3.1:8b",
+      reasoningModel: "gpt-oss:20b",
+      codingModel: "qwen3-coder:latest",
+      toolsModel: "gemma3:4b",
+      embeddingModel: "nomic-embed-text:latest",
+      role: "Primary orchestration resource.",
+      capabilities: ["reasoning", "planning", "chat", "code generation", "tool formatting"],
+      notes: []
+    },
+    workhorse: {
+      alias: "workhorse",
+      label: "Second Device",
+      tier: "top",
+      baseUrl: "http://127.0.0.1:11435",
+      defaultModel: "llama3.1:8b",
+      toolsModel: "gemma3:4b",
+      embeddingModel: "nomic-embed-text:latest",
+      role: "Top-tier drafting resource.",
+      capabilities: ["chat", "drafting"],
+      notes: []
+    },
+    helper: {
+      alias: "helper",
+      label: "Structured Helper",
+      tier: "mid",
+      baseUrl: "http://127.0.0.1:11436",
+      defaultModel: "llama3.2:1b",
+      toolsModel: "qwen2.5:0.5b",
+      embeddingModel: "granite-embedding:latest",
+      role: "Structured and indexing support.",
+      capabilities: ["routing", "indexing"],
+      notes: []
+    },
+    overflow: {
+      alias: "overflow",
+      label: "Overflow Node",
+      tier: "low",
+      baseUrl: "http://127.0.0.1:11437",
+      defaultModel: "llama3.2:3b",
+      role: "Small-context overflow.",
+      capabilities: ["small tasks"],
+      notes: []
+    }
+  };
+
+  await saveResources(resources, rootDir);
 }
 
 function makeChatResponse(
@@ -241,6 +297,7 @@ describe("CrustyApp", () => {
 
   test("returns a status viewer request and exposes orchestration status lines", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
       const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
 
       await app.execute(parseCommand("/auto"));
@@ -251,7 +308,9 @@ describe("CrustyApp", () => {
         kind: "status"
       });
       expect(lines.some((line) => line.includes("Auto pulse: active every"))).toBe(true);
-      expect(lines.some((line) => line.includes("Top tier: @air, @vic"))).toBe(true);
+      expect(lines.some((line) => line.includes("Top tier: @orchestrator, @workhorse"))).toBe(
+        true
+      );
     });
   });
 
@@ -290,37 +349,50 @@ describe("CrustyApp", () => {
     });
   });
 
-  test("enters auto mode, queues a task, and processes it through Erin", async () => {
+  test("enters auto mode, queues a task, and processes it through the configured orchestrator identity", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
+      process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
       const app = await CrustyApp.create({
         rootDir,
         fetchFn: async () =>
-          makeChatResponse("Completed the orchestration task.\nQUEUE[low][pav]: sanity check the result"),
+          makeChatResponse(
+            "Completed the orchestration task.\nQUEUE[low][overflow]: sanity check the result"
+          ),
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("/auto"));
-      expect(app.shouldAutoPulse()).toBe(true);
-      const result = await app.execute(parseCommand("Design a routing policy."));
-      const systemState = await loadSystemState(rootDir);
+      try {
+        await app.execute(parseCommand("/auto"));
+        expect(app.shouldAutoPulse()).toBe(true);
+        const result = await app.execute(parseCommand("Design a routing policy."));
+        const systemState = await loadSystemState(rootDir);
 
-      expect(result.lines[0]).toBe("Queued #1 [high]: Design a routing policy.");
-      expect(result.lines[1]).toContain("Erin completed #1 [high] via air/");
-      expect(result.lines[3]).toBe("Queued #2 [low] -> pav: sanity check the result");
-      expect(systemState.auto.pending).toEqual([
-        expect.objectContaining({
-          id: 2,
-          priority: "low",
-          requestedResource: "pav",
-          content: "sanity check the result"
-        })
-      ]);
-      expect(systemState.auto.completed).toEqual([
-        expect.objectContaining({
-          id: 1,
-          status: "completed"
-        })
-      ]);
+        expect(result.lines[0]).toBe("Queued #1 [high]: Design a routing policy.");
+        expect(result.lines[1]).toContain("Aster completed #1 [high] via orchestrator/");
+        expect(result.lines[3]).toBe("Queued #2 [low] -> overflow: sanity check the result");
+        expect(systemState.auto.pending).toEqual([
+          expect.objectContaining({
+            id: 2,
+            priority: "low",
+            requestedResource: "overflow",
+            content: "sanity check the result"
+          })
+        ]);
+        expect(systemState.auto.completed).toEqual([
+          expect.objectContaining({
+            id: 1,
+            status: "completed"
+          })
+        ]);
+      } finally {
+        if (previousName === undefined) {
+          delete process.env.CRUSTY_ORCHESTRATOR_NAME;
+        } else {
+          process.env.CRUSTY_ORCHESTRATOR_NAME = previousName;
+        }
+      }
     });
   });
 
@@ -342,6 +414,9 @@ describe("CrustyApp", () => {
 
   test("fills the auto queue on an idle cycle when it is empty", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
+      process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
       const app = await CrustyApp.create({
         rootDir,
         fetchFn: async () =>
@@ -349,20 +424,29 @@ describe("CrustyApp", () => {
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("/auto"));
-      const result = await app.runIdleCycle();
-      const systemState = await loadSystemState(rootDir);
+      try {
+        await app.execute(parseCommand("/auto"));
+        const result = await app.runIdleCycle();
+        const systemState = await loadSystemState(rootDir);
 
-      expect(result.lines[0]).toBe("Erin filled the queue with 2 self-improvement tasks.");
-      expect(systemState.auto.pending.map((task) => `${task.priority}:${task.content}`)).toEqual([
-        "medium:Tighten the queue routing rubric.",
-        "low:Audit stale memory summaries."
-      ]);
+        expect(result.lines[0]).toBe("Aster filled the queue with 2 self-improvement tasks.");
+        expect(systemState.auto.pending.map((task) => `${task.priority}:${task.content}`)).toEqual([
+          "medium:Tighten the queue routing rubric.",
+          "low:Audit stale memory summaries."
+        ]);
+      } finally {
+        if (previousName === undefined) {
+          delete process.env.CRUSTY_ORCHESTRATOR_NAME;
+        } else {
+          process.env.CRUSTY_ORCHESTRATOR_NAME = previousName;
+        }
+      }
     });
   });
 
   test("ingests inbox documents, writes draft/final files, and moves the source document through the dropbox", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
       const app = await CrustyApp.create({
         rootDir,
         fetchFn: async () =>
@@ -413,6 +497,7 @@ describe("CrustyApp", () => {
 
   test("returns a workflow request for agent creation and persists a generated agent", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
       const app = await CrustyApp.create({
         rootDir,
         fetchFn: async () =>
@@ -429,7 +514,7 @@ describe("CrustyApp", () => {
         mission: "Inspect orchestration choices.",
         style: "Direct and skeptical.",
         skills: "Review routing decisions and call out weak assumptions.",
-        preferredResource: "vic"
+        preferredResource: "workhorse"
       });
       const agents = await listAgents(rootDir);
       const spec = await loadAgentSpec("reviewer", rootDir);
@@ -443,6 +528,7 @@ describe("CrustyApp", () => {
 
   test("chats with an agent identity and allows the agent to queue follow-up work", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
       let callIndex = 0;
       const app = await CrustyApp.create({
         rootDir,
@@ -454,7 +540,7 @@ describe("CrustyApp", () => {
             );
           }
           return makeChatResponse(
-            "I would test the plan against the queue.\nQUEUE[medium][vic]: compare two routing strategies"
+            "I would test the plan against the queue.\nQUEUE[medium][workhorse]: compare two routing strategies"
           );
         },
         speakFn: () => {}
@@ -478,11 +564,11 @@ describe("CrustyApp", () => {
       ]);
       expect(reply.lines[0]).toBe("@reviewer: I would test the plan against the queue.");
       expect(reply.lines[1]).toBe(
-        "Queued #1 [medium] -> vic from @reviewer: compare two routing strategies"
+        "Queued #1 [medium] -> workhorse from @reviewer: compare two routing strategies"
       );
       expect(systemState.auto.pending).toEqual([
         expect.objectContaining({
-          requestedResource: "vic",
+          requestedResource: "workhorse",
           content: "compare two routing strategies"
         })
       ]);
@@ -491,7 +577,7 @@ describe("CrustyApp", () => {
 
   test("persists instructions, default endpoint, sound, and voice changes", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir });
+      const app = await CrustyApp.create({ rootDir, platform: "darwin" });
 
       await app.execute(parseCommand('/instructions @zora "Reply in one sentence."'));
       await app.execute(parseCommand("/default zora"));
@@ -504,6 +590,95 @@ describe("CrustyApp", () => {
       expect(config.defaultEndpoint).toBe("zora");
       expect(config.soundEnabled).toBe(false);
       expect(config.endpoints.zora.voicePreset).toBe("daniel");
+    });
+  });
+
+  test("reports voice and sound controls as macOS-only on other platforms", async () => {
+    await withTempDir(async (rootDir) => {
+      const app = await CrustyApp.create({ rootDir, platform: "linux" });
+
+      const soundResult = await app.execute(parseCommand("/sound off"));
+      const voiceResult = await app.execute(parseCommand("/voice list"));
+      const config = await loadConfig(rootDir);
+
+      expect(soundResult.lines[0]).toContain("available only on macOS");
+      expect(voiceResult.lines[0]).toContain("available only on macOS");
+      expect(config.soundEnabled).toBe(true);
+      expect(config.endpoints.zora.voicePreset).toBe("zoe");
+    });
+  });
+
+  test("supports dynamic participant, resource, model, and orchestrator configuration flows", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const seenDirectModels: string[] = [];
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async (input, init) => {
+          const url = String(input);
+          if (url.endsWith("/api/tags")) {
+            const isHelper = url.includes("11436");
+            return new Response(
+              JSON.stringify({
+                models: isHelper
+                  ? [
+                      {
+                        name: "qwen2.5:0.5b",
+                        details: { parameter_size: "494M", quantization_level: "Q4_K_M" }
+                      },
+                      {
+                        name: "granite-embedding:latest",
+                        details: { parameter_size: "30M", quantization_level: "F16" }
+                      }
+                    ]
+                  : [
+                      {
+                        name: "llama3.1:8b",
+                        details: { parameter_size: "8.0B", quantization_level: "Q4_K_M" }
+                      },
+                      {
+                        name: "gemma3:4b",
+                        details: { parameter_size: "4.3B", quantization_level: "Q4_K_M" }
+                      }
+                    ]
+              }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+          seenDirectModels.push(body.model ?? "");
+          return makeChatResponse("Direct resource reply");
+        },
+        speakFn: () => {}
+      });
+
+      const add = await app.execute(parseCommand('/participant add reviewer workhorse "Reviewer"'));
+      const nickname = await app.execute(parseCommand('/nickname @reviewer "Reviewer Prime"'));
+      const bind = await app.execute(parseCommand("/bind @reviewer helper"));
+      const assign = await app.execute(parseCommand("/model reviewer qwen2.5:0.5b"));
+      const models = await app.execute(parseCommand("/models @reviewer"));
+      const direct = await app.execute(parseCommand('/direct helper "Ping the helper" qwen2.5:0.5b'));
+      const orchestrator = await app.execute(parseCommand('/orchestrator "Aster"'));
+      const config = await loadConfig(rootDir);
+
+      expect(add.lines[0]).toBe("Added participant @reviewer bound to @workhorse.");
+      expect(nickname.lines[0]).toBe('Nickname for @reviewer is now Reviewer Prime.');
+      expect(bind.lines[0]).toBe("@reviewer is now bound to resource @helper.");
+      expect(assign.lines[0]).toBe("Model for @reviewer is now qwen2.5:0.5b.");
+      expect(models.lines[0]).toBe("Models on @helper (http://127.0.0.1:11436):");
+      expect(models.lines).toContain("qwen2.5:0.5b (494M, Q4_K_M)");
+      expect(direct.lines[0]).toBe("@helper/qwen2.5:0.5b: Direct resource reply");
+      expect(orchestrator.lines[0]).toBe("Orchestrator profile name is now Aster.");
+      expect(seenDirectModels).toContain("qwen2.5:0.5b");
+      expect(config.orchestratorName).toBe("Aster");
+      expect(config.endpoints.reviewer).toEqual(
+        expect.objectContaining({
+          nickname: "Reviewer Prime",
+          resourceAlias: "helper",
+          model: "qwen2.5:0.5b"
+        })
+      );
     });
   });
 
@@ -652,7 +827,7 @@ describe("CrustyApp", () => {
 
       expect(summary.totalEvents).toBe(1);
       expect(summary.byKind["ollama.chat"]).toBe(1);
-      expect(Object.keys(summary.models)).toContain("erin/llama3.1:8b");
+      expect(Object.keys(summary.models)).toContain("orchestrator/llama3.1:8b");
       expect(recent[0]?.kind).toBe("ollama.chat");
       expect(recent[0]?.responseText).toBe("Hello from Erin");
     });
@@ -722,6 +897,7 @@ describe("CrustyApp", () => {
 
   test("supports queued model overrides for later auto execution", async () => {
     await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
       await createAgent(
         {
           name: "Reviewer",
@@ -729,7 +905,7 @@ describe("CrustyApp", () => {
           mission: "Inspect queue behavior.",
           style: "Direct and analytical.",
           skills: "Use metrics and queue analysis.",
-          preferredResource: "vic"
+          preferredResource: "workhorse"
         },
         rootDir
       );
@@ -745,7 +921,7 @@ describe("CrustyApp", () => {
 
           if (callCount === 1) {
             return makeChatResponse(
-              "Queue it.\nQUEUE[medium][vic][special-model]: benchmark the workhorse"
+              "Queue it.\nQUEUE[medium][workhorse][special-model]: benchmark the workhorse"
             );
           }
 
@@ -762,11 +938,52 @@ describe("CrustyApp", () => {
       const state = await loadSystemState(rootDir);
       expect(state.auto.completed[0]).toEqual(
         expect.objectContaining({
-          assignedResource: "vic",
+          assignedResource: "workhorse",
           assignedModel: "special-model"
         })
       );
       expect(requestedModels).toContain("special-model");
+    });
+  });
+
+  test("records delegation roles on queued collaborative follow-up tasks", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      await createAgent(
+        {
+          name: "Reviewer",
+          summary: "Reviews routing choices.",
+          mission: "Inspect queue behavior.",
+          style: "Direct and analytical.",
+          skills: "Use metrics and queue analysis.",
+          preferredResource: "auto"
+        },
+        rootDir
+      );
+
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            "Split the work.\nQUEUE[medium][workhorse]{reviewer}: critique the routing plan"
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/agent reviewer"));
+      const reply = await app.execute(parseCommand("Review the routing."));
+      const state = await loadSystemState(rootDir);
+
+      expect(reply.lines[1]).toBe(
+        "Queued #1 [medium] {reviewer} -> workhorse from @reviewer: critique the routing plan"
+      );
+      expect(state.auto.pending[0]).toEqual(
+        expect.objectContaining({
+          requestedResource: "workhorse",
+          delegationRole: "reviewer",
+          content: "critique the routing plan"
+        })
+      );
     });
   });
 
@@ -778,9 +995,10 @@ describe("CrustyApp", () => {
       const validResult = await app.execute(parseCommand("/model"));
 
       expect(invalidResult.errors).toEqual(['Unknown endpoint alias "nope".']);
-      expect(validResult.lines).toEqual([
-        "Current participant: @erin. Plain messages still go to @erin."
-      ]);
+      expect(validResult.lines[0]).toContain(
+        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b."
+      );
+      expect(validResult.lines[0]).toContain("Plain messages still go to @erin.");
     });
   });
 });
@@ -797,6 +1015,7 @@ describe("speakText", () => {
 
     speakText("Hello", {
       voice: "Reed (English (US))",
+      platform: "darwin",
       spawnFn: (command, args, options) => {
         call = { command, args, options: options as Record<string, unknown> };
         return {
@@ -821,6 +1040,7 @@ describe("speakText", () => {
 
     speakText("Hello", {
       voice: "Siri",
+      platform: "darwin",
       warn: (message) => warnings.push(message),
       spawnFn: () => ({
         on(event, listener) {

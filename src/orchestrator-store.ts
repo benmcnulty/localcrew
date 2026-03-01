@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { loadLocalEnv } from "./env.ts";
 import { loadBuiltinAgentSeeds, loadSeedFile } from "./external-memory.ts";
+import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
 import { getStoragePaths } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
 import { getDefaultTelemetrySummary } from "./telemetry.ts";
@@ -78,6 +79,9 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
     createdAt: candidate.createdAt,
     createdBy: candidate.createdBy,
     status: candidate.status === "completed" ? "completed" : "queued",
+    ...(typeof candidate.delegationRole === "string" && candidate.delegationRole.trim() !== ""
+      ? { delegationRole: candidate.delegationRole.trim() }
+      : {}),
     ...(typeof candidate.requestedResource === "string" &&
     candidate.requestedResource.trim() !== ""
       ? { requestedResource: candidate.requestedResource }
@@ -136,19 +140,20 @@ function normalizeSystemState(raw: unknown): SystemState {
   };
 }
 
-function getDefaultDirectives(): string {
+function getDefaultDirectives(rootDir = process.cwd()): string {
+  const orchestratorName = getOrchestratorIdentityName(rootDir);
   return [
-    "# Erin Directives",
+    `# ${orchestratorName} Directives`,
     "",
-    "You are Erin, the orchestrator and conscience of this local agent swarm.",
+    `You are ${orchestratorName}, the orchestrator and conscience of this local agent swarm.`,
     "Your job is to route work across the available inference resources, keep memory useful, and keep the system improving inside its local scope.",
     "",
     "## Core Rules",
     "",
-    "- Use air for orchestration, reasoning, verification, and code-heavy work when uncertain.",
-    "- Use vic for heavier general drafting and sustained generation.",
-    "- Use min for routing, indexing, queue formatting, and lightweight structured outputs.",
-    "- Use pav for overflow and alternate small-model perspective.",
+    "- Prefer the local orchestrator resource for reasoning, verification, and ambiguous routing decisions.",
+    "- Prefer the strongest available non-orchestrator top-tier resource for sustained drafting when one is available.",
+    "- Prefer mid-tier or tools-capable resources for structured routing, indexing, and bookkeeping work when possible.",
+    "- Reserve low-tier resources for small-context isolated tasks and overflow work.",
     "- Keep tasks concrete, concise, and scoped to what this local system can actually do.",
     "- When the queue is empty, propose a brief medium/low priority self-improvement backlog for the orchestration system itself.",
     "- Agent identities are separate from devices. Devices are inference resources; agents are persistent working identities with their own specs and memory.",
@@ -157,7 +162,7 @@ function getDefaultDirectives(): string {
     "",
     ACTIVE_AUTO_DIRECTIVE_HEADING,
     "",
-    "- In `/auto`, self-aware self-improvement is Erin's default operating stance whenever the user has not given a more urgent direct task.",
+    `- In \`/auto\`, self-aware self-improvement is ${orchestratorName}'s default operating stance whenever the user has not given a more urgent direct task.`,
     "- Continuously review documentation, indexing, task logs, prompt guidance, delegation heuristics, queue hygiene, and memory quality for opportunities to improve the system.",
     "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance.",
     "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance.",
@@ -203,7 +208,7 @@ function getDefaultWorkflow(): string {
     "- Mission and responsibility",
     "- Personality and response style",
     "- Tool-use and skills guidance",
-    "- Preferred resource (`air`, `vic`, `min`, `pav`, or `auto`)"
+    "- Preferred resource (`resource-alias` or `auto`)"
   ].join("\n");
 }
 
@@ -215,6 +220,35 @@ async function writeIfMissing(path: string, content: string): Promise<void> {
       throw error;
     }
     await writeFile(path, `${content.trimEnd()}\n`, "utf8");
+  }
+}
+
+async function replaceGeneratedOrchestratorIdentityText(
+  rootDir: string,
+  path: string
+): Promise<void> {
+  const orchestratorName = getOrchestratorIdentityName(rootDir);
+
+  try {
+    const current = await readFile(path, "utf8");
+    const next = current
+      .replace(/^# .+ Directives$/m, `# ${orchestratorName} Directives`)
+      .replace(
+        /^You are (?:.+?, )?the orchestrator and conscience of this local agent swarm\.$/m,
+        `You are ${orchestratorName}, the orchestrator and conscience of this local agent swarm.`
+      )
+      .replace(
+        /^- In `\/auto`, self-aware self-improvement is (?:.+?'s|the orchestrator's) default operating stance whenever the user has not given a more urgent direct task\.$/m,
+        `- In \`/auto\`, self-aware self-improvement is ${orchestratorName}'s default operating stance whenever the user has not given a more urgent direct task.`
+      );
+
+    if (next !== current) {
+      await writeFile(path, next, "utf8");
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 }
 
@@ -301,7 +335,7 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await writeIfMissing(paths.systemStatePath, JSON.stringify(getDefaultSystemState(), null, 2));
   await writeIfMissing(
     paths.directivesPath,
-    await loadSeedFile("orchestrator/directives.md", getDefaultDirectives(), rootDir)
+    await loadSeedFile("orchestrator/directives.md", getDefaultDirectives(rootDir), rootDir)
   );
   await writeIfMissing(
     paths.roadmapPath,
@@ -331,13 +365,14 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
     "# Orchestrator Memory\n\nPersistent orchestrator summaries and notes live here.\n"
   );
   await writeIfMissing(paths.agentsIndexPath, JSON.stringify({ agents: [] }, null, 2));
+  await replaceGeneratedOrchestratorIdentityText(rootDir, paths.directivesPath);
   await ensureDocumentContains(
     paths.directivesPath,
     ACTIVE_AUTO_DIRECTIVE_HEADING,
     [
       ACTIVE_AUTO_DIRECTIVE_HEADING,
       "",
-      "- In `/auto`, self-aware self-improvement is Erin's default operating stance whenever the user has not given a more urgent direct task.",
+      `- In \`/auto\`, self-aware self-improvement is ${getOrchestratorIdentityName(rootDir)}'s default operating stance whenever the user has not given a more urgent direct task.`,
       "- Continuously review documentation, indexing, task logs, prompt guidance, delegation heuristics, queue hygiene, and memory quality for opportunities to improve the system.",
       "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance.",
       "- Prefer improvements that make future autonomous work more coherent, reliable, efficient, and easier to verify.",
@@ -593,7 +628,7 @@ function buildAgentSpec(answers: AgentCreateAnswers): string {
     "QUEUE[medium]: concise task",
     "QUEUE[low]: concise task",
     "Or, when a specific device should be requested explicitly:",
-    "QUEUE[medium][air]: concise task"
+    "QUEUE[medium][resource-alias]: concise task"
   ].join("\n");
 }
 

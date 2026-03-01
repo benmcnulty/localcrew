@@ -4,6 +4,7 @@ export interface StoragePaths {
   rootDir: string;
   storageDir: string;
   configPath: string;
+  resourcesPath: string;
   sessionsPath: string;
   systemDir: string;
   secureDir: string;
@@ -39,6 +40,7 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     rootDir: resolvedRoot,
     storageDir,
     configPath: join(storageDir, "config.json"),
+    resourcesPath: join(storageDir, "resources.json"),
     sessionsPath: join(storageDir, "sessions.json"),
     systemDir,
     secureDir,

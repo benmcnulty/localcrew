@@ -7,4 +7,4 @@ Collect the following before creating an agent identity:
 - Mission and responsibility
 - Personality and response style
 - Tool-use and skills guidance
-- Preferred resource (`air`, `vic`, `min`, `pav`, or `auto`)
+- Preferred resource (`resource-alias` or `auto`)

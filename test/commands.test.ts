@@ -112,6 +112,98 @@ describe("parseCommand", () => {
     });
   });
 
+  test("parses resource commands", () => {
+    expect(parseCommand("/resource list")).toEqual({
+      type: "resource.list"
+    });
+    expect(parseCommand('/resource add workhorse "Second Device" http://127.0.0.1:11435 top')).toEqual({
+      type: "resource.add",
+      alias: "workhorse",
+      label: "Second Device",
+      baseUrl: "http://127.0.0.1:11435",
+      tier: "top"
+    });
+    expect(
+      parseCommand('/resource add studio "LM Studio" http://127.0.0.1:1234 openai')
+    ).toEqual({
+      type: "resource.add",
+      alias: "studio",
+      label: "LM Studio",
+      baseUrl: "http://127.0.0.1:1234",
+      apiStyle: "openai"
+    });
+    expect(parseCommand("/resource edit workhorse")).toEqual({
+      type: "resource.edit",
+      alias: "workhorse"
+    });
+    expect(parseCommand("/resource refresh workhorse")).toEqual({
+      type: "resource.refresh",
+      alias: "workhorse"
+    });
+    expect(parseCommand("/resource remove workhorse")).toEqual({
+      type: "resource.remove",
+      alias: "workhorse"
+    });
+  });
+
+  test("parses participant commands", () => {
+    expect(parseCommand("/participant list")).toEqual({
+      type: "participant.list"
+    });
+    expect(parseCommand('/participant add reviewer workhorse "Reviewer Prime"')).toEqual({
+      type: "participant.add",
+      alias: "reviewer",
+      resourceAlias: "workhorse",
+      nickname: "Reviewer Prime"
+    });
+    expect(parseCommand("/participant edit reviewer")).toEqual({
+      type: "participant.edit",
+      alias: "reviewer"
+    });
+    expect(parseCommand("/participant remove reviewer")).toEqual({
+      type: "participant.remove",
+      alias: "reviewer"
+    });
+  });
+
+  test("parses model and direct chat commands", () => {
+    expect(parseCommand("/models")).toEqual({
+      type: "models.list"
+    });
+    expect(parseCommand("/models @reviewer")).toEqual({
+      type: "models.list",
+      target: "@reviewer"
+    });
+    expect(parseCommand('/direct workhorse "Ping the node" llama3.1:8b')).toEqual({
+      type: "directChat",
+      resourceAlias: "workhorse",
+      text: "Ping the node",
+      model: "llama3.1:8b"
+    });
+    expect(parseCommand("/model reviewer llama3.1:70b")).toEqual({
+      type: "model.assign",
+      alias: "reviewer",
+      model: "llama3.1:70b"
+    });
+  });
+
+  test("parses nickname, bind, and orchestrator commands", () => {
+    expect(parseCommand('/nickname @reviewer "Reviewer Prime"')).toEqual({
+      type: "nickname.set",
+      alias: "reviewer",
+      nickname: "Reviewer Prime"
+    });
+    expect(parseCommand("/bind @reviewer helper")).toEqual({
+      type: "bind.set",
+      alias: "reviewer",
+      resourceAlias: "helper"
+    });
+    expect(parseCommand('/orchestrator "Aster"')).toEqual({
+      type: "orchestrator.set",
+      name: "Aster"
+    });
+  });
+
   test("rejects unknown commands", () => {
     expect(() => parseCommand("/nope")).toThrow('Unknown command "/nope".');
   });

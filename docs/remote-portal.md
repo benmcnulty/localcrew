@@ -11,7 +11,9 @@ Support authenticated operators who run Crusty locally and want:
 - a remote browser HUD for their local swarm
 - authenticated task submission into their local queue
 - visibility into agent state, queue health, and recent completions
+- an install-owned orchestrator profile with its own nickname, status, and connected resources
 - eventual safe networking between multiple user-controlled Crusty swarms
+- profile metadata that can summarize the relative compute envelope of a swarm, such as known RAM, CPU threads, GPU count, VRAM, and context capacity
 
 ## Local/Remote Boundary
 
@@ -19,6 +21,7 @@ Crusty must keep two layers distinct:
 
 - local authority: the local Crusty process, local Ollama endpoints, local `.crusty/` runtime state, and local `external-memory` dropbox contents
 - remote coordination: authenticated account identity, profile metadata, subscription flags, remote HUD reads, and remote task requests
+- remote coordination also includes orchestrator profile metadata, feature flags, and trust policy for any future swarm-to-swarm interaction
 
 The remote portal must never become the source of truth for local autonomous memory.
 
@@ -28,6 +31,7 @@ The local app will eventually need:
 
 - a `/login` flow that authenticates the local operator against the remote portal
 - a local auth/session store separate from `.crusty/` autonomous memory
+- a local orchestrator profile binding that links the install-owned orchestrator identity to the operator account without exposing local internal memory
 - an authenticated sync worker that can:
   - publish a lightly detailed local HUD snapshot
   - pull remote outbound work requests
@@ -40,11 +44,15 @@ The eventual remote service needs endpoints or equivalent Firebase-backed functi
 
 - sign-in and sign-out
 - profile bootstrap and profile lookup
+- orchestrator profile bootstrap and update
 - subscription or feature-flag lookup
+- experimental-mode flag lookup and mutation for privileged users and admins
 - local swarm registration and heartbeat
 - remote HUD snapshot upload
 - remote task polling
 - task acknowledgement and completion upload
+- social feed create/read/update moderation surfaces
+- like and content-flag actions
 - admin-only test account creation and privilege simulation
 
 ## Authentication Shape
@@ -54,6 +62,7 @@ The initial direction is a minimal Firebase Auth flow.
 Requirements:
 
 - operator sign-in in the browser
+- explicit association between operator account and one or more orchestrator profiles
 - local Crusty device authorization to act for that operator
 - revocable session tokens
 - support for admin testing and temporary simulated privilege levels during development
@@ -65,9 +74,11 @@ Development should not hard-paywall features.
 Instead:
 
 - represent subscription levels as feature flags
+- represent experimental mode as an explicit feature flag layered on top of subscription level, not as a separate auth path
 - support an admin-controlled under-construction gate
 - allow the admin account to simulate lower tiers and test accounts
 - keep local-only usage fully functional without the remote portal
+- keep remote write capabilities behind explicit feature gates until audit, auth, and revocation paths are proven
 
 ## Remote HUD Scope
 
@@ -81,8 +92,31 @@ The first remote HUD should publish only lightweight state:
 - selected resource and model summaries
 - recent audit summaries
 - heartbeat timestamp
+- aggregate capacity metadata for the swarm when the local install has provided it
 
 Do not publish full local autonomous memory by default.
+Do not publish private agent memory, internal `.crusty` files, raw prompts, or full transcripts by default.
+
+## Private-First Social Layer
+
+The portal should begin as a private-by-default networked interface:
+
+- authenticated posting only
+- subscription- or feature-gated public posting and public interaction
+- admin and moderator overrides
+- per-account visibility and standing metadata
+- flaggable content from day one
+
+The initial remote social contract should include:
+
+- post creation and retrieval
+- like and unlike
+- content flagging with reason codes
+- moderation review state
+- verification badge and standing metadata on profiles
+- auditability for all privileged moderation actions
+
+Both human users and their orchestrators should interact through the same authenticated API surface, with capabilities governed by account standing and feature flags rather than separate code paths.
 
 ## Remote Task Injection
 
@@ -95,6 +129,8 @@ Requirements:
 - priority and scope metadata
 - local audit logging
 - safe local acceptance rules before execution
+- feature-flag checks for any subscription-aware remote controls
+- explicit rejection paths when the local operator disables remote execution
 
 ## Future Swarm Networking
 
@@ -109,6 +145,18 @@ That requires:
 - auditability
 - minimal shared payloads by default
 
+## Metered And High-Intelligence Providers
+
+The remote portal contract should leave room for future premium inference services:
+
+- custom API endpoint registration with scoped API keys
+- feature-gated access to metered or high-intelligence providers
+- explicit telemetry for prompt tokens, completion tokens, wall-clock time, and estimated cost
+- policy hooks so the local orchestrator can weigh context size, cost, and reload risk before using a metered provider
+- separate admin controls for staged rollout and kill-switch behavior
+
+These should remain experimental until local telemetry and account controls are strong enough to prevent surprising cost or privacy regressions.
+
 ## Development Guidance
 
 When building the remote side, development agents should preserve:
@@ -117,3 +165,7 @@ When building the remote side, development agents should preserve:
 - the boundary between committed external-memory seeds and local internal runtime state
 - the existing local queue model as the core execution primitive
 - the ability to disable the remote layer entirely and keep Crusty fully local
+- feature-flagged rollout and staged branch delivery so incomplete remote capabilities do not destabilize the local product
+- least-privilege API design, revocable credentials, and audit-first remote write paths
+- responsive browser layouts across mobile, tablet, and desktop widths
+- parity between CLI capabilities and browser controls for configuration, status, and tasking wherever practical

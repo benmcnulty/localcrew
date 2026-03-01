@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { getEnvBoolean, getEnvString, loadLocalEnv } from "./env.ts";
+import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
+import { getResourceProfile, listResources } from "./resources.ts";
 import { getStoragePaths } from "./storage.ts";
 import type { AppConfig, EndpointConfig } from "./types.ts";
 import {
@@ -18,15 +20,19 @@ function titleCase(value: string): string {
     return value;
   }
 
-  return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
+  return value
+    .split(/[-_\s]+/)
+    .filter((segment) => segment !== "")
+    .map((segment) => segment.slice(0, 1).toUpperCase() + segment.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function getLegacyDefaultInstruction(alias: string): string {
   return `You are ${titleCase(alias)}. Reply clearly and concisely.`;
 }
 
-export function getDefaultInstruction(alias: string): string {
-  const name = titleCase(alias);
+export function getDefaultInstruction(alias: string, nickname = titleCase(alias)): string {
+  const name = nickname.trim() || titleCase(alias);
 
   switch (alias.toLowerCase()) {
     case "erin":
@@ -42,30 +48,42 @@ export function getDefaultInstruction(alias: string): string {
   }
 }
 
-function getDefaultEndpointModel(alias: string): string {
-  switch (alias.toLowerCase()) {
-    case "erin":
-      return "llama3.1:8b";
-    case "zora":
-      return "llama3.1:8b";
-    case "sam":
-      return "llama3.2:1b";
-    case "pav":
-      return "llama3.2:1b";
-    default:
-      return "llama3.1:8b";
-  }
+function getDefaultEndpointNickname(alias: string, label?: string): string {
+  return typeof label === "string" && label.trim() !== "" ? label.trim() : titleCase(alias);
 }
 
-function getDefaultEndpointConfig(alias: string): EndpointConfig {
+function getDefaultEndpointConfig(
+  alias: string,
+  resourceAlias: string,
+  rootDir = process.cwd()
+): EndpointConfig {
   const upperAlias = alias.toUpperCase();
+  let fallbackBaseUrl = "http://127.0.0.1:11434";
+  let fallbackModel = "llama3.1:8b";
+  let fallbackApiStyle: "ollama" | "openai" = "ollama";
+  let fallbackApiKeyEnv: string | undefined;
+  const fallbackNickname = titleCase(alias);
+
+  try {
+    const resource = getResourceProfile(resourceAlias, rootDir);
+    fallbackBaseUrl = resource.baseUrl;
+    fallbackModel = resource.defaultModel;
+    fallbackApiStyle = resource.apiStyle ?? "ollama";
+    fallbackApiKeyEnv = resource.apiKeyEnv;
+  } catch {}
+
+  const nickname = getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_NICKNAME`, fallbackNickname);
 
   return {
-    baseUrl: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_BASE_URL`, "http://127.0.0.1:11434"),
-    model: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_MODEL`, getDefaultEndpointModel(alias)),
+    resourceAlias: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_RESOURCE`, resourceAlias),
+    nickname,
+    baseUrl: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_BASE_URL`, fallbackBaseUrl),
+    apiStyle: fallbackApiStyle,
+    ...(fallbackApiKeyEnv ? { apiKeyEnv: fallbackApiKeyEnv } : {}),
+    model: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_MODEL`, fallbackModel),
     instructions: getEnvString(
       `CRUSTY_ENDPOINT_${upperAlias}_INSTRUCTIONS`,
-      getDefaultInstruction(alias)
+      getDefaultInstruction(alias, nickname)
     ),
     voicePreset: normalizeVoicePreset(
       getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_VOICE`, getDefaultVoicePreset(alias)),
@@ -76,41 +94,57 @@ function getDefaultEndpointConfig(alias: string): EndpointConfig {
 
 function getDefaultEndpoints(rootDir = process.cwd()): Record<string, EndpointConfig> {
   loadLocalEnv(rootDir);
+  const resources = listResources(rootDir);
+  const fallbackResourceAlias = resources[0]?.alias ?? "orchestrator";
 
   return {
-    erin: getDefaultEndpointConfig("erin"),
-    zora: getDefaultEndpointConfig("zora"),
-    sam: getDefaultEndpointConfig("sam"),
-    pav: getDefaultEndpointConfig("pav")
+    erin: getDefaultEndpointConfig("erin", resources[0]?.alias ?? fallbackResourceAlias, rootDir),
+    zora: getDefaultEndpointConfig("zora", resources[1]?.alias ?? fallbackResourceAlias, rootDir),
+    sam: getDefaultEndpointConfig("sam", resources[2]?.alias ?? fallbackResourceAlias, rootDir),
+    pav: getDefaultEndpointConfig("pav", resources[3]?.alias ?? fallbackResourceAlias, rootDir)
   };
 }
 
 export function getDefaultConfig(rootDir = process.cwd()): AppConfig {
   loadLocalEnv(rootDir);
+  const endpoints = getDefaultEndpoints(rootDir);
+  const endpointAliases = Object.keys(endpoints);
+  const requestedDefault = getEnvString(
+    "CRUSTY_DEFAULT_ENDPOINT",
+    endpointAliases[0] ?? "orchestrator"
+  ).toLowerCase();
 
   return {
-    defaultEndpoint: getEnvString("CRUSTY_DEFAULT_ENDPOINT", "erin").toLowerCase(),
+    orchestratorName: getOrchestratorIdentityName(rootDir),
+    defaultEndpoint: endpointAliases.includes(requestedDefault)
+      ? requestedDefault
+      : (endpointAliases[0] ?? "orchestrator"),
     soundEnabled: getEnvBoolean("CRUSTY_SOUND_ENABLED", true),
-    endpoints: getDefaultEndpoints(rootDir)
+    endpoints
   };
 }
 
-function normalizeInstruction(alias: string, instructions: unknown): { value: string; changed: boolean } {
+function normalizeInstruction(
+  alias: string,
+  nickname: string,
+  instructions: unknown
+): { value: string; changed: boolean } {
   if (typeof instructions !== "string") {
     return {
-      value: getDefaultInstruction(alias),
+      value: getDefaultInstruction(alias, nickname),
       changed: true
     };
   }
 
   const generatedInstructions = new Set([
     getLegacyDefaultInstruction(alias),
-    getDefaultInstruction(alias)
+    getDefaultInstruction(alias, titleCase(alias)),
+    getDefaultInstruction(alias, nickname)
   ]);
 
   if (generatedInstructions.has(instructions)) {
     return {
-      value: getDefaultInstruction(alias),
+      value: getDefaultInstruction(alias, nickname),
       changed: true
     };
   }
@@ -123,23 +157,61 @@ function normalizeInstruction(alias: string, instructions: unknown): { value: st
 
 function normalizeEndpoint(
   alias: string,
-  value: unknown
+  value: unknown,
+  rootDir = process.cwd()
 ): { endpoint: EndpointConfig; changed: boolean } {
   if (!value || typeof value !== "object") {
     throw new Error(`Endpoint "${alias}" must be an object.`);
   }
 
   const candidate = value as Partial<EndpointConfig>;
+  const nickname =
+    typeof candidate.nickname === "string" && candidate.nickname.trim() !== ""
+      ? candidate.nickname.trim()
+      : getDefaultEndpointNickname(alias);
+  const resourceAlias =
+    typeof candidate.resourceAlias === "string" && candidate.resourceAlias.trim() !== ""
+      ? candidate.resourceAlias.trim().toLowerCase()
+      : alias;
 
-  if (typeof candidate.baseUrl !== "string" || candidate.baseUrl.trim() === "") {
-    throw new Error(`Endpoint "${alias}" is missing a valid "baseUrl".`);
+  let baseUrl =
+    typeof candidate.baseUrl === "string" && candidate.baseUrl.trim() !== ""
+      ? candidate.baseUrl.trim()
+      : "http://127.0.0.1:11434";
+  let apiStyle = candidate.apiStyle === "openai" ? "openai" : "ollama";
+  let apiKeyEnv =
+    typeof candidate.apiKeyEnv === "string" && candidate.apiKeyEnv.trim() !== ""
+      ? candidate.apiKeyEnv.trim()
+      : undefined;
+  let model =
+    typeof candidate.model === "string" && candidate.model.trim() !== ""
+      ? candidate.model.trim()
+      : "llama3.1:8b";
+
+  try {
+    const resource = getResourceProfile(resourceAlias, rootDir);
+    if (typeof candidate.baseUrl !== "string" || candidate.baseUrl.trim() === "") {
+      baseUrl = resource.baseUrl;
+    }
+    if (typeof candidate.apiStyle !== "string") {
+      apiStyle = resource.apiStyle ?? "ollama";
+    }
+    if (typeof candidate.apiKeyEnv !== "string" || candidate.apiKeyEnv.trim() === "") {
+      apiKeyEnv = resource.apiKeyEnv;
+    }
+    if (typeof candidate.model !== "string" || candidate.model.trim() === "") {
+      model = resource.defaultModel;
+    }
+  } catch {
+    if (typeof candidate.baseUrl !== "string" || candidate.baseUrl.trim() === "") {
+      throw new Error(`Endpoint "${alias}" is missing a valid "baseUrl".`);
+    }
+    if (typeof candidate.model !== "string" || candidate.model.trim() === "") {
+      throw new Error(`Endpoint "${alias}" is missing a valid "model".`);
+    }
   }
 
-  if (typeof candidate.model !== "string" || candidate.model.trim() === "") {
-    throw new Error(`Endpoint "${alias}" is missing a valid "model".`);
-  }
-
-  const instructions = normalizeInstruction(alias, candidate.instructions);
+  const instructions = normalizeInstruction(alias, nickname, candidate.instructions);
   const requestedVoicePreset =
     typeof candidate.voicePreset === "string" ? candidate.voicePreset : getDefaultVoicePreset(alias);
   const normalizedRequestedVoicePreset = normalizeVoicePreset(requestedVoicePreset, alias);
@@ -153,25 +225,38 @@ function normalizeEndpoint(
 
   return {
     endpoint: {
-      baseUrl: candidate.baseUrl,
-      model: candidate.model,
+      resourceAlias,
+      nickname,
+      baseUrl,
+      apiStyle,
+      ...(apiKeyEnv ? { apiKeyEnv } : {}),
+      model,
       instructions: instructions.value,
       voicePreset
     },
     changed:
       instructions.changed ||
       shouldUpgradeDefaultVoice ||
+      typeof candidate.apiStyle !== "string" ||
+      (apiKeyEnv !== undefined &&
+        (typeof candidate.apiKeyEnv !== "string" || candidate.apiKeyEnv.trim() === "")) ||
       typeof candidate.voicePreset !== "string" ||
-      !hasVoicePreset(candidate.voicePreset)
+      !hasVoicePreset(candidate.voicePreset) ||
+      typeof candidate.nickname !== "string" ||
+      typeof candidate.resourceAlias !== "string"
   };
 }
 
-function normalizeConfig(raw: unknown): { config: AppConfig; changed: boolean } {
+function normalizeConfig(
+  raw: unknown,
+  rootDir = process.cwd()
+): { config: AppConfig; changed: boolean } {
   if (!raw || typeof raw !== "object") {
     throw new Error("Config root must be an object.");
   }
 
   const candidate = raw as {
+    orchestratorName?: unknown;
     defaultEndpoint?: unknown;
     soundEnabled?: unknown;
     endpoints?: unknown;
@@ -183,16 +268,16 @@ function normalizeConfig(raw: unknown): { config: AppConfig; changed: boolean } 
 
   let changed = false;
   const rawEndpoints = candidate.endpoints as Record<string, unknown>;
-
-  const endpoints = Object.entries(rawEndpoints).reduce<
-    Record<string, EndpointConfig>
-  >((accumulator, [alias, endpoint]) => {
-    const normalizedAlias = alias.toLowerCase();
-    const result = normalizeEndpoint(normalizedAlias, endpoint);
-    accumulator[normalizedAlias] = result.endpoint;
-    changed ||= result.changed || normalizedAlias !== alias;
-    return accumulator;
-  }, {});
+  const endpoints = Object.entries(rawEndpoints).reduce<Record<string, EndpointConfig>>(
+    (accumulator, [alias, endpoint]) => {
+      const normalizedAlias = alias.toLowerCase();
+      const result = normalizeEndpoint(normalizedAlias, endpoint, rootDir);
+      accumulator[normalizedAlias] = result.endpoint;
+      changed ||= result.changed || normalizedAlias !== alias;
+      return accumulator;
+    },
+    {}
+  );
 
   const endpointKeys = Object.keys(endpoints);
   if (endpointKeys.length === 0) {
@@ -202,20 +287,26 @@ function normalizeConfig(raw: unknown): { config: AppConfig; changed: boolean } 
   const requestedDefault =
     typeof candidate.defaultEndpoint === "string"
       ? candidate.defaultEndpoint.toLowerCase()
-      : "erin";
+      : endpointKeys[0];
   const defaultEndpoint = endpointKeys.includes(requestedDefault)
     ? requestedDefault
     : endpointKeys[0];
   const soundEnabled =
     typeof candidate.soundEnabled === "boolean" ? candidate.soundEnabled : true;
+  const orchestratorName =
+    typeof candidate.orchestratorName === "string" && candidate.orchestratorName.trim() !== ""
+      ? candidate.orchestratorName.trim()
+      : getOrchestratorIdentityName(rootDir);
 
   changed ||=
     typeof candidate.defaultEndpoint !== "string" ||
     requestedDefault !== defaultEndpoint ||
-    typeof candidate.soundEnabled !== "boolean";
+    typeof candidate.soundEnabled !== "boolean" ||
+    typeof candidate.orchestratorName !== "string";
 
   return {
     config: {
+      orchestratorName,
       defaultEndpoint,
       soundEnabled,
       endpoints
@@ -237,7 +328,7 @@ export async function loadConfig(rootDir = process.cwd()): Promise<AppConfig> {
 
   try {
     const raw = await readFile(paths.configPath, "utf8");
-    const normalized = normalizeConfig(JSON.parse(raw));
+    const normalized = normalizeConfig(JSON.parse(raw), rootDir);
     if (normalized.changed) {
       await saveConfig(normalized.config, rootDir);
     }
@@ -267,6 +358,39 @@ export function ensureEndpointAlias(config: AppConfig, alias: string): string {
 
 export function isValidAlias(alias: string): boolean {
   return ALIAS_PATTERN.test(alias);
+}
+
+export function resolveEndpointConfig(
+  config: AppConfig,
+  alias: string,
+  rootDir = process.cwd()
+): EndpointConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const endpoint = config.endpoints[normalizedAlias];
+
+  try {
+    const resource = getResourceProfile(endpoint.resourceAlias, rootDir);
+    return {
+      ...endpoint,
+      baseUrl: resource.baseUrl,
+      apiStyle: resource.apiStyle ?? "ollama",
+      ...(resource.apiKeyEnv ? { apiKeyEnv: resource.apiKeyEnv } : {})
+    };
+  } catch {
+    return endpoint;
+  }
+}
+
+export function setOrchestratorName(config: AppConfig, name: string): AppConfig {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error("Orchestrator name cannot be empty.");
+  }
+
+  return {
+    ...config,
+    orchestratorName: trimmedName
+  };
 }
 
 export function setEndpointInstructions(
@@ -309,5 +433,125 @@ export function setEndpointVoicePreset(
         voicePreset: normalizedPreset
       }
     }
+  };
+}
+
+export function setEndpointModel(config: AppConfig, alias: string, model: string): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const trimmedModel = model.trim();
+  if (!trimmedModel) {
+    throw new Error("Model cannot be empty.");
+  }
+
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        ...config.endpoints[normalizedAlias],
+        model: trimmedModel
+      }
+    }
+  };
+}
+
+export function setEndpointNickname(config: AppConfig, alias: string, nickname: string): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const trimmedNickname = nickname.trim();
+  if (!trimmedNickname) {
+    throw new Error("Nickname cannot be empty.");
+  }
+
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        ...config.endpoints[normalizedAlias],
+        nickname: trimmedNickname
+      }
+    }
+  };
+}
+
+export function setEndpointResourceAlias(
+  config: AppConfig,
+  alias: string,
+  resourceAlias: string,
+  rootDir = process.cwd()
+): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const resource = getResourceProfile(resourceAlias, rootDir);
+
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        ...config.endpoints[normalizedAlias],
+        resourceAlias: resource.alias,
+        baseUrl: resource.baseUrl,
+        apiStyle: resource.apiStyle ?? "ollama",
+        ...(resource.apiKeyEnv ? { apiKeyEnv: resource.apiKeyEnv } : {})
+      }
+    }
+  };
+}
+
+export function addEndpoint(
+  config: AppConfig,
+  alias: string,
+  resourceAlias: string,
+  nickname: string | undefined,
+  rootDir = process.cwd()
+): AppConfig {
+  const normalizedAlias = alias.trim().toLowerCase();
+  if (!isValidAlias(normalizedAlias)) {
+    throw new Error(`Invalid endpoint alias "${alias}".`);
+  }
+  if (config.endpoints[normalizedAlias]) {
+    throw new Error(`Endpoint alias "${normalizedAlias}" already exists.`);
+  }
+
+  const resource = getResourceProfile(resourceAlias, rootDir);
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        resourceAlias: resource.alias,
+        nickname: nickname?.trim() || getDefaultEndpointNickname(normalizedAlias),
+        baseUrl: resource.baseUrl,
+        apiStyle: resource.apiStyle ?? "ollama",
+        ...(resource.apiKeyEnv ? { apiKeyEnv: resource.apiKeyEnv } : {}),
+        model: resource.defaultModel,
+        instructions: getDefaultInstruction(
+          normalizedAlias,
+          nickname?.trim() || getDefaultEndpointNickname(normalizedAlias)
+        ),
+        voicePreset: getDefaultVoicePreset(normalizedAlias)
+      }
+    }
+  };
+}
+
+export function removeEndpoint(config: AppConfig, alias: string): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const endpointAliases = Object.keys(config.endpoints);
+  if (endpointAliases.length === 1) {
+    throw new Error("At least one participant must remain configured.");
+  }
+
+  const nextEndpoints = { ...config.endpoints };
+  delete nextEndpoints[normalizedAlias];
+  const nextDefault =
+    config.defaultEndpoint === normalizedAlias
+      ? Object.keys(nextEndpoints)[0]
+      : config.defaultEndpoint;
+
+  return {
+    ...config,
+    defaultEndpoint: nextDefault,
+    endpoints: nextEndpoints
   };
 }

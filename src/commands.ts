@@ -38,10 +38,24 @@ function usage(command: string): string {
       return "Usage: /priority [high|medium|low]";
     case "/agent":
       return "Usage: /agent list | /agent new | /agent edit <name> | /agent <name>";
+    case "/participant":
+      return 'Usage: /participant list | /participant add <alias> <resourceAlias> ["nickname"] | /participant edit <alias> | /participant remove <alias>';
+    case "/resource":
+      return 'Usage: /resource list | /resource add <alias> "<label>" <baseUrl> [top|mid|low] [ollama|openai] | /resource edit <alias> | /resource refresh <alias> | /resource remove <alias>';
+    case "/models":
+      return "Usage: /models [resourceAlias|@participantAlias]";
+    case "/direct":
+      return 'Usage: /direct <resourceAlias> "<message>" [model]';
     case "/model":
-      return "Usage: /model [alias]";
+      return "Usage: /model [alias] | /model <alias> <model>";
     case "/default":
       return "Usage: /default [alias]";
+    case "/nickname":
+      return 'Usage: /nickname [@alias] ["name"]';
+    case "/bind":
+      return "Usage: /bind [@alias] [resourceAlias]";
+    case "/orchestrator":
+      return 'Usage: /orchestrator ["name"]';
     case "/rename":
       return "Usage: /rename <oldAlias> <newAlias>";
     case "/sound":
@@ -85,6 +99,22 @@ function parseBooleanToggle(value: string): boolean | undefined {
 
 function parsePriority(value: string): "high" | "medium" | "low" | undefined {
   if (value === "high" || value === "medium" || value === "low") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parseTier(value: string): "top" | "mid" | "low" | undefined {
+  if (value === "top" || value === "mid" || value === "low") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parseApiStyle(value: string): "ollama" | "openai" | undefined {
+  if (value === "ollama" || value === "openai") {
     return value;
   }
 
@@ -350,16 +380,108 @@ export function parseCommand(input: string): Command {
         };
       }
       throw new CommandParseError(usage("/agent"));
+    case "/participant":
+      if (rest.length === 1 && rest[0].toLowerCase() === "list") {
+        return { type: "participant.list" };
+      }
+      if (rest.length >= 3 && rest[0].toLowerCase() === "add") {
+        return {
+          type: "participant.add",
+          alias: normalizeAlias(rest[1]),
+          resourceAlias: normalizeAlias(rest[2]),
+          ...(rest[3] ? { nickname: rest.slice(3).join(" ") } : {})
+        };
+      }
+      if (rest.length === 2 && rest[0].toLowerCase() === "edit") {
+        return {
+          type: "participant.edit",
+          alias: normalizeAlias(rest[1])
+        };
+      }
+      if (rest.length === 2 && rest[0].toLowerCase() === "remove") {
+        return {
+          type: "participant.remove",
+          alias: normalizeAlias(rest[1])
+        };
+      }
+      throw new CommandParseError(usage("/participant"));
+    case "/resource":
+      if (rest.length === 1 && rest[0].toLowerCase() === "list") {
+        return { type: "resource.list" };
+      }
+      if (rest.length >= 4 && rest.length <= 6 && rest[0].toLowerCase() === "add") {
+        const tier = rest[4] ? parseTier(rest[4].toLowerCase()) : undefined;
+        const apiStyle = rest[5]
+          ? parseApiStyle(rest[5].toLowerCase())
+          : rest[4] && !tier
+            ? parseApiStyle(rest[4].toLowerCase())
+            : undefined;
+        if (rest[4] && !tier && !apiStyle) {
+          throw new CommandParseError(usage("/resource"));
+        }
+        if (rest[5] && !apiStyle) {
+          throw new CommandParseError(usage("/resource"));
+        }
+        return {
+          type: "resource.add",
+          alias: normalizeAlias(rest[1]),
+          label: rest[2],
+          baseUrl: rest[3],
+          ...(tier ? { tier } : {}),
+          ...(apiStyle ? { apiStyle } : {})
+        };
+      }
+      if (rest.length === 2 && rest[0].toLowerCase() === "edit") {
+        return {
+          type: "resource.edit",
+          alias: normalizeAlias(rest[1])
+        };
+      }
+      if (rest.length === 2 && rest[0].toLowerCase() === "refresh") {
+        return {
+          type: "resource.refresh",
+          alias: normalizeAlias(rest[1])
+        };
+      }
+      if (rest.length === 2 && rest[0].toLowerCase() === "remove") {
+        return {
+          type: "resource.remove",
+          alias: normalizeAlias(rest[1])
+        };
+      }
+      throw new CommandParseError(usage("/resource"));
+    case "/models":
+      if (rest.length > 1) {
+        throw new CommandParseError(usage("/models"));
+      }
+      return {
+        type: "models.list",
+        ...(rest[0] ? { target: rest[0] } : {})
+      };
+    case "/direct":
+      if (rest.length < 2 || rest.length > 3) {
+        throw new CommandParseError(usage("/direct"));
+      }
+      return {
+        type: "directChat",
+        resourceAlias: normalizeAlias(rest[0]),
+        text: rest[1],
+        ...(rest[2] ? { model: rest[2] } : {})
+      };
     case "/model":
       if (rest.length === 0) {
         return { type: "model.get" };
       }
-      if (rest.length !== 1) {
-        throw new CommandParseError(usage("/model"));
+      if (rest.length === 1) {
+        return {
+          type: "model.set",
+          alias: normalizeAlias(rest[0])
+        };
       }
       return {
-        type: "model.set",
-        alias: normalizeAlias(rest[0])
+        type: "model.assign",
+        alias: normalizeAlias(rest[0]),
+        model: rest.slice(1).join(" ")
       };
     case "/default":
       if (rest.length === 0) {
@@ -371,6 +493,62 @@ export function parseCommand(input: string): Command {
       return {
         type: "default.set",
         alias: normalizeAlias(rest[0])
+      };
+    case "/nickname":
+      if (rest.length === 0) {
+        return { type: "nickname.get" };
+      }
+      if (rest.length === 1) {
+        if (isAliasToken(rest[0])) {
+          return {
+            type: "nickname.get",
+            alias: normalizeAlias(rest[0])
+          };
+        }
+        return {
+          type: "nickname.set",
+          nickname: rest[0]
+        };
+      }
+      if (rest.length === 2 && isAliasToken(rest[0])) {
+        return {
+          type: "nickname.set",
+          alias: normalizeAlias(rest[0]),
+          nickname: rest[1]
+        };
+      }
+      throw new CommandParseError(usage("/nickname"));
+    case "/bind":
+      if (rest.length === 0) {
+        return { type: "bind.get" };
+      }
+      if (rest.length === 1) {
+        if (isAliasToken(rest[0])) {
+          return {
+            type: "bind.get",
+            alias: normalizeAlias(rest[0])
+          };
+        }
+        return {
+          type: "bind.set",
+          resourceAlias: normalizeAlias(rest[0])
+        };
+      }
+      if (rest.length === 2 && isAliasToken(rest[0])) {
+        return {
+          type: "bind.set",
+          alias: normalizeAlias(rest[0]),
+          resourceAlias: normalizeAlias(rest[1])
+        };
+      }
+      throw new CommandParseError(usage("/bind"));
+    case "/orchestrator":
+      if (rest.length === 0) {
+        return { type: "orchestrator.get" };
+      }
+      return {
+        type: "orchestrator.set",
+        name: rest.join(" ")
       };
     case "/rename":
       if (rest.length !== 2) {

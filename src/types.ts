@@ -1,4 +1,5 @@
 export type Role = "system" | "user" | "assistant";
+export type EndpointApiStyle = "ollama" | "openai";
 
 export interface ChatMessage {
   role: Role;
@@ -6,13 +7,18 @@ export interface ChatMessage {
 }
 
 export interface EndpointConfig {
+  resourceAlias: string;
+  nickname: string;
   baseUrl: string;
+  apiStyle?: EndpointApiStyle;
+  apiKeyEnv?: string;
   model: string;
   instructions: string;
   voicePreset: string;
 }
 
 export interface AppConfig {
+  orchestratorName: string;
   defaultEndpoint: string;
   soundEnabled: boolean;
   endpoints: Record<string, EndpointConfig>;
@@ -52,6 +58,7 @@ export interface AutoQueueTask {
   createdAt: string;
   createdBy: string;
   status: "queued" | "completed";
+  delegationRole?: string;
   requestedResource?: string;
   requestedModel?: string;
   assignedResource?: string;
@@ -97,7 +104,7 @@ export interface AgentMemoryFile {
 }
 
 export interface EditRequest {
-  kind: "instructions" | "agentSpec";
+  kind: "instructions" | "agentSpec" | "resource" | "participant";
   target: string;
   prompt: string;
   initialText: string;
@@ -201,6 +208,32 @@ export interface TelemetrySummary {
   recent: TelemetryRecentEvent[];
 }
 
+export interface ResourceSyncReport {
+  alias: string;
+  label: string;
+  baseUrl: string;
+  apiStyle?: EndpointApiStyle;
+  apiKeyEnv?: string;
+  tier?: "top" | "mid" | "low";
+  hostName?: string;
+  platform?: string;
+  cpuLogicalCores?: number;
+  ramGb?: number;
+  gpuModel?: string;
+  gpuCount?: number;
+  totalVramGb?: number;
+  maxContextTokens?: number;
+  defaultModel?: string;
+  reasoningModel?: string;
+  codingModel?: string;
+  toolsModel?: string;
+  embeddingModel?: string;
+  availableModels?: string[];
+  endpointVersion?: string;
+  capabilities?: string[];
+  notes?: string[];
+}
+
 export interface WikipediaSearchPage {
   pageId: number;
   title: string;
@@ -234,10 +267,35 @@ export type Command =
   | { type: "agent.new" }
   | { type: "agent.chat"; name: string }
   | { type: "agent.edit"; name: string }
+  | { type: "participant.list" }
+  | { type: "participant.add"; alias: string; resourceAlias: string; nickname?: string }
+  | { type: "participant.edit"; alias: string }
+  | { type: "participant.remove"; alias: string }
+  | { type: "resource.list" }
+  | {
+      type: "resource.add";
+      alias: string;
+      label: string;
+      baseUrl: string;
+      tier?: "top" | "mid" | "low";
+      apiStyle?: EndpointApiStyle;
+    }
+  | { type: "resource.edit"; alias: string }
+  | { type: "resource.refresh"; alias: string }
+  | { type: "resource.remove"; alias: string }
+  | { type: "models.list"; target?: string }
+  | { type: "directChat"; resourceAlias: string; model?: string; text: string }
   | { type: "model.get" }
   | { type: "model.set"; alias: string }
+  | { type: "model.assign"; alias: string; model: string }
   | { type: "default.get" }
   | { type: "default.set"; alias: string }
+  | { type: "nickname.get"; alias?: string }
+  | { type: "nickname.set"; alias?: string; nickname: string }
+  | { type: "bind.get"; alias?: string }
+  | { type: "bind.set"; alias?: string; resourceAlias: string }
+  | { type: "orchestrator.get" }
+  | { type: "orchestrator.set"; name: string }
   | { type: "rename"; fromAlias: string; toAlias: string }
   | { type: "sound.toggle" }
   | { type: "sound.set"; enabled: boolean }
