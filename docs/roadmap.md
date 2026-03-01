@@ -1,46 +1,49 @@
 # Roadmap
 
-## What The First Auto Run Showed
+## Current State
 
-The autonomous documentation pass was productive, but it also exposed the current ceiling:
+The baseline is stronger now:
 
-- Erin can generate useful docs and queue follow-up work, but there is not yet a metrics layer to validate whether routing and model choices were actually optimal.
-- Generated artifacts can sound authoritative even when they infer capabilities or validations the harness does not yet measure directly.
-- The queue is active, but the terminal still lacks a purpose-built live dashboard for long-running autonomous work.
+- Erin now records transactional telemetry and audit logs for Ollama and Wikipedia work.
+- A built-in `data-analyst` identity exists to review metrics and suggest routing refinements.
+- `/hud` and the local HTTP API provide a foundation for browser parity and live observability.
+
+The remaining ceiling is refinement, not absence:
+
+- routing still relies partly on static heuristics rather than measured policy
+- the browser-facing API is read-only and not yet a full GUI surface
+- telemetry needs richer historical analysis before model-switching can be strongly automated
 
 ## Highest-Value Next Steps
 
-### 1. Telemetry And Model Analytics
+### 1. Refine Routing With Measured Policy
 
-Add structured capture for:
+Build on the existing telemetry with stronger policy inputs:
 
-- request/response latency
-- prompt and completion token counts when available
-- queue wait time
-- assigned resource and model
-- compaction frequency and summary size
-- retry/escalation counts
+- explicit queue wait and service-time thresholds by tier
+- cold-load and model-eviction cost tracking
+- historical success/failure rates by resource and model
+- model-switch recommendations that compare real gains against reload cost
 
-This unlocks evidence-based routing, model-switch decisions, and resource tuning.
+This is the bridge from “instrumented” to “self-optimizing.”
 
-### 2. Dynamic Model Selection
+### 2. Expand The HUD And Browser Parity
 
-Allow Erin to override the model used on a resource for a specific task when telemetry or task shape justifies it. The important constraint is to make model switching data-driven so the orchestrator can weigh quality gains against cold-load and eviction costs.
+- add richer live views for queue pressure, recent completions, and model health
+- expose the same observability cleanly to mobile, tablet, and desktop browsers
+- add safe control surfaces for queue actions and agent interactions
 
-### 3. Data Analyst Agent
+### 3. Deepen Analyst And Review Workflows
 
-Add a persistent internal `data-analyst` agent identity focused on:
+- let `data-analyst` generate recurring telemetry reviews
+- add durable analyst outputs to the external-memory playbooks when they prove useful
+- separate speculative recommendations from measured conclusions more explicitly
 
-- aggregating task metrics
-- spotting routing regressions
-- comparing model efficiency
-- recommending queue and model-policy changes
+### 4. Safe Promotion From Internal To External Memory
 
-### 4. Better UX Surfaces
-
-- `/hud` for live terminal observability
-- browser GUI with mobile/tablet/desktop support
-- shared live view of queue, current task, recent completions, and agent output
+- formalize how useful internal agent discoveries are promoted into committed external-memory seeds
+- keep `.crusty/` fully local and disposable without losing validated capabilities
+- add review checkpoints before internal guidance becomes repo-default behavior
 
 ## Public Release Readiness
 
@@ -48,8 +51,9 @@ Before publishing the repo, the critical baseline is:
 
 - env-based local configuration
 - ignored runtime state
+- committed external-memory seeds
 - setup docs
 - platform support scripts
 - a clear architecture description
 
-Those pieces are now in place, so the next iterations can focus on telemetry, HUD, and GUI parity instead of repo hygiene.
+Those pieces are now in place, so the next iterations can focus on measured orchestration quality, GUI parity, and safe promotion workflows instead of basic repo hygiene.

@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { pathToFileURL } from "node:url";
 
+import { startApiServer } from "./api-server.ts";
 import { CrustyApp, type CommandResult } from "./app.ts";
 import {
   CommandParseError,
@@ -205,7 +206,12 @@ async function runHudViewer(
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
   await withRawMode(readline, async () => {
-    const tabs: Array<"status" | "detail"> = ["status", "detail"];
+    const tabs: Array<"status" | "queue" | "metrics" | "detail"> = [
+      "status",
+      "queue",
+      "metrics",
+      "detail"
+    ];
     let tabIndex = 0;
     let lastPulseAt = 0;
 
@@ -375,6 +381,10 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     rootDir,
     warn: (message) => writeLine(stderr, message)
   });
+  const apiServer = await startApiServer(app, {
+    rootDir,
+    warn: (message) => writeLine(stderr, message)
+  });
 
   const readline = createInterface({
     input: stdin,
@@ -398,6 +408,10 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
   }, app.getAutoPulseIntervalMs());
 
   try {
+    if (apiServer) {
+      writeLine(stdout, `HTTP API: ${apiServer.url}/api/status`);
+    }
+
     while (true) {
       let inputLine: string;
 
@@ -490,6 +504,9 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
   } finally {
     pulseShutdown = true;
     clearInterval(pulseTimer);
+    if (apiServer) {
+      await apiServer.close();
+    }
     readline.close();
   }
 }

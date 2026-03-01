@@ -98,6 +98,16 @@ export function getEnvBoolean(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
+export function getEnvNumber(name: string, fallback: number): number {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export function getEnvList(name: string, fallback: string[]): string[] {
   const value = process.env[name];
   if (typeof value !== "string" || value.trim() === "") {

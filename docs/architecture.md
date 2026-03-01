@@ -9,6 +9,13 @@ Crusty has two related but separate concepts:
 
 ## Storage
 
+Crusty keeps a strict boundary between committed external system memory and ignored local internal runtime state.
+
+Committed external system memory lives in `external-memory/` and seeds durable behavior:
+
+- `external-memory/orchestrator/*.md`: default directives, roadmap, focus todo, and agent-creation workflow
+- `external-memory/agents/*`: built-in agent identities such as `data-analyst`
+
 Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 
 - `.crusty/config.json`: participant routing, voices, instructions
@@ -22,6 +29,12 @@ Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 ## Configuration
 
 The committed code now uses public-safe defaults. Real node URLs, model assignments, and hardware notes should be provided through ignored env files or system environment variables.
+
+The local browser-facing API is also env-driven:
+
+- `CRUSTY_API_ENABLED`
+- `CRUSTY_API_HOST`
+- `CRUSTY_API_PORT`
 
 ## Queue And Delegation
 
@@ -37,8 +50,9 @@ This tiering is intentionally simple today. The next meaningful upgrade is telem
 Current observability surfaces:
 
 - `/status`: point-in-time orchestration summary
-- `/hud`: live terminal dashboard with overview and full transaction detail tabs
+- `/hud`: live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs
 - `/explore`: internal file browser
+- local HTTP API for browser-based status, queue, telemetry, audit, and agent reads
 - terminal background output in `/auto`
 - append-only audit logging for Ollama and Wikipedia transactions
 

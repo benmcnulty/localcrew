@@ -386,7 +386,7 @@ describe("CrustyApp", () => {
 
       expect(workflow.workflowRequest?.kind).toBe("agent.create");
       expect(created.lines[0]).toBe("Created agent @reviewer.");
-      expect(agents.map((agent) => agent.slug)).toEqual(["reviewer"]);
+      expect(agents.map((agent) => agent.slug)).toEqual(["data-analyst", "reviewer"]);
       expect(spec).toContain("Summary: Reviews delegation plans.");
     });
   });
@@ -550,7 +550,7 @@ describe("CrustyApp", () => {
       expect(getConversationSummary(sessions)).toBe("");
       expect(systemState.auto.pending).toEqual([]);
       expect(systemState.auto.completed).toEqual([]);
-      expect(agents).toEqual([]);
+      expect(agents.map((agent) => agent.slug)).toEqual(["data-analyst"]);
       expect(focusTodo).toContain("Add telemetry capture for model latency");
     });
   });

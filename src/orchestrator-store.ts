@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { loadLocalEnv } from "./env.ts";
+import { loadBuiltinAgentSeeds, loadSeedFile } from "./external-memory.ts";
 import { getStoragePaths } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
 import { getDefaultTelemetrySummary } from "./telemetry.ts";
@@ -161,12 +162,12 @@ function getDefaultRoadmap(): string {
   return [
     "# Roadmap",
     "",
-    "- Stabilize the orchestrator queue and task delegation model.",
-    "- Add runtime telemetry, task analytics, and per-model performance history.",
-    "- Improve agent identity creation, editing, and memory quality.",
-    "- Add a dedicated data-analyst agent identity for metrics review and routing refinements.",
+    "- Refine routing policy with measured queue, latency, and model-load evidence.",
+    "- Expand the terminal HUD and browser-facing API into richer observability surfaces.",
+    "- Deepen agent identity creation, editing, and memory quality.",
+    "- Use the data-analyst identity for recurring metrics reviews and process refinements.",
     "- Tighten structured outputs, indexing, compaction quality, and validation before promotion.",
-    "- Build a richer terminal HUD and prepare a browser GUI with parity for observability and control."
+    "- Formalize how validated internal discoveries are promoted into committed external-memory seeds."
   ].join("\n");
 }
 
@@ -174,9 +175,9 @@ function getDefaultFocusTodo(): string {
   return [
     "# In Focus Todo",
     "",
-    "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
-    "- [medium] Design a data-analyst agent identity that distills metrics into routing refinements.",
-    "- [medium] Specify a terminal HUD and browser GUI parity plan."
+    "- [high] Refine routing policy using measured queue pressure, latency, and model-switch costs.",
+    "- [medium] Expand the browser-facing API and GUI parity plan for observability and control.",
+    "- [medium] Formalize promotion from internal runtime discoveries into committed external-memory seeds."
   ].join("\n");
 }
 
@@ -209,6 +210,63 @@ async function writeIfMissing(path: string, content: string): Promise<void> {
   }
 }
 
+async function readAgentsIndexWithoutEnsure(rootDir = process.cwd()): Promise<AgentMeta[]> {
+  const paths = getStoragePaths(rootDir);
+  const raw = await readFile(paths.agentsIndexPath, "utf8");
+  const parsed = JSON.parse(raw) as { agents?: unknown[] };
+  return Array.isArray(parsed.agents)
+    ? parsed.agents.map(normalizeAgentMeta).filter((agent): agent is AgentMeta => agent !== null)
+    : [];
+}
+
+async function seedBuiltinAgents(rootDir = process.cwd()): Promise<void> {
+  const paths = getStoragePaths(rootDir);
+  const seeds = await loadBuiltinAgentSeeds(rootDir);
+  if (seeds.length === 0) {
+    return;
+  }
+
+  const agents = await readAgentsIndexWithoutEnsure(rootDir);
+  let changed = false;
+
+  for (const seed of seeds) {
+    if (agents.some((agent) => agent.slug === seed.slug)) {
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const meta: AgentMeta = {
+      slug: seed.slug,
+      name: seed.name,
+      summary: seed.summary,
+      preferredResource: seed.preferredResource,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const agentDir = getAgentDir(rootDir, seed.slug);
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(getAgentMetaPath(rootDir, seed.slug), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+    await writeFile(getAgentSpecPath(rootDir, seed.slug), `${seed.spec.trimEnd()}\n`, "utf8");
+    await writeFile(
+      getAgentMemoryPath(rootDir, seed.slug),
+      `${JSON.stringify(getEmptyAgentMemory(), null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      getAgentMemoryIndexPath(rootDir, seed.slug),
+      `${JSON.stringify({ updatedAt: now, summary: "", recentMessages: [] }, null, 2)}\n`,
+      "utf8"
+    );
+    agents.push(meta);
+    changed = true;
+  }
+
+  if (changed) {
+    await writeFile(paths.agentsIndexPath, `${JSON.stringify({ agents }, null, 2)}\n`, "utf8");
+  }
+}
+
 async function ensureDocumentContains(
   path: string,
   requiredMarker: string,
@@ -233,12 +291,24 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await mkdir(paths.agentsDir, { recursive: true });
 
   await writeIfMissing(paths.systemStatePath, JSON.stringify(getDefaultSystemState(), null, 2));
-  await writeIfMissing(paths.directivesPath, getDefaultDirectives());
-  await writeIfMissing(paths.roadmapPath, getDefaultRoadmap());
-  await writeIfMissing(paths.focusTodoPath, getDefaultFocusTodo());
+  await writeIfMissing(
+    paths.directivesPath,
+    await loadSeedFile("orchestrator/directives.md", getDefaultDirectives(), rootDir)
+  );
+  await writeIfMissing(
+    paths.roadmapPath,
+    await loadSeedFile("orchestrator/roadmap.md", getDefaultRoadmap(), rootDir)
+  );
+  await writeIfMissing(
+    paths.focusTodoPath,
+    await loadSeedFile("orchestrator/focus-todo.md", getDefaultFocusTodo(), rootDir)
+  );
   await writeIfMissing(paths.changelogPath, getDefaultChangelog());
   await writeIfMissing(paths.deviceInventoryPath, renderResourceInventory(rootDir));
-  await writeIfMissing(paths.agentWorkflowPath, getDefaultWorkflow());
+  await writeIfMissing(
+    paths.agentWorkflowPath,
+    await loadSeedFile("orchestrator/agent-new-workflow.md", getDefaultWorkflow(), rootDir)
+  );
   await writeIfMissing(
     paths.telemetrySummaryPath,
     JSON.stringify(getDefaultTelemetrySummary(), null, 2)
@@ -295,6 +365,7 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
       "- [medium] Specify a terminal HUD and browser GUI parity plan."
     ].join("\n")
   );
+  await seedBuiltinAgents(rootDir);
 }
 
 export async function loadSystemState(rootDir = process.cwd()): Promise<SystemState> {

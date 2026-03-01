@@ -1,0 +1,88 @@
+import { createServer } from "node:http";
+
+const host = process.argv[2] ?? "127.0.0.1";
+const requestedPort = Number(process.argv[3] ?? "4310");
+let nextRequestId = 0;
+const pendingResponses = new Map();
+
+function writeJson(response, statusCode, body) {
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "cache-control": "no-store"
+  });
+  response.end(`${JSON.stringify(body, null, 2)}\n`);
+}
+
+const server = createServer((request, response) => {
+  if (request.method !== "GET") {
+    writeJson(response, 405, { error: "Method not allowed." });
+    return;
+  }
+
+  if (!process.send) {
+    writeJson(response, 500, { error: "IPC channel unavailable." });
+    return;
+  }
+
+  const requestId = ++nextRequestId;
+  pendingResponses.set(requestId, response);
+  process.send({
+    type: "request",
+    id: requestId,
+    url: request.url ?? "/"
+  });
+});
+
+process.on("message", (message) => {
+  if (!message || typeof message !== "object" || !("type" in message)) {
+    return;
+  }
+
+  if (message.type === "response") {
+    const response = pendingResponses.get(message.id);
+    if (!response) {
+      return;
+    }
+
+    pendingResponses.delete(message.id);
+    writeJson(response, message.status, message.body);
+    return;
+  }
+
+  if (message.type === "shutdown") {
+    for (const response of pendingResponses.values()) {
+      writeJson(response, 503, { error: "API server shutting down." });
+    }
+    pendingResponses.clear();
+    server.close(() => {
+      process.exit(0);
+    });
+  }
+});
+
+process.on("disconnect", () => {
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
+server.on("error", (error) => {
+  if (process.send) {
+    process.send({
+      type: "error",
+      message: error.message
+    });
+  }
+});
+
+server.listen(requestedPort, host, () => {
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : requestedPort;
+  if (process.send) {
+    process.send({
+      type: "ready",
+      port
+    });
+  }
+});

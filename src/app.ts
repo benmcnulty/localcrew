@@ -467,15 +467,107 @@ export class CrustyApp {
     ];
   }
 
-  async getHudLines(tab: "status" | "detail"): Promise<string[]> {
+  async getStatusSnapshot(): Promise<{
+    mode: ReplMode;
+    prompt: string;
+    currentEndpoint: string;
+    defaultEndpoint: string;
+    auto: {
+      enabled: boolean;
+      busy: boolean;
+      intervalMs: number;
+      defaultPriority: TaskPriority;
+      pendingCount: number;
+      completedCount: number;
+    };
+    nextTask?: AutoQueueTask;
+    lastCompleted?: AutoQueueTask;
+    tiers: ReturnType<typeof getResourceProfilesByTier>;
+    agents: AgentMeta[];
+    docs: Awaited<ReturnType<typeof getInternalFileDetails>>;
+    telemetry: TelemetrySummary;
+  }> {
+    const [agents, docs, telemetry] = await Promise.all([
+      listAgents(this.rootDir),
+      getInternalFileDetails(this.rootDir),
+      loadTelemetrySummary(this.rootDir)
+    ]);
+
+    return {
+      mode: this.runtime.mode,
+      prompt: this.getPrompt(),
+      currentEndpoint: this.runtime.currentEndpoint,
+      defaultEndpoint: this.config.defaultEndpoint,
+      auto: {
+        enabled: this.isAutoMode(),
+        busy: this.isAutoBusy(),
+        intervalMs: this.getAutoPulseIntervalMs(),
+        defaultPriority: this.systemState.auto.defaultPriority,
+        pendingCount: this.systemState.auto.pending.length,
+        completedCount: this.systemState.auto.completed.length
+      },
+      nextTask: this.sortPendingTasks(this.systemState.auto.pending)[0],
+      lastCompleted: this.systemState.auto.completed.at(-1),
+      tiers: getResourceProfilesByTier(this.rootDir),
+      agents,
+      docs,
+      telemetry
+    };
+  }
+
+  async getQueueSnapshot(): Promise<{
+    enabled: boolean;
+    busy: boolean;
+    defaultPriority: TaskPriority;
+    pending: AutoQueueTask[];
+    completed: AutoQueueTask[];
+  }> {
+    return {
+      enabled: this.isAutoMode(),
+      busy: this.isAutoBusy(),
+      defaultPriority: this.systemState.auto.defaultPriority,
+      pending: this.sortPendingTasks(this.systemState.auto.pending),
+      completed: [...this.systemState.auto.completed].reverse()
+    };
+  }
+
+  async getTelemetrySnapshot(): Promise<TelemetrySummary> {
+    return loadTelemetrySummary(this.rootDir);
+  }
+
+  async getAuditSnapshot(limit = 20): Promise<AuditEvent[]> {
+    return readRecentAuditEvents(limit, this.rootDir);
+  }
+
+  async getAgentsSnapshot(): Promise<AgentMeta[]> {
+    return listAgents(this.rootDir);
+  }
+
+  async getHudLines(tab: "status" | "queue" | "metrics" | "detail"): Promise<string[]> {
     const [statusLines, telemetry, auditEvents] = await Promise.all([
       this.getStatusLines(),
       loadTelemetrySummary(this.rootDir),
       readRecentAuditEvents(tab === "detail" ? 6 : 3, this.rootDir)
     ]);
+    const pending = this.sortPendingTasks(this.systemState.auto.pending);
+    const completed = [...this.systemState.auto.completed].slice(-8).reverse();
+    const modelLines = Object.entries(telemetry.models)
+      .sort((left, right) => right[1].calls - left[1].calls)
+      .map(([key, bucket]) => {
+        const averageDuration = bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0;
+        return `${key} | calls ${bucket.calls} | errors ${bucket.errors} | avg ${averageDuration}ms | eval ${bucket.evalCount}`;
+      });
+    const resourceLines = Object.entries(telemetry.resources)
+      .sort((left, right) => right[1].calls - left[1].calls)
+      .map(([key, bucket]) => {
+        const averageDuration = bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0;
+        return `@${key} | calls ${bucket.calls} | errors ${bucket.errors} | avg ${averageDuration}ms | eval ${bucket.evalCount}`;
+      });
 
     const tabs = [
       tab === "status" ? "[status]" : " status ",
+      tab === "queue" ? "[queue]" : " queue ",
+      tab === "metrics" ? "[metrics]" : " metrics ",
       tab === "detail" ? "[detail]" : " detail "
     ].join(" ");
 
@@ -499,6 +591,48 @@ export class CrustyApp {
       ];
     }
 
+    if (tab === "queue") {
+      return [
+        `HUD ${tabs}`,
+        "",
+        `Pending tasks: ${pending.length}`,
+        ...(pending.length > 0
+          ? pending.map(
+              (task) =>
+                `#${task.id} [${task.priority}]${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""} ${task.content}`
+            )
+          : ["(none pending)"]),
+        "",
+        `Recent completed: ${completed.length}`,
+        ...(completed.length > 0
+          ? completed.map(
+              (task) =>
+                `#${task.id} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"} ${task.content}`
+            )
+          : ["(none completed yet)"]),
+        "",
+        "Left/Right switches tabs. Esc returns to the prompt."
+      ];
+    }
+
+    if (tab === "metrics") {
+      return [
+        `HUD ${tabs}`,
+        "",
+        `Total events: ${telemetry.totalEvents}`,
+        `Model calls: ${telemetry.byKind["ollama.chat"] ?? 0}`,
+        `Wikipedia: ${telemetry.wikipedia.calls} call(s), ${telemetry.wikipedia.errors} error(s), recent ${telemetry.wikipedia.recentQueries.join(" | ") || "(none)"}`,
+        "",
+        "Models:",
+        ...(modelLines.length > 0 ? modelLines : ["(none yet)"]),
+        "",
+        "Resources:",
+        ...(resourceLines.length > 0 ? resourceLines : ["(none yet)"]),
+        "",
+        "Left/Right switches tabs. Esc returns to the prompt."
+      ];
+    }
+
     return [
       `HUD ${tabs}`,
       "",
@@ -506,6 +640,68 @@ export class CrustyApp {
         ? auditEvents.flatMap((event) => [...formatAuditEventLines(event), ""])
         : ["No audit events recorded yet.", ""]),
       "Left/Right switches tabs. Esc returns to the prompt."
+    ];
+  }
+
+  private async getAgentExtraContext(agent: AgentMeta): Promise<string[]> {
+    if (agent.slug !== "data-analyst") {
+      return [];
+    }
+
+    const telemetry = await loadTelemetrySummary(this.rootDir);
+    const recentAudit = await readRecentAuditEvents(5, this.rootDir);
+    const pending = this.sortPendingTasks(this.systemState.auto.pending).slice(0, 8);
+    const completed = [...this.systemState.auto.completed].slice(-5).reverse();
+    const topModels = Object.entries(telemetry.models)
+      .sort((left, right) => right[1].calls - left[1].calls)
+      .slice(0, 5)
+      .map(
+        ([key, bucket]) =>
+          `${key}: ${bucket.calls} call(s), ${bucket.errors} error(s), avg ${bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0}ms`
+      );
+    const topResources = Object.entries(telemetry.resources)
+      .sort((left, right) => right[1].calls - left[1].calls)
+      .map(
+        ([key, bucket]) =>
+          `@${key}: ${bucket.calls} call(s), ${bucket.errors} error(s), avg ${bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0}ms`
+      );
+
+    return [
+      [
+        "Telemetry summary:",
+        `- Total events: ${telemetry.totalEvents}`,
+        `- Model calls: ${telemetry.byKind["ollama.chat"] ?? 0}`,
+        `- Wikipedia searches: ${telemetry.wikipedia.calls}`,
+        `- Recent queries: ${telemetry.wikipedia.recentQueries.join(" | ") || "(none)"}`,
+        ...(topModels.length > 0 ? ["- Top models:", ...topModels.map((line) => `  ${line}`)] : [])
+      ].join("\n"),
+      [
+        "Queue snapshot:",
+        `- Pending: ${this.systemState.auto.pending.length}`,
+        `- Completed: ${this.systemState.auto.completed.length}`,
+        ...(pending.length > 0
+          ? pending.map(
+              (task) =>
+                `- Pending #${task.id} [${task.priority}]${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""}: ${task.content}`
+            )
+          : ["- Pending: (none)"]),
+        ...(completed.length > 0
+          ? completed.map(
+              (task) =>
+                `- Completed #${task.id} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"}: ${task.content}`
+            )
+          : ["- Completed: (none recent)"])
+      ].join("\n"),
+      [
+        "Recent audit events:",
+        ...(recentAudit.length > 0
+          ? recentAudit.map(
+              (event) =>
+                `- #${event.id} ${event.kind} ${event.success ? "ok" : "error"} ${event.summary}`
+            )
+          : ["- (none)"]),
+        ...(topResources.length > 0 ? ["", "Resource summary:", ...topResources.map((line) => `- ${line}`)] : [])
+      ].join("\n")
     ];
   }
 
@@ -1104,6 +1300,7 @@ export class CrustyApp {
       loadAgentMemory(agent.slug, this.rootDir),
       loadAgentSpec(agent.slug, this.rootDir)
     ]);
+    const extraContextBlocks = await this.getAgentExtraContext(agent);
     const selection = chooseResourceForTask(userMessage, agent.preferredResource, this.rootDir);
     const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
     const outgoingMessages = buildAgentChatMessages({
@@ -1113,7 +1310,8 @@ export class CrustyApp {
       spec,
       summary: memory.conversation.summary,
       recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
-      taskPrompt: `USER -> @${agent.slug}: ${userMessage}`
+      taskPrompt: `USER -> @${agent.slug}: ${userMessage}`,
+      extraContextBlocks
     });
 
     let rawReply: string;

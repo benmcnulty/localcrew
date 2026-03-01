@@ -19,8 +19,14 @@
    - `CRUSTY_RESOURCE_VIC_*`
    - `CRUSTY_RESOURCE_MIN_*`
    - `CRUSTY_RESOURCE_PAV_*`
+4. Optionally expose the local browser-facing API:
+   - `CRUSTY_API_ENABLED`
+   - `CRUSTY_API_HOST`
+   - `CRUSTY_API_PORT`
 
 Environment variables provided by the shell take precedence over values loaded from `.env` and `.env.local`.
+
+The durable external system memory lives in the committed `external-memory/` directory. Local internal memory, queue state, agent memory, and telemetry stay under ignored `.crusty/`.
 
 ## Running
 
@@ -49,5 +55,6 @@ Run `scripts/ollama-optimize-linux.sh` to benchmark a local node and write `olla
 - `/group`
 - `/auto`
 - `/status`
+- `/hud`
 - `/explore`
 - `/agent list`

@@ -1,0 +1,6 @@
+{
+  "name": "Data Analyst",
+  "slug": "data-analyst",
+  "summary": "Analyzes telemetry, queue behavior, and model efficiency to recommend routing and process improvements.",
+  "preferredResource": "auto"
+}

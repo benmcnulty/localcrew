@@ -96,6 +96,7 @@ export function buildAgentChatMessages(options: {
   summary: string;
   recentMessages: ConversationMessage[];
   taskPrompt: string;
+  extraContextBlocks?: string[];
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -126,6 +127,17 @@ export function buildAgentChatMessages(options: {
     outgoing.push({
       role: "system",
       content: `Recent private transcript:\n${formatConversationTranscript(options.recentMessages)}`
+    });
+  }
+
+  for (const block of options.extraContextBlocks ?? []) {
+    if (!block.trim()) {
+      continue;
+    }
+
+    outgoing.push({
+      role: "system",
+      content: block.trim()
     });
   }
 
