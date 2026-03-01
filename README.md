@@ -27,7 +27,7 @@ The repo is being prepared for public release. Local node addresses, model assig
 1. Run `bun run setup:orchestrator` on the best local device with Ollama or another supported local OpenAI-compatible endpoint.
 2. Start Crusty with `bun run src/index.ts` or `node src/index.ts`.
 3. Open the printed `Local UI` link or stay in the CLI and use `/help`.
-4. Bring the next best device online and run `bun run setup:node --orchestrator http://your-orchestrator-ip:4310` on that device, or add it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`.
+4. Bring the next best device online and run `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310` on that device, or add it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`.
 
 Once the orchestrator is up, the fast validation path is:
 
@@ -97,7 +97,7 @@ Control the API listener with:
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
 - Linux: `scripts/ollama-optimize-linux.sh`
 
-Each script benchmarks a local Ollama node, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `bun run setup:orchestrator`, then benchmark and add secondary devices with `bun run setup:node`.
+Each script benchmarks a local Ollama node, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `bun run setup:orchestrator`, then benchmark and add secondary devices with `node scripts/setup-node.js`.
 
 ## Documentation
 

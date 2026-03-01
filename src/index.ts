@@ -419,7 +419,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     if (resources.length <= 1) {
       writeLine(
         stdout,
-        'Onboarding: this install has one resource. Run `bun run setup:node` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
+        'Onboarding: this install has one resource. Run `node scripts/setup-node.js --orchestrator http://<orchestrator-ip>:4310` on the next device, then sync it here or add it manually with /resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai].'
       );
     }
 

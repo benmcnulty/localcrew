@@ -2,37 +2,23 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
+import { cpus, hostname, networkInterfaces, platform, totalmem } from "node:os";
 
-import {
-  detectLocalMachineProfile,
-  probeResourceModels
-} from "../src/resource-discovery.ts";
-import { getStoragePaths } from "../src/storage.ts";
-import type { EndpointApiStyle, ResourceSyncReport } from "../src/types.ts";
-
-interface SetupNodeOptions {
-  rootDir: string;
-  endpointUrl: string;
-  apiStyle: EndpointApiStyle;
-  alias?: string;
-  label?: string;
-  tier?: "top" | "mid" | "low";
-  orchestratorUrl?: string;
-  gpuModel?: string;
-  gpuCount?: number;
-  totalVramGb?: number;
-  maxContextTokens?: number;
+function trimTrailingSlash(value) {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-function normalizeAlias(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "node";
+function normalizeAlias(value) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "node"
+  );
 }
 
-function titleCase(value: string): string {
+function titleCase(value) {
   return value
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -40,7 +26,112 @@ function titleCase(value: string): string {
     .join(" ");
 }
 
-function autoTier(profile: ReturnType<typeof detectLocalMachineProfile>): "top" | "mid" | "low" {
+function detectLocalIpAddress() {
+  const interfaces = networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        return entry.address;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function detectLocalMachineProfile() {
+  const localIp = detectLocalIpAddress();
+  return {
+    hostName: hostname(),
+    platform: platform(),
+    cpuLogicalCores: cpus().length,
+    ramGb: Math.round((totalmem() / 1024 / 1024 / 1024) * 10) / 10,
+    ...(localIp ? { localIp } : {})
+  };
+}
+
+function pickModel(names, candidates, fallback) {
+  for (const candidate of candidates) {
+    const exact = names.find((name) => name.toLowerCase() === candidate.toLowerCase());
+    if (exact) {
+      return exact;
+    }
+  }
+
+  for (const candidate of candidates) {
+    const partial = names.find((name) => name.toLowerCase().includes(candidate.toLowerCase()));
+    if (partial) {
+      return partial;
+    }
+  }
+
+  return fallback ?? names[0];
+}
+
+async function probeResourceModels(baseUrl, apiStyle) {
+  if (apiStyle === "openai") {
+    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+
+    const body = await response.json();
+    const availableModels = Array.isArray(body.data)
+      ? body.data
+          .map((entry) => (typeof entry?.id === "string" ? entry.id.trim() : ""))
+          .filter(Boolean)
+      : [];
+
+    return {
+      availableModels,
+      defaultModel: pickModel(availableModels, ["gpt-4", "llama", "qwen", "gemma"], availableModels[0]),
+      reasoningModel: pickModel(availableModels, ["gpt-4", "gpt-oss", "reason"], availableModels[0]),
+      codingModel: pickModel(availableModels, ["coder", "code", "qwen"], undefined),
+      toolsModel: pickModel(availableModels, ["tool", "json", "gemma", "qwen"], undefined),
+      embeddingModel: pickModel(availableModels, ["embed"], undefined)
+    };
+  }
+
+  const [versionResponse, tagsResponse] = await Promise.all([
+    fetch(`${trimTrailingSlash(baseUrl)}/api/version`),
+    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`)
+  ]);
+
+  if (!tagsResponse.ok) {
+    throw new Error(`HTTP ${tagsResponse.status}: ${await tagsResponse.text()}`);
+  }
+
+  const version = versionResponse.ok ? await versionResponse.json() : {};
+  const tags = await tagsResponse.json();
+  const availableModels = Array.isArray(tags.models)
+    ? tags.models
+        .map((entry) => (typeof entry?.name === "string" ? entry.name.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  return {
+    availableModels,
+    ...(typeof version.version === "string" ? { endpointVersion: version.version } : {}),
+    defaultModel: pickModel(
+      availableModels,
+      ["llama3.1:8b", "llama3.1:latest", "llama3.2:3b", "llama3.2:latest", "gemma3:4b"],
+      availableModels[0]
+    ),
+    reasoningModel: pickModel(availableModels, ["gpt-oss:20b", "reason"], availableModels[0]),
+    codingModel: pickModel(availableModels, ["coder", "code"], undefined),
+    toolsModel: pickModel(availableModels, ["gemma", "qwen", "tool"], undefined),
+    embeddingModel: pickModel(availableModels, ["embed"], undefined)
+  };
+}
+
+function getStoragePaths(rootDir) {
+  const storageDir = join(rootDir, ".crusty");
+  return {
+    storageDir
+  };
+}
+
+function autoTier(profile) {
   if (profile.ramGb >= 24 || profile.cpuLogicalCores >= 16) {
     return "top";
   }
@@ -50,18 +141,18 @@ function autoTier(profile: ReturnType<typeof detectLocalMachineProfile>): "top" 
   return "low";
 }
 
-function parseArgs(argv: string[]): SetupNodeOptions {
+function parseArgs(argv) {
   let rootDir = process.cwd();
   let endpointUrl = "http://127.0.0.1:11434";
-  let apiStyle: EndpointApiStyle = "ollama";
-  let alias: string | undefined;
-  let label: string | undefined;
-  let tier: "top" | "mid" | "low" | undefined;
-  let orchestratorUrl: string | undefined;
-  let gpuModel: string | undefined;
-  let gpuCount: number | undefined;
-  let totalVramGb: number | undefined;
-  let maxContextTokens: number | undefined;
+  let apiStyle = "ollama";
+  let alias;
+  let label;
+  let tier;
+  let orchestratorUrl;
+  let gpuModel;
+  let gpuCount;
+  let totalVramGb;
+  let maxContextTokens;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -138,7 +229,7 @@ function parseArgs(argv: string[]): SetupNodeOptions {
   };
 }
 
-async function promptForOrchestratorUrl(initial?: string): Promise<string | undefined> {
+async function promptForOrchestratorUrl(initial) {
   if (initial || !input.isTTY || !output.isTTY) {
     return initial;
   }
@@ -152,7 +243,7 @@ async function promptForOrchestratorUrl(initial?: string): Promise<string | unde
   }
 }
 
-async function writeLocalReport(rootDir: string, report: ResourceSyncReport): Promise<string> {
+async function writeLocalReport(rootDir, report) {
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
   const reportPath = join(paths.storageDir, "node-setup-report.json");
@@ -160,10 +251,7 @@ async function writeLocalReport(rootDir: string, report: ResourceSyncReport): Pr
   return reportPath;
 }
 
-async function syncToOrchestrator(
-  orchestratorUrl: string,
-  report: ResourceSyncReport
-): Promise<string> {
+async function syncToOrchestrator(orchestratorUrl, report) {
   const trimmedBase = orchestratorUrl.replace(/\/+$/, "");
   const healthResponse = await fetch(`${trimmedBase}/api/health`);
   if (!healthResponse.ok) {
@@ -178,13 +266,7 @@ async function syncToOrchestrator(
     body: JSON.stringify(report)
   });
 
-  const payload = (await syncResponse.json()) as {
-    error?: string;
-    result?: {
-      lines?: string[];
-    };
-  };
-
+  const payload = await syncResponse.json();
   if (!syncResponse.ok) {
     throw new Error(payload.error ?? `Resource sync failed with HTTP ${syncResponse.status}.`);
   }
@@ -192,7 +274,7 @@ async function syncToOrchestrator(
   return payload.result?.lines?.join(" ") ?? "Resource sync complete.";
 }
 
-async function main(): Promise<void> {
+async function main() {
   const options = parseArgs(process.argv.slice(2));
   const machine = detectLocalMachineProfile();
   const discovered = await probeResourceModels(options.endpointUrl, options.apiStyle);
@@ -201,7 +283,7 @@ async function main(): Promise<void> {
   const tier = options.tier ?? autoTier(machine);
   const orchestratorUrl = await promptForOrchestratorUrl(options.orchestratorUrl);
 
-  const report: ResourceSyncReport = {
+  const report = {
     alias,
     label,
     baseUrl: options.endpointUrl,
@@ -272,6 +354,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`Setup failed: ${(error as Error).message}`);
+  console.error(`Setup failed: ${error.message}`);
   process.exitCode = 1;
 });

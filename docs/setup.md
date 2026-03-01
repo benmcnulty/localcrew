@@ -14,7 +14,7 @@
 3. Start Crusty with `bun run src/index.ts`.
 4. Open the printed `Local UI` link or stay in the CLI.
 5. Bring a second device online, benchmark it with the platform script on that device if needed, then run:
-   - `bun run setup:node --orchestrator http://your-orchestrator-ip:4310`
+   - `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310`
    - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`
    - or use the `Resources` section in `/ui`
 6. Configure the starter chat roster and test the network:

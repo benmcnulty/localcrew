@@ -398,7 +398,7 @@ function renderResources(resources) {
   els.resourceList.replaceChildren();
   els.resourceSummary.textContent =
     resources.length <= 1
-      ? "One resource is configured. Run setup:node on the next device, then add or sync it here."
+      ? "One resource is configured. Run node scripts/setup-node.js on the next device, then add or sync it here."
       : resources.length + " resources configured.";
 
   for (const resource of resources) {
