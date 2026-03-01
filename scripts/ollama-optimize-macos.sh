@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="http://127.0.0.1:11434"
+MODEL=""
+OUTPUT_DIR="."
+APPLY=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/ollama-optimize-macos.sh [--host URL] [--model MODEL] [--output-dir DIR] [--apply]
+
+Benchmarks the local Ollama node, recommends a top/mid/low tier, chooses a practical
+context length, and prints the environment commands to use when starting Ollama.
+
+By default the script does not change your system. Use --apply to run launchctl setenv
+for the recommended variables in the current user session, then restart Ollama.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      HOST="$2"
+      shift 2
+      ;;
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    --output-dir)
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --apply)
+      APPLY=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
+command -v python3 >/dev/null || { echo "python3 is required." >&2; exit 1; }
+
+mkdir -p "$OUTPUT_DIR"
+
+TAGS_JSON="$(curl -fsS "$HOST/api/tags")"
+
+if [[ -z "$MODEL" ]]; then
+  MODEL="$(
+    python3 - "$TAGS_JSON" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+models = [entry.get("name", "") for entry in data.get("models", [])]
+preferences = [
+    "gpt-oss",
+    "qwen3-coder",
+    "llama3.1",
+    "llama3.2",
+    "qwen",
+    "gemma"
+]
+
+filtered = [
+    model for model in models
+    if model and "embed" not in model and "embedding" not in model
+]
+
+for preference in preferences:
+    for model in filtered:
+        if preference in model:
+            print(model)
+            raise SystemExit(0)
+
+if filtered:
+    print(filtered[0])
+    raise SystemExit(0)
+
+raise SystemExit("No benchmarkable local models were found.")
+PY
+  )"
+fi
+
+MEMORY_GB="$(
+  python3 - <<'PY'
+import subprocess
+
+bytes_total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).decode().strip())
+print(round(bytes_total / (1024 ** 3), 1))
+PY
+)"
+
+CPU_NAME="$(
+  system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '/Chip|Processor Name/ {print $2; exit}'
+)"
+
+HOSTNAME_VALUE="$(hostname -s)"
+BENCHMARK_PATH="${OUTPUT_DIR%/}/ollama-profile-${HOSTNAME_VALUE}.json"
+
+CONTEXT_CANDIDATES="$(
+python3 - "$MEMORY_GB" <<'PY'
+import sys
+memory_gb = float(sys.argv[1])
+if memory_gb >= 48:
+    print("8192 16384 32768 65536 131072")
+elif memory_gb >= 24:
+    print("8192 16384 32768 65536")
+elif memory_gb >= 12:
+    print("4096 8192 16384 32768")
+else:
+    print("4096 8192 16384")
+PY
+)"
+
+echo "Benchmarking ${MODEL} on ${HOST} with candidate contexts: ${CONTEXT_CANDIDATES}"
+
+RESULTS_JSON="$(
+  python3 - "$HOST" "$MODEL" "$CONTEXT_CANDIDATES" <<'PY'
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+host = sys.argv[1].rstrip("/")
+model = sys.argv[2]
+candidates = [int(value) for value in sys.argv[3].split()]
+prompt = (
+    "Summarize how this node should contribute to a distributed Ollama swarm in five short bullets. "
+    "Focus on delegation, queueing, memory, and documentation hygiene."
+)
+
+results = []
+
+for candidate in candidates:
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "num_ctx": candidate,
+                "num_predict": 64,
+                "temperature": 0
+            }
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{host}/api/generate",
+        data=payload,
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+
+    started = time.perf_counter()
+    try:
+      with urllib.request.urlopen(request, timeout=180) as response:
+        body = json.loads(response.read().decode("utf-8"))
+      elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+      results.append(
+          {
+              "num_ctx": candidate,
+              "ok": True,
+              "elapsed_ms": elapsed_ms,
+              "eval_count": body.get("eval_count"),
+          }
+      )
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+      elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+      results.append(
+          {
+              "num_ctx": candidate,
+              "ok": False,
+              "elapsed_ms": elapsed_ms,
+              "error": str(error),
+          }
+      )
+
+print(json.dumps(results))
+PY
+)"
+
+PROFILE_JSON="$(
+  python3 - "$MODEL" "$MEMORY_GB" "$CPU_NAME" "$RESULTS_JSON" <<'PY'
+import json
+import sys
+
+model = sys.argv[1]
+memory_gb = float(sys.argv[2])
+cpu_name = sys.argv[3]
+results = json.loads(sys.argv[4])
+
+successful = [entry for entry in results if entry["ok"]]
+if not successful:
+    raise SystemExit("No successful benchmark runs were recorded.")
+
+baseline = successful[0]["elapsed_ms"]
+recommended = successful[0]
+for entry in successful:
+    if entry["elapsed_ms"] <= baseline * 4:
+        recommended = entry
+
+recommended_ctx = recommended["num_ctx"]
+
+if memory_gb >= 24 and recommended_ctx >= 32768:
+    tier = "top"
+elif memory_gb >= 12 and recommended_ctx >= 16384:
+    tier = "mid"
+else:
+    tier = "low"
+
+recommendations = {
+    "OLLAMA_CONTEXT_LENGTH": str(recommended_ctx),
+    "OLLAMA_FLASH_ATTENTION": "1",
+    "OLLAMA_NUM_PARALLEL": "2" if tier == "top" else "1",
+    "OLLAMA_MAX_LOADED_MODELS": "2" if tier == "top" else "1",
+    "OLLAMA_MAX_QUEUE": "256" if tier == "top" else ("128" if tier == "mid" else "64"),
+    "OLLAMA_KEEP_ALIVE": "30m" if tier == "top" else ("15m" if tier == "mid" else "10m"),
+}
+
+profile = {
+    "platform": "macos",
+    "model": model,
+    "tier": tier,
+    "memory_gb": memory_gb,
+    "cpu": cpu_name,
+    "benchmark_results": results,
+    "recommended_context_length": recommended_ctx,
+    "recommended_env": recommendations,
+}
+
+print(json.dumps(profile, indent=2))
+PY
+)"
+
+printf '%s\n' "$PROFILE_JSON" > "$BENCHMARK_PATH"
+
+echo
+echo "Saved profile: $BENCHMARK_PATH"
+echo
+echo "$PROFILE_JSON"
+echo
+echo "Recommended commands:"
+python3 - "$BENCHMARK_PATH" <<'PY'
+import json
+import sys
+
+profile = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+for key, value in profile["recommended_env"].items():
+    print(f"launchctl setenv {key} {value}")
+print("Restart Ollama after applying the values.")
+PY
+
+if [[ "$APPLY" -eq 1 ]]; then
+  echo
+  echo "Applying recommended environment variables with launchctl setenv..."
+  python3 - "$BENCHMARK_PATH" <<'PY' | while read -r key value; do
+import json
+import sys
+
+profile = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+for key, value in profile["recommended_env"].items():
+    print(key, value)
+PY
+    launchctl setenv "$key" "$value"
+  done
+  echo "Applied. Restart Ollama for the new values to take effect."
+fi
