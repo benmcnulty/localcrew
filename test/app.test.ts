@@ -1171,6 +1171,76 @@ describe("CrustyApp", () => {
     });
   });
 
+  test("quarantines a failed auto task and queues a safe mode recovery task", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 1,
+              pending: [
+                {
+                  id: 1,
+                  content: "Review queue routing drift after the last autonomous run.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => {
+          throw new Error("HTTP 500: upstream unavailable");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const state = await loadSystemState(rootDir);
+
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain("Auto task #1 failed on ");
+      expect(result.errors[0]).toContain("HTTP 500: upstream unavailable");
+      expect(
+        result.lines.some((line) =>
+          line.includes("Quarantined failed auto task #1 and queued safe mode recovery task #2.")
+        )
+      ).toBe(true);
+      expect(state.auto.completed).toHaveLength(1);
+      expect(state.auto.completed[0]).toEqual(
+        expect.objectContaining({
+          id: 1,
+          status: "completed",
+          result: "FAILED: HTTP 500: upstream unavailable"
+        })
+      );
+      expect(state.auto.pending).toHaveLength(1);
+      expect(state.auto.pending[0]).toEqual(
+        expect.objectContaining({
+          id: 2,
+          createdBy: "orchestrator:safe-mode",
+          priority: "high",
+          requestedResource: "orchestrator"
+        })
+      );
+    });
+  });
+
   test("uses the top-tier default model instead of a tools model for autonomous structured tasks", async () => {
     await withTempDir(async (rootDir) => {
       const resources: Record<string, ResourceProfile> = {

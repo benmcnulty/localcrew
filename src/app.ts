@@ -393,6 +393,10 @@ function toKebabSlug(value: string, fallback = "ticket"): string {
   return slug || fallback;
 }
 
+function formatAuditEventLine(event: AuditEvent): string {
+  return `- ${event.timestamp} [${event.kind}] ${event.scope}: ${event.summary}${event.success ? "" : " (failed)"}`;
+}
+
 function getAgentCreationQuestions(resourceAliases: string[]): WorkflowQuestion[] {
   const label =
     resourceAliases.length > 0 ? `${resourceAliases.join("|")}|auto` : "resource-alias|auto";
@@ -2014,6 +2018,10 @@ export class CrustyApp {
       return false;
     }
 
+    if (createdBy.startsWith("orchestrator:safe-mode")) {
+      return false;
+    }
+
     const normalized = content.toLowerCase();
     if (
       normalized.includes("feature request ticket") ||
@@ -2029,6 +2037,10 @@ export class CrustyApp {
   }
 
   private shouldRejectAutonomousTask(content: string, createdBy: string): boolean {
+    if (createdBy.startsWith("orchestrator:safe-mode")) {
+      return false;
+    }
+
     return this.isAutonomousTaskSource(createdBy) && AUTONOMOUS_EXTERNAL_CHANGE_PATTERN.test(content);
   }
 
@@ -2037,6 +2049,90 @@ export class CrustyApp {
     return resources.length > 0
       ? resources.map((resource) => `@${resource.alias} (${resource.label})`).join(", ")
       : "(none)";
+  }
+
+  private isSafeModeRecoveryTask(task: Pick<AutoQueueTask, "createdBy">): boolean {
+    return task.createdBy.startsWith("orchestrator:safe-mode");
+  }
+
+  private async getRecentAuditContext(limit = 8): Promise<string> {
+    const events = await readRecentAuditEvents(limit, this.rootDir);
+    if (events.length === 0) {
+      return "Recent audit context:\n- (none)";
+    }
+
+    return ["Recent audit context:", ...events.map(formatAuditEventLine)].join("\n");
+  }
+
+  private async queueSafeModeRecoveryTask(options: {
+    failedTaskId?: number;
+    reason: string;
+    failedTaskSummary?: string;
+  }): Promise<AutoQueueTask> {
+    const recentAuditContext = await this.getRecentAuditContext(8);
+    const content = [
+      "Safe mode recovery.",
+      "Review the recent failure context, identify the most likely contained internal cause, and realign the autonomous plan.",
+      "Correct only internal memory, prompt guidance, queue hygiene, or routing assumptions through approved application capabilities.",
+      "Do not retry the failed assumption blindly and do not propose external implementation work.",
+      options.failedTaskId ? `Failed task ID: ${options.failedTaskId}.` : "",
+      `Failure reason: ${options.reason}`,
+      options.failedTaskSummary ? `Failed task summary: ${options.failedTaskSummary}` : "",
+      "",
+      recentAuditContext
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return this.enqueueAutoTask(content, "high", "orchestrator:safe-mode", {
+      requestedResource: getOrchestratorResourceAlias(this.rootDir)
+    });
+  }
+
+  private async quarantineFailedAutoTask(options: {
+    task: AutoQueueTask;
+    remaining: AutoQueueTask[];
+    assignedResource?: string;
+    assignedModel?: string;
+    errorMessage: string;
+    createRecoveryTask: boolean;
+  }): Promise<{ recoveryTask?: AutoQueueTask }> {
+    const failedTask: AutoQueueTask = {
+      ...options.task,
+      status: "completed",
+      ...(options.assignedResource ? { assignedResource: options.assignedResource } : {}),
+      ...(options.assignedModel ? { assignedModel: options.assignedModel } : {}),
+      result: `FAILED: ${options.errorMessage}`
+    };
+
+    this.systemState = {
+      ...this.systemState,
+      auto: {
+        ...this.systemState.auto,
+        pending: this.sortPendingTasks(options.remaining),
+        completed: [...this.systemState.auto.completed, failedTask].slice(-AUTO_COMPLETED_TASK_LIMIT)
+      }
+    };
+    await this.persistSystemState();
+    await appendChangelogEntry(
+      `Quarantined failed auto task #${options.task.id}. Error: ${options.errorMessage}`,
+      this.rootDir
+    );
+
+    let recoveryTask: AutoQueueTask | undefined;
+    if (options.createRecoveryTask) {
+      recoveryTask = await this.queueSafeModeRecoveryTask({
+        failedTaskId: options.task.id,
+        reason: options.errorMessage,
+        failedTaskSummary: options.task.content
+      });
+      await appendChangelogEntry(
+        `Queued safe mode recovery task #${recoveryTask.id} after auto task #${options.task.id} failed.`,
+        this.rootDir
+      );
+    }
+
+    return { ...(recoveryTask ? { recoveryTask } : {}) };
   }
 
   private async writeFeatureRequestTicket(options: {
@@ -2405,6 +2501,19 @@ export class CrustyApp {
         ...(pendingByResource.length > 0 ? pendingByResource : ["- (none)"])
       ].join("\n")
     ];
+
+    if (this.isSafeModeRecoveryTask(task)) {
+      blocks.push(
+        [
+          "Safe mode recovery context:",
+          "- This task exists because Crusty observed an unexpected failure or derailment during autonomous work.",
+          "- First diagnose the contained internal cause from the recent audit context and failed task summary.",
+          "- Then realign only internal memory, prompt guidance, queue hygiene, routing assumptions, or documentation.",
+          "- If any durable improvement would require external application or source-code work, write an outbox feature request ticket instead of queueing executable implementation work.",
+          await this.getRecentAuditContext(8)
+        ].join("\n")
+      );
+    }
 
     if (!task.sourceDocumentRelativePath) {
       return blocks;
@@ -2901,11 +3010,22 @@ export class CrustyApp {
         rawReply
       });
     } catch (error) {
+      const errorMessage = (error as Error).message;
+      const recovery = await this.quarantineFailedAutoTask({
+        task,
+        remaining,
+        assignedResource: selection.alias,
+        assignedModel: endpoint.model,
+        errorMessage,
+        createRecoveryTask: !this.isSafeModeRecoveryTask(task)
+      });
       return {
-        lines: [],
-        errors: [
-          `Auto task #${task.id} failed on ${selection.alias} (${endpoint.baseUrl}): ${(error as Error).message}`
-        ],
+        lines: recovery.recoveryTask
+          ? [
+              `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+            ]
+          : [`Quarantined failed safe mode recovery task #${task.id}.`],
+        errors: [`Auto task #${task.id} failed on ${selection.alias} (${endpoint.baseUrl}): ${errorMessage}`],
         shouldExit: false
       };
     }
@@ -3035,8 +3155,21 @@ export class CrustyApp {
         return this.processNextAutoTask();
       });
     } catch (error) {
+      let recoveryLine: string | undefined;
+      if (this.systemState.auto.pending.length > 0) {
+        const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+        const recovery = await this.quarantineFailedAutoTask({
+          task,
+          remaining,
+          errorMessage: `Unexpected auto-cycle exception: ${(error as Error).message}`,
+          createRecoveryTask: !this.isSafeModeRecoveryTask(task)
+        });
+        recoveryLine = recovery.recoveryTask
+          ? `Quarantined task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+          : `Quarantined failed safe mode recovery task #${task.id}.`;
+      }
       return {
-        lines: [],
+        lines: recoveryLine ? [recoveryLine] : [],
         errors: [`Auto cycle failed safely: ${(error as Error).message}`],
         shouldExit: false
       };
