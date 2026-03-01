@@ -379,7 +379,7 @@ export async function addResource(
 ): Promise<ResourceProfile> {
   const paths = getStoragePaths(rootDir);
   return withFileLock(paths.resourcesPath, async () => {
-    const resources = loadResources(rootDir);
+    const resources = await loadResourcesAsync(rootDir);
     const alias = normalizeAlias(resource.alias);
     if (!RESOURCE_ALIAS_PATTERN.test(alias)) {
       throw new Error(`Invalid resource alias "${resource.alias}".`);
@@ -401,7 +401,7 @@ export async function updateResource(
 ): Promise<ResourceProfile> {
   const paths = getStoragePaths(rootDir);
   return withFileLock(paths.resourcesPath, async () => {
-    const resources = loadResources(rootDir);
+    const resources = await loadResourcesAsync(rootDir);
     const normalizedAlias = normalizeAlias(alias);
     if (!resources[normalizedAlias]) {
       throw new Error(`Unknown resource "${alias}".`);
@@ -416,7 +416,7 @@ export async function updateResource(
 export async function removeResource(alias: string, rootDir = process.cwd()): Promise<void> {
   const paths = getStoragePaths(rootDir);
   return withFileLock(paths.resourcesPath, async () => {
-    const resources = loadResources(rootDir);
+    const resources = await loadResourcesAsync(rootDir);
     const normalizedAlias = normalizeAlias(alias);
     if (!resources[normalizedAlias]) {
       throw new Error(`Unknown resource "${alias}".`);

@@ -92,6 +92,18 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
       ? { agentName: candidate.agentName }
       : {}),
     ...(typeof candidate.result === "string" ? { result: candidate.result } : {}),
+    ...(typeof candidate.errorMessage === "string" && candidate.errorMessage.trim() !== ""
+      ? { errorMessage: candidate.errorMessage }
+      : {}),
+    ...(typeof candidate.startedAt === "string" && candidate.startedAt.trim() !== ""
+      ? { startedAt: candidate.startedAt }
+      : {}),
+    ...(typeof candidate.completedAt === "string" && candidate.completedAt.trim() !== ""
+      ? { completedAt: candidate.completedAt }
+      : {}),
+    ...(typeof candidate.durationMs === "number" && candidate.durationMs >= 0
+      ? { durationMs: candidate.durationMs }
+      : {}),
     ...(typeof candidate.sourceDocumentRelativePath === "string" &&
     candidate.sourceDocumentRelativePath.trim() !== ""
       ? { sourceDocumentRelativePath: candidate.sourceDocumentRelativePath }

@@ -91,6 +91,7 @@ export function buildAgentChatMessages(options: {
   taskPrompt: string;
   resourceRoster?: string;
   extraContextBlocks?: string[];
+  currentDateTime?: string;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -113,6 +114,13 @@ export function buildAgentChatMessages(options: {
       ].join(" ")
     }
   ];
+
+  if (options.currentDateTime) {
+    outgoing.push({
+      role: "system",
+      content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
 
   if (options.resourceRoster?.trim()) {
     outgoing.push({
@@ -154,6 +162,47 @@ export function buildAgentChatMessages(options: {
   return outgoing;
 }
 
+export function buildTaskPreflightMessages(options: {
+  orchestratorName: string;
+  task: string;
+  priority: string;
+  directives: string;
+  inventory: string;
+  currentDateTime?: string;
+}): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        `You are ${options.orchestratorName}, reasoning carefully before acting.`,
+        "You are about to execute an autonomous task.",
+        "Before acting, produce a brief structured pre-flight analysis using the exact format below.",
+        "Be concise — 1-2 sentences per section, no padding.",
+        "GOAL: What this task should accomplish and what a successful output looks like.",
+        "CONSTRAINTS: Key boundaries from the directives that apply here (e.g. no external changes, no source-code mutations).",
+        "RISKS: The most likely failure mode or quality trap for this specific task.",
+        "APPROACH: The specific steps or output structure you intend to use.",
+        "Output only these four labeled sections. Do not begin executing the task."
+      ].join(" ")
+    },
+    ...(options.currentDateTime
+      ? [{ role: "system" as const, content: `Current date and time: ${options.currentDateTime}` }]
+      : []),
+    {
+      role: "system",
+      content: `Core directives summary:\n${options.directives.trim().slice(0, 800)}`
+    },
+    {
+      role: "system",
+      content: `Resource inventory:\n${options.inventory.trim().slice(0, 600)}`
+    },
+    {
+      role: "user",
+      content: [`Priority: ${options.priority}`, "", "Task:", options.task].join("\n")
+    }
+  ];
+}
+
 export function buildAutoTaskMessages(options: {
   directives: string;
   inventory: string;
@@ -170,6 +219,7 @@ export function buildAutoTaskMessages(options: {
   resourceRationale: string;
   resourceRoster?: string;
   extraContextBlocks?: string[];
+  currentDateTime?: string;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -232,6 +282,13 @@ export function buildAutoTaskMessages(options: {
     }
   ];
 
+  if (options.currentDateTime) {
+    outgoing.push({
+      role: "system",
+      content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
+
   for (const block of options.extraContextBlocks ?? []) {
     if (!block.trim()) {
       continue;
@@ -267,8 +324,9 @@ export function buildQueueFillMessages(options: {
   orchestratorName: string;
   agents: string[];
   resourceRoster?: string;
+  currentDateTime?: string;
 }): ChatMessage[] {
-  return [
+  const outgoing: ChatMessage[] = [
     {
       role: "system",
       content: options.directives.trim()
@@ -294,15 +352,17 @@ export function buildQueueFillMessages(options: {
     {
       role: "system",
       content: `Available agents: ${options.agents.length > 0 ? options.agents.join(", ") : "(none)"}`
-    },
-    ...(options.resourceRoster?.trim()
-      ? [
-          {
-            role: "system" as const,
-            content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
-          }
-        ]
-      : []),
+    }
+  ];
+
+  if (options.resourceRoster?.trim()) {
+    outgoing.push({
+      role: "system",
+      content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
+    });
+  }
+
+  outgoing.push(
     {
       role: "system",
       content: `Orchestrator memory summary:\n${options.orchestratorSummary.trim() || "(none)"}`
@@ -323,7 +383,16 @@ export function buildQueueFillMessages(options: {
       role: "system",
       content: `Resource inventory:\n${options.inventory.trim()}`
     }
-  ];
+  );
+
+  if (options.currentDateTime) {
+    outgoing.push({
+      role: "system",
+      content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
+
+  return outgoing;
 }
 
 export function buildQueueFillReviewMessages(options: {
@@ -335,8 +404,9 @@ export function buildQueueFillReviewMessages(options: {
   focusTodo: string;
   changelog: string;
   resourceRoster?: string;
+  currentDateTime?: string;
 }): ChatMessage[] {
-  return [
+  const outgoing: ChatMessage[] = [
     {
       role: "system",
       content: [
@@ -351,15 +421,17 @@ export function buildQueueFillReviewMessages(options: {
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Crusty diagnostics.',
         "Respond with a short critique followed by one final verdict line exactly in the form VERDICT: approve or VERDICT: revise."
       ].join(" ")
-    },
-    ...(options.resourceRoster?.trim()
-      ? [
-          {
-            role: "system" as const,
-            content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
-          }
-        ]
-      : []),
+    }
+  ];
+
+  if (options.resourceRoster?.trim()) {
+    outgoing.push({
+      role: "system",
+      content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
+    });
+  }
+
+  outgoing.push(
     {
       role: "system",
       content: `Roadmap:\n${options.roadmap.trim()}`
@@ -375,12 +447,22 @@ export function buildQueueFillReviewMessages(options: {
     {
       role: "system",
       content: `Resource inventory:\n${options.inventory.trim()}`
-    },
-    {
-      role: "user",
-      content: `Draft backlog to review:\n${options.draftTasks.trim() || "(none)"}`
     }
-  ];
+  );
+
+  if (options.currentDateTime) {
+    outgoing.push({
+      role: "system",
+      content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
+
+  outgoing.push({
+    role: "user",
+    content: `Draft backlog to review:\n${options.draftTasks.trim() || "(none)"}`
+  });
+
+  return outgoing;
 }
 
 export function buildQueueFillFinalizeMessages(options: {
@@ -395,8 +477,9 @@ export function buildQueueFillFinalizeMessages(options: {
   draftTasks: string;
   reviewFeedback: string;
   resourceRoster?: string;
+  currentDateTime?: string;
 }): ChatMessage[] {
-  return [
+  const outgoing: ChatMessage[] = [
     {
       role: "system",
       content: options.directives.trim()
@@ -422,15 +505,17 @@ export function buildQueueFillFinalizeMessages(options: {
     {
       role: "system",
       content: `Available agents: ${options.agents.length > 0 ? options.agents.join(", ") : "(none)"}`
-    },
-    ...(options.resourceRoster?.trim()
-      ? [
-          {
-            role: "system" as const,
-            content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
-          }
-        ]
-      : []),
+    }
+  ];
+
+  if (options.resourceRoster?.trim()) {
+    outgoing.push({
+      role: "system",
+      content: `Valid resource aliases for any delegated work are: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
+    });
+  }
+
+  outgoing.push(
     {
       role: "system",
       content: `Orchestrator memory summary:\n${options.orchestratorSummary.trim() || "(none)"}`
@@ -450,7 +535,17 @@ export function buildQueueFillFinalizeMessages(options: {
     {
       role: "system",
       content: `Resource inventory:\n${options.inventory.trim()}`
-    },
+    }
+  );
+
+  if (options.currentDateTime) {
+    outgoing.push({
+      role: "system",
+      content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
+
+  outgoing.push(
     {
       role: "system",
       content: `Draft backlog:\n${options.draftTasks.trim() || "(none)"}`
@@ -459,5 +554,7 @@ export function buildQueueFillFinalizeMessages(options: {
       role: "system",
       content: `Reviewer critique:\n${options.reviewFeedback.trim() || "(none)"}`
     }
-  ];
+  );
+
+  return outgoing;
 }

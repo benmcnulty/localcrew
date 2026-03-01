@@ -67,3 +67,29 @@ export function getErrorMessage(error: unknown): string {
   }
   return String(error);
 }
+
+/**
+ * Format a Date as a compact, human-readable datetime string for injection into
+ * model prompts. Includes the ISO date, day of week, UTC time, and local offset
+ * so agents can accurately record timestamps and reason about elapsed time.
+ *
+ * Example: "2026-03-02 (Monday) 15:42 UTC (UTC+0)"
+ */
+export function formatCurrentDateTime(date = new Date()): string {
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dayName = dayNames[date.getUTCDay()];
+  const iso = date.toISOString();
+  const datePart = iso.slice(0, 10);
+  const timePart = iso.slice(11, 16);
+
+  // Derive local offset from the JS environment
+  const offsetMinutes = -date.getTimezoneOffset();
+  const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+  const offsetHours = Math.floor(Math.abs(offsetMinutes) / 60)
+    .toString()
+    .padStart(2, "0");
+  const offsetMins = (Math.abs(offsetMinutes) % 60).toString().padStart(2, "0");
+  const offsetLabel = offsetMinutes === 0 ? "UTC" : `UTC${offsetSign}${offsetHours}:${offsetMins}`;
+
+  return `${datePart} (${dayName}) ${timePart} UTC (${offsetLabel})`;
+}

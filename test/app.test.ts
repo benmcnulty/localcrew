@@ -1530,3 +1530,126 @@ describe("speakText", () => {
     expect(warnings).toEqual(['Speech failed for voice "Siri".']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task timing: startedAt / completedAt / durationMs
+// ---------------------------------------------------------------------------
+
+describe("AutoQueueTask timing", () => {
+  test("completed task has startedAt, completedAt, and durationMs set", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      // Each call returns the same mock response regardless of whether it is a
+      // preflight or the main execution call.
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Task done."),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Summarise the routing policy."));
+      const state = await loadSystemState(rootDir);
+      const completed = state.auto.completed[0];
+
+      expect(completed).toBeDefined();
+      expect(typeof completed.startedAt).toBe("string");
+      expect(typeof completed.completedAt).toBe("string");
+      expect(typeof completed.durationMs).toBe("number");
+      expect(completed.durationMs).toBeGreaterThanOrEqual(0);
+      // completedAt must not precede startedAt
+      expect(new Date(completed.completedAt!).getTime()).toBeGreaterThanOrEqual(
+        new Date(completed.startedAt!).getTime()
+      );
+    });
+  });
+
+  test("quarantined task also records startedAt and durationMs", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      let callCount = 0;
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => {
+          callCount++;
+          // Always throw after first preflight call to force a quarantine.
+          // First call is the preflight (non-fatal, so task continues).
+          // We throw on every call so the main execution fails.
+          throw new Error("network timeout");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Analyze all the things."));
+      const state = await loadSystemState(rootDir);
+      const failed = state.auto.completed[0];
+
+      expect(failed).toBeDefined();
+      expect(failed.result).toContain("FAILED:");
+      expect(failed.errorMessage).toBeTruthy();
+      // Timing must still be recorded even for failed tasks
+      expect(typeof failed.startedAt).toBe("string");
+      expect(typeof failed.completedAt).toBe("string");
+      expect(typeof failed.durationMs).toBe("number");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-flight reasoning: verify it fires as an extra model call
+// ---------------------------------------------------------------------------
+
+describe("pre-flight task reasoning", () => {
+  test("makes two model calls per task: preflight + execution", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const calls: Array<{ url: string; body: unknown }> = [];
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async (url, init) => {
+          calls.push({ url: String(url), body: JSON.parse((init?.body as string) ?? "{}") });
+          return makeChatResponse("Done.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Write a routing analysis."));
+
+      // There should be at least 2 calls to the inference endpoint for one task:
+      // one for the pre-flight and one for the main execution.
+      const chatCalls = calls.filter((c) => c.url.includes("/api/chat"));
+      expect(chatCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  test("pre-flight failure is non-fatal: task still completes", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      let callCount = 0;
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => {
+          callCount++;
+          // First call (preflight) throws; second call (main execution) succeeds.
+          if (callCount === 1) {
+            throw new Error("preflight network error");
+          }
+          return makeChatResponse("Task done despite preflight failure.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.execute(parseCommand("Diagnose the queue health."));
+      const state = await loadSystemState(rootDir);
+
+      // Task should be completed successfully despite the failed preflight
+      expect(state.auto.completed[0]).toBeDefined();
+      expect(state.auto.completed[0].result).toContain("Task done despite preflight failure.");
+      // Result lines should reflect successful completion
+      expect(result.lines.some((l) => l.includes("completed"))).toBe(true);
+    });
+  });
+});
