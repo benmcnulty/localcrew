@@ -20,6 +20,10 @@ It is not intended for:
 
 Those belong in the ignored `.crusty/` directory as internal system memory.
 
+Internal notes, summaries, diagnostics, and process artifacts generated during `/auto`
+should stay under `.crusty/system/secure/orchestrator/` rather than being treated as
+portable external memory.
+
 ## Promotion Rule
 
 Promote a local lesson into `external-memory/` only when it is:
@@ -33,5 +37,10 @@ Promote a local lesson into `external-memory/` only when it is:
 - `inbox/`: untracked user-supplied documents waiting for the orchestrator to ingest
 - `active/`: untracked source documents and rough drafts currently being worked
 - `outbox/`: untracked finalized source documents, final deliverables, and feature request tickets for external implementation work
+
+For autonomous self-improvement:
+
+- prefer local internal writes over `active/` when the artifact is only useful to the swarm
+- use `outbox/feature-requests/` when the swarm needs developers to change the app
 
 Only the folders themselves are tracked. Their contents are ignored so local work artifacts stay local.
