@@ -361,6 +361,15 @@ async function resolveVerifiedOrchestratorUrl(initialUrl, machine) {
 
   const subnetPrefix = parseSubnetPrefix(machine.localIp);
   while (true) {
+    if (subnetPrefix) {
+      console.log(
+        `Enter the orchestrator IP. This prompt starts with ${subnetPrefix}; confirm or edit the final number.`
+      );
+    } else {
+      console.log(
+        "Enter the full orchestrator IP address shown during orchestrator setup before continuing."
+      );
+    }
     const orchestratorIp = await promptWithPrefill("Orchestrator IP: ", subnetPrefix);
     if (!orchestratorIp) {
       return {

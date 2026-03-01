@@ -30,7 +30,7 @@ Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 
 ## Configuration
 
-The committed code now uses public-safe defaults. Real node URLs, model assignments, and hardware notes should be provided through ignored env files, the orchestrator setup script, or runtime resource editing in the CLI and Local UI.
+The committed code now uses public-safe defaults. Real node URLs, model assignments, and hardware notes should be provided through ignored env files, the primary-device setup script, or runtime resource editing in the CLI and Local UI.
 
 For the prototype chat surfaces, the intended layering is:
 

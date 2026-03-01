@@ -29,10 +29,10 @@ Provider foundation is built around:
 
 ## Quick Start
 
-1. Run `npm run setup:orchestrator` on the best local device with Ollama or another supported endpoint.
+1. Run `npm run setup:crusty` on the best local device with Ollama or another supported endpoint. This primary device becomes your local agent orchestrator.
 2. Start Crusty with `npm run start`.
 3. Open the printed `Local UI` link or stay in the CLI and use `/help`.
-4. Bring the next best agent device online and run `node scripts/setup-agent.js` on that device, or use the standalone `setup-agent.js` download when that is published. It prompts for the orchestrator IP, tests the connection immediately, prompts for a device nickname, shows a verified configuration summary, and then syncs the verified configuration. Re-running it on the same device replaces that device's prior synced listing instead of duplicating it. For OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync. You can still add devices manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`.
+4. Bring the next best agent device online and run `node scripts/setup-agent.js` on that device, or use the standalone `setup-agent.js` download when that is published. The orchestrator setup output shows the full orchestrator IP to remember. The agent setup prompt pre-fills the first three IP numbers from the local network, and you confirm or enter the final number before it tests the connection. It then prompts for a device nickname, shows a verified configuration summary, and syncs the verified configuration. Re-running it on the same device replaces that device's prior synced listing instead of duplicating it. For OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync. You can still add devices manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`.
 
 Once the orchestrator is up, the fast validation path is:
 
@@ -41,7 +41,7 @@ Once the orchestrator is up, the fast validation path is:
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet
 - use `/ui` for the matching browser prototype with editable resources, participants, and direct test chat
 
-The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `npm run setup:orchestrator -- --name "Your Name"`.
+The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `npm run setup:crusty -- --name "Your Name"`.
 
 Notable views:
 
@@ -102,7 +102,7 @@ Control the API listener with:
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
 - Linux: `scripts/ollama-optimize-linux.sh`
 
-Each script benchmarks a local Ollama endpoint, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `npm run setup:orchestrator`, then bring secondary agent devices online with `node scripts/setup-agent.js`.
+Each script benchmarks a local Ollama endpoint, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the primary Crusty device first with `npm run setup:crusty`, then bring secondary agent devices online with `node scripts/setup-agent.js`.
 
 ## Documentation
 

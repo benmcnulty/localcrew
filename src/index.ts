@@ -429,7 +429,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     if (resources.length <= 1) {
       writeLine(
         stdout,
-        'Onboarding: this install has one resource. Run `node scripts/setup-agent.js` on the next agent device. It will prompt for the orchestrator IP and a device nickname, then sync it here automatically.'
+        'Onboarding: this install has one resource. Run `node scripts/setup-agent.js` on the next agent device. It will prefill the first three IP numbers from the local network, you confirm or enter the final number of the orchestrator IP, then it will prompt for a device nickname and sync it here automatically.'
       );
     }
 

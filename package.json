@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup:orchestrator": "node scripts/setup-orchestrator.js",
+    "setup:crusty": "node scripts/setup-orchestrator.js",
     "setup:agent": "node scripts/setup-agent.js",
     "start": "node src/index.ts",
     "start:bun": "bun run src/index.ts",

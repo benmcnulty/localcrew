@@ -408,11 +408,11 @@ async function main() {
       ? `http://${setup.publicHost}:${setup.apiPort}/ui`
       : localUiUrl;
 
-  console.log("Crusty orchestrator setup complete.");
+  console.log("Crusty setup complete.");
   console.log(`Repo root: ${setup.rootDir}`);
   console.log(`Managed env: ${envPath}`);
   console.log(`Resource inventory: ${resourcesPath}`);
-  console.log(`Orchestrator profile: ${setup.name}`);
+  console.log(`Agent orchestrator profile: ${setup.name}`);
   console.log(`Inference endpoint: ${setup.endpointUrl} (${setup.apiStyle})`);
   if (setup.apiKeyEnv) {
     console.log(`API key env: ${setup.apiKeyEnv}`);
@@ -442,13 +442,26 @@ async function main() {
   console.log("Next steps:");
   console.log("1. Start Crusty with: npm run start");
   console.log("2. Open the Local UI link above after startup.");
+  console.log("3. Remember this orchestrator address for agent setup:");
+  console.log(`   ${setup.publicHost ?? machine.localIp ?? "the LAN IP shown above"}`);
+  console.log("4. On the next agent device, run: node scripts/setup-agent.js");
   console.log(
-    `3. On the next agent device, run: node scripts/setup-agent.js`
+    "   The agent prompt pre-fills the first three IP numbers from the local network."
   );
-  console.log(
-    `   It will prompt for the orchestrator IP and prefill ${setup.publicHost ?? "the local subnet"} for convenience.`
-  );
-  console.log("4. Review and refresh agent resources later with /resource refresh <alias> when models change.");
+  if (setup.publicHost) {
+    const numbers = setup.publicHost.split(".");
+    const lastNumber = numbers.length === 4 ? numbers[3] : "the final number";
+    const prefix =
+      numbers.length === 4 ? `${numbers[0]}.${numbers[1]}.${numbers[2]}.` : "the local subnet";
+    console.log(
+      `   Check that the prompt starts with ${prefix} and enter or confirm ${lastNumber} as the final number.`
+    );
+  } else {
+    console.log(
+      "   Enter or confirm the final number of the orchestrator IP shown above before continuing."
+    );
+  }
+  console.log("5. Review and refresh agent resources later with /resource refresh <alias> when models change.");
 }
 
 main().catch((error) => {

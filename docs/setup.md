@@ -10,12 +10,14 @@
 ## First-Run Flow
 
 1. Clone the repo and run `npm install`.
-2. On the best local device, run `npm run setup:orchestrator`.
+2. On the best local device, run `npm run setup:crusty`. This primary device becomes the local agent orchestrator.
 3. Start Crusty with `npm run start`.
 4. Open the printed `Local UI` link or stay in the CLI.
 5. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
    - `node scripts/setup-agent.js`
-   - the script will prompt for `Orchestrator IP:` and prefill the first three octets from the local subnet when available
+   - the Crusty setup output shows the full primary-device IP to remember
+   - the script will prompt for `Orchestrator IP:` and prefill the first three IP numbers from the local network when available
+   - confirm or enter the final number of the orchestrator IP before continuing
    - it immediately tests `http://<orchestrator-ip>:4310/api/health` before continuing
    - it then prompts for a device nickname used in the orchestrator resource listing
    - it prints a verified configuration summary before syncing
@@ -86,7 +88,7 @@ Shell env values take precedence over `.env`, which takes precedence over `.env.
 
 If you want a non-default orchestrator identity name during install, run:
 
-- `npm run setup:orchestrator -- --name "Aster"`
+- `npm run setup:crusty -- --name "Aster"`
 
 ## Device Benchmark Scripts
 
