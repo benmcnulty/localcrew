@@ -349,20 +349,20 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   );
   await ensureDocumentContains(
     paths.roadmapPath,
-    "- Add runtime telemetry, task analytics, and per-model performance history.",
+    "- Refine routing policy with measured queue, latency, and model-load evidence.",
     [
-      "- Add runtime telemetry, task analytics, and per-model performance history.",
-      "- Add a dedicated data-analyst agent identity for metrics review and routing refinements.",
-      "- Build a richer terminal HUD and prepare a browser GUI with parity for observability and control."
+      "- Refine routing policy with measured queue, latency, and model-load evidence.",
+      "- Use the data-analyst identity for recurring metrics reviews and process refinements.",
+      "- Expand the terminal HUD and browser-facing API into richer observability surfaces."
     ].join("\n")
   );
   await ensureDocumentContains(
     paths.focusTodoPath,
-    "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
+    "- [high] Refine routing policy using measured queue pressure, latency, and model-switch costs.",
     [
-      "- [high] Add telemetry capture for model latency, token counts, and queue outcomes.",
-      "- [medium] Design a data-analyst agent identity that distills metrics into routing refinements.",
-      "- [medium] Specify a terminal HUD and browser GUI parity plan."
+      "- [high] Refine routing policy using measured queue pressure, latency, and model-switch costs.",
+      "- [medium] Expand the browser-facing API and GUI parity plan for observability and control.",
+      "- [medium] Formalize promotion from internal runtime discoveries into committed external-memory seeds."
     ].join("\n")
   );
   await seedBuiltinAgents(rootDir);

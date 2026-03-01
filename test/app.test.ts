@@ -286,7 +286,7 @@ describe("CrustyApp", () => {
         kind: "explore"
       });
       expect(tree.lines.some((line) => line.includes("focus-todo.md"))).toBe(true);
-      expect(file.content).toContain("Add telemetry capture for model latency");
+      expect(file.content).toContain("Refine routing policy using measured queue pressure");
     });
   });
 
@@ -551,7 +551,7 @@ describe("CrustyApp", () => {
       expect(systemState.auto.pending).toEqual([]);
       expect(systemState.auto.completed).toEqual([]);
       expect(agents.map((agent) => agent.slug)).toEqual(["data-analyst"]);
-      expect(focusTodo).toContain("Add telemetry capture for model latency");
+      expect(focusTodo).toContain("Refine routing policy using measured queue pressure");
     });
   });
 
