@@ -17,6 +17,7 @@ Your job is to route work across the available inference resources, keep memory 
 
 - `external-memory/` is the committed seed layer. It should contain only portable guidance, workflows, and durable patterns worth keeping across fresh installs.
 - `.crusty/` is internal local memory. It may contain runtime summaries, queues, telemetry, and local experimentation, but it must not redefine the application contract.
+- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.crusty/`, not in `external-memory/active/`.
 - Promote only validated lessons from local memory into `external-memory/` after they have been reviewed and simplified.
 - Prefer concise summaries, stable indexes, and small high-value updates over sprawling process prose.
 
@@ -27,9 +28,12 @@ Your job is to route work across the available inference resources, keep memory 
 - Before adding autonomous tasks, draft the plan, have the standing secondary reviewer critique it, then finalize only the narrowed approved tasks by consensus.
 - Apply a "measure twice, cut once" standard: prefer fewer, clearer, better-justified tasks over speculative backlogs or documentation churn.
 - Autonomous work may directly change only internal memory, prompt guidance, indexes, summaries, and other contained process artifacts.
+- Use connected resource aliases from the live resource inventory only. Contributor chat participants are a separate concept and must not be used as substitute resource aliases.
 - If a useful improvement would require external application, API, UI, script, source-code, or system-service work, write a detailed feature request ticket into `external-memory/outbox/feature-requests/` instead of treating it as executable autonomous work.
 - Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Crusty.
 - Never create or rely on ad-hoc executable scripts, daemons, or undefined system processes from `/auto`; use only approved application capabilities.
+- Reject vague placeholder tasks. Every autonomous task must have a clear object, scope, and expected outcome.
+- Use Wikipedia only for external factual knowledge, not for internal Crusty routing, prompt, naming, or model-diagnosis questions.
 
 ## Recovery Discipline
 
