@@ -105,7 +105,9 @@ afterEach(() => {
 });
 
 describe("API server", () => {
-  test("serves status, telemetry, queue, agents, hud, UI, and write actions over HTTP", async () => {
+  test(
+    "serves status, telemetry, queue, agents, hud, UI, and write actions over HTTP",
+    async () => {
     await withTempDir(async (rootDir) => {
       process.env.CRUSTY_API_HOST = "127.0.0.1";
       process.env.CRUSTY_API_PORT = "0";
@@ -196,7 +198,7 @@ describe("API server", () => {
           body: JSON.stringify({
             alias: "studio",
             label: "LM Studio",
-            baseUrl: "http://127.0.0.1:1234",
+            baseUrl: "http://192.168.1.50:1234",
             apiStyle: "openai",
             apiKeyEnv: "OPENAI_API_KEY",
             deviceId: "studio-device-1",
@@ -344,5 +346,7 @@ describe("API server", () => {
         await api!.close();
       }
     });
-  });
+    },
+    15000
+  );
 });

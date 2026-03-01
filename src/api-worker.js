@@ -66,6 +66,9 @@ process.on("message", (message) => {
       writeJson(response, 503, { error: "API server shutting down." });
     }
     pendingResponses.clear();
+    if (typeof server.closeAllConnections === "function") {
+      server.closeAllConnections();
+    }
     server.close(() => {
       process.exit(0);
     });
@@ -73,6 +76,9 @@ process.on("message", (message) => {
 });
 
 process.on("disconnect", () => {
+  if (typeof server.closeAllConnections === "function") {
+    server.closeAllConnections();
+  }
   server.close(() => {
     process.exit(0);
   });
