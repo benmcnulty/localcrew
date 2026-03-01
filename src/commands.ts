@@ -1,4 +1,5 @@
 import type { Command, FollowUpRequest } from "./types.ts";
+import { normalizeAlias } from "./utils.ts";
 
 const SMART_DOUBLE_OPEN = "\u201C";
 const SMART_DOUBLE_CLOSE = "\u201D";
@@ -75,10 +76,6 @@ function usage(command: string): string {
     default:
       return "Unknown command.";
   }
-}
-
-function normalizeAlias(alias: string): string {
-  return alias.trim().replace(/^@/, "").toLowerCase();
 }
 
 function isAliasToken(value: string): boolean {

@@ -1,6 +1,7 @@
 import { hostname, networkInterfaces, platform, totalmem, cpus } from "node:os";
 
 import type { EndpointApiStyle } from "./types.ts";
+import { ANTHROPIC_VERSION, trimTrailingSlash } from "./utils.ts";
 
 export interface DiscoveredModelInfo {
   name: string;
@@ -28,10 +29,6 @@ export interface LocalMachineProfile {
 }
 
 export type FetchFn = typeof fetch;
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value.slice(0, -1) : value;
-}
 
 function pickModel(names: string[], candidates: string[], fallback?: string): string | undefined {
   for (const candidate of candidates) {
@@ -67,7 +64,7 @@ function getAuthHeadersForStyle(
   if (apiStyle === "anthropic") {
     return {
       "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
+      "anthropic-version": ANTHROPIC_VERSION
     };
   }
 

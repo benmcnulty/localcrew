@@ -1,13 +1,5 @@
 import type { ChatMessage, ConversationMessage } from "./types.ts";
 
-function titleCase(value: string): string {
-  if (!value) {
-    return value;
-  }
-
-  return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
-}
-
 function formatConversationLine(message: ConversationMessage): string {
   if (message.speaker === "user") {
     return `USER -> @${message.target}: ${message.content}`;

@@ -17,6 +17,7 @@ import {
   setOrchestratorName,
   setEndpointVoicePreset
 } from "./config.ts";
+import { getEnvNumber } from "./env.ts";
 import {
   appendChangelogEntry,
   createAgent,
@@ -114,22 +115,15 @@ import type {
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
+import { titleCase } from "./utils.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
 const AGENT_COMPACT_MESSAGE_LIMIT = 10;
 const AUTONOMOUS_EXTERNAL_CHANGE_PATTERN =
   /\b(deploy|restart|reboot|reconfigure|install|uninstall|upgrade|downgrade|open\s+firewall|allow\s+inbound|allowlist|pf\s+anchor|registry|service\b|daemon\b|kill\s+process|terminate\s+process|pull\s+model|delete\s+model|remove\s+model)\b/i;
-const AUTO_PULSE_INTERVAL_MS = 1500;
-const AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
-
-function titleCase(value: string): string {
-  if (!value) {
-    return value;
-  }
-
-  return value.slice(0, 1).toUpperCase() + value.slice(1).toLowerCase();
-}
+const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
+const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
 function replaceAliasReferences(text: string, oldAlias: string, newAlias: string): string {
   return text
@@ -500,7 +494,14 @@ export class CrustyApp {
   }
 
   getAutoPulseIntervalMs(): number {
-    return AUTO_PULSE_INTERVAL_MS;
+    return getEnvNumber("CRUSTY_AUTO_PULSE_INTERVAL_MS", DEFAULT_AUTO_PULSE_INTERVAL_MS);
+  }
+
+  getAutoSourceDocumentCharLimit(): number {
+    return getEnvNumber(
+      "CRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT",
+      DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT
+    );
   }
 
   async getStatusLines(): Promise<string[]> {
@@ -526,7 +527,7 @@ export class CrustyApp {
       "",
       `Orchestrator profile: ${this.config.orchestratorName}`,
       `Mode: /${this.runtime.mode}`,
-      `Auto pulse: ${this.isAutoMode() ? `active every ${AUTO_PULSE_INTERVAL_MS}ms` : "stopped"}`,
+      `Auto pulse: ${this.isAutoMode() ? `active every ${this.getAutoPulseIntervalMs()}ms` : "stopped"}`,
       `Orchestrator state: ${this.isAutoBusy() ? "busy" : "idle"}`,
       `Queue: ${this.systemState.auto.pending.length} pending / ${this.systemState.auto.completed.length} completed`,
       `Cluster capacity: ${[
@@ -758,7 +759,9 @@ export class CrustyApp {
 
     try {
       discovered = await probeResourceModels(baseUrl, apiStyle, this.fetchFn, undefined);
-    } catch {}
+    } catch (error) {
+      this.warn?.(`Resource discovery for ${baseUrl} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     const resource = await addResource(
       {
@@ -1164,7 +1167,8 @@ export class CrustyApp {
       if (next !== current) {
         await writeFile(directivesPath, next, "utf8");
       }
-    } catch {
+    } catch (error) {
+      this.warn?.(`Failed to sync orchestrator name in directives: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
   }
@@ -2050,13 +2054,18 @@ export class CrustyApp {
     }
   }
 
+  private normalizeAutoQueueTask(task: AutoQueueTask): AutoQueueTask {
+    return {
+      ...task,
+      ...this.normalizeQueuedTaskRouting(task)
+    };
+  }
+
   private async sanitizeAutoQueueState(): Promise<void> {
     const nextPending = this.systemState.auto.pending
-      .map((task) => this.normalizeQueuedTaskRouting(task))
+      .map((task) => this.normalizeAutoQueueTask(task))
       .filter((task) => !this.shouldRejectAutonomousTask(task.content, task.createdBy));
-    const nextCompleted = this.systemState.auto.completed.map((task) =>
-      this.normalizeQueuedTaskRouting(task)
-    );
+    const nextCompleted = this.systemState.auto.completed.map((task) => this.normalizeAutoQueueTask(task));
     const changed =
       JSON.stringify(nextPending) !== JSON.stringify(this.systemState.auto.pending) ||
       JSON.stringify(nextCompleted) !== JSON.stringify(this.systemState.auto.completed);
@@ -2197,7 +2206,7 @@ export class CrustyApp {
     }
 
     const source = await readActiveDropboxDocument(task.sourceDocumentRelativePath, this.rootDir);
-    const truncated = truncateForPrompt(source.content, AUTO_SOURCE_DOCUMENT_CHAR_LIMIT);
+    const truncated = truncateForPrompt(source.content, this.getAutoSourceDocumentCharLimit());
 
     blocks.push(
       [
@@ -2749,7 +2758,8 @@ export class CrustyApp {
           summary: `Generating the initial specification for @${normalizedAnswers.name}.`
         })
       ).text;
-    } catch {
+    } catch (error) {
+      this.warn?.(`Agent spec generation failed, using template: ${error instanceof Error ? error.message : String(error)}`);
       generatedSpec = undefined;
     }
 

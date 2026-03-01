@@ -1,10 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 
 import { getEnvBoolean, getEnvString, loadLocalEnv } from "./env.ts";
 import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
 import { getResourceProfile, listResources } from "./resources.ts";
-import { getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths } from "./storage.ts";
 import type { AppConfig, EndpointConfig } from "./types.ts";
+import { titleCase } from "./utils.ts";
 import {
   getDefaultVoicePreset,
   getGeneratedDefaultVoicePresets,
@@ -14,18 +15,6 @@ import {
 } from "./voices.ts";
 
 const ALIAS_PATTERN = /^[a-z][a-z0-9_-]*$/;
-
-function titleCase(value: string): string {
-  if (!value) {
-    return value;
-  }
-
-  return value
-    .split(/[-_\s]+/)
-    .filter((segment) => segment !== "")
-    .map((segment) => segment.slice(0, 1).toUpperCase() + segment.slice(1).toLowerCase())
-    .join(" ");
-}
 
 function getLegacyDefaultInstruction(alias: string): string {
   return `You are ${titleCase(alias)}. Reply clearly and concisely.`;
@@ -70,7 +59,9 @@ function getDefaultEndpointConfig(
     fallbackModel = resource.defaultModel;
     fallbackApiStyle = resource.apiStyle ?? "ollama";
     fallbackApiKeyEnv = resource.apiKeyEnv;
-  } catch {}
+  } catch {
+    // Resource not found during bootstrap — fall back to hardcoded defaults
+  }
 
   const nickname = getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_NICKNAME`, fallbackNickname);
 
@@ -321,7 +312,7 @@ function normalizeConfig(
 export async function saveConfig(config: AppConfig, rootDir = process.cwd()): Promise<void> {
   const paths = getStoragePaths(rootDir);
   await mkdir(paths.storageDir, { recursive: true });
-  await writeFile(paths.configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await atomicWriteFile(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 export async function loadConfig(rootDir = process.cwd()): Promise<AppConfig> {
@@ -380,6 +371,7 @@ export function resolveEndpointConfig(
       ...(resource.apiKeyEnv ? { apiKeyEnv: resource.apiKeyEnv } : {})
     };
   } catch {
+    // Resource binding not resolved — return endpoint as-is with stored values
     return endpoint;
   }
 }

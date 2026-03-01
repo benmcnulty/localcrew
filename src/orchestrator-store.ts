@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { loadLocalEnv } from "./env.ts";
 import { loadBuiltinAgentSeeds, loadSeedFile } from "./external-memory.ts";
 import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
-import { getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
 import { getDefaultTelemetrySummary } from "./telemetry.ts";
+import { getEmptyConversation } from "./utils.ts";
 import type {
   AgentCreateAnswers,
   AgentMemoryFile,
@@ -19,14 +20,6 @@ import type {
 
 const PRIORITY_ORDER: TaskPriority[] = ["high", "medium", "low"];
 const ACTIVE_AUTO_DIRECTIVE_HEADING = "## Active Auto Directive";
-
-function getEmptyConversation(): SharedConversationState {
-  return {
-    messages: [],
-    compactedUntil: 0,
-    summary: ""
-  };
-}
 
 function getEmptyAgentMemory(): AgentMemoryFile {
   return {
@@ -436,7 +429,27 @@ export async function saveSystemState(
 ): Promise<void> {
   const paths = getStoragePaths(rootDir);
   await ensureSystemLayout(rootDir);
-  await writeFile(paths.systemStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await atomicWriteFile(paths.systemStatePath, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+/** Maximum number of recent changelog lines to keep in prompt context. */
+const CHANGELOG_TAIL_LINES = 60;
+
+/**
+ * Return the header plus the most recent entries when the changelog grows
+ * beyond CHANGELOG_TAIL_LINES, so unbounded growth does not inflate prompts.
+ */
+function tailChangelog(raw: string): string {
+  const lines = raw.split("\n");
+  if (lines.length <= CHANGELOG_TAIL_LINES) {
+    return raw;
+  }
+  // Keep the "# Changelog" header (first non-empty lines) and tail the rest.
+  const headerEnd = lines.findIndex((l, i) => i > 0 && l.startsWith("- "));
+  const header = headerEnd > 0 ? lines.slice(0, headerEnd) : [];
+  const body = headerEnd > 0 ? lines.slice(headerEnd) : lines;
+  const truncated = body.slice(Math.max(0, body.length - CHANGELOG_TAIL_LINES));
+  return [...header, `(${body.length - truncated.length} older entries omitted)`, ...truncated].join("\n");
 }
 
 export async function loadSystemDocuments(rootDir = process.cwd()): Promise<{
@@ -466,7 +479,7 @@ export async function loadSystemDocuments(rootDir = process.cwd()): Promise<{
     directives,
     roadmap,
     focusTodo,
-    changelog,
+    changelog: tailChangelog(changelog),
     inventory,
     workflow,
     orchestratorSummary
@@ -511,7 +524,7 @@ export async function updateOrchestratorIndex(options: {
 }): Promise<void> {
   const paths = getStoragePaths(options.rootDir);
   await ensureSystemLayout(options.rootDir);
-  await writeFile(
+  await atomicWriteFile(
     paths.orchestratorMemoryIndexPath,
     `${JSON.stringify(
       {
@@ -521,8 +534,7 @@ export async function updateOrchestratorIndex(options: {
       },
       null,
       2
-    )}\n`,
-    "utf8"
+    )}\n`
   );
 }
 
@@ -588,7 +600,7 @@ async function loadAgentsIndex(rootDir = process.cwd()): Promise<AgentMeta[]> {
 async function saveAgentsIndex(agents: AgentMeta[], rootDir = process.cwd()): Promise<void> {
   const paths = getStoragePaths(rootDir);
   await ensureSystemLayout(rootDir);
-  await writeFile(paths.agentsIndexPath, `${JSON.stringify({ agents }, null, 2)}\n`, "utf8");
+  await atomicWriteFile(paths.agentsIndexPath, `${JSON.stringify({ agents }, null, 2)}\n`);
 }
 
 export async function listAgents(rootDir = process.cwd()): Promise<AgentMeta[]> {
@@ -659,21 +671,19 @@ export async function createAgent(
 
   const agentDir = getAgentDir(rootDir, slug);
   await mkdir(agentDir, { recursive: true });
-  await writeFile(getAgentMetaPath(rootDir, slug), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+  await atomicWriteFile(getAgentMetaPath(rootDir, slug), `${JSON.stringify(meta, null, 2)}\n`);
   await writeFile(
     getAgentSpecPath(rootDir, slug),
     `${(generatedSpec?.trim() || buildAgentSpec(answers)).trimEnd()}\n`,
     "utf8"
   );
-  await writeFile(
+  await atomicWriteFile(
     getAgentMemoryPath(rootDir, slug),
-    `${JSON.stringify(getEmptyAgentMemory(), null, 2)}\n`,
-    "utf8"
+    `${JSON.stringify(getEmptyAgentMemory(), null, 2)}\n`
   );
-  await writeFile(
+  await atomicWriteFile(
     getAgentMemoryIndexPath(rootDir, slug),
-    `${JSON.stringify({ updatedAt: now, summary: "", recentMessages: [] }, null, 2)}\n`,
-    "utf8"
+    `${JSON.stringify({ updatedAt: now, summary: "", recentMessages: [] }, null, 2)}\n`
   );
 
   await saveAgentsIndex([...agents, meta], rootDir);
@@ -721,10 +731,9 @@ export async function saveAgentSpec(
   };
   const nextAgents = [...agents];
   nextAgents[targetIndex] = updatedMeta;
-  await writeFile(
+  await atomicWriteFile(
     getAgentMetaPath(rootDir, normalizedSlug),
-    `${JSON.stringify(updatedMeta, null, 2)}\n`,
-    "utf8"
+    `${JSON.stringify(updatedMeta, null, 2)}\n`
   );
   await saveAgentsIndex(nextAgents, rootDir);
   return updatedMeta;
@@ -787,10 +796,9 @@ export async function saveAgentMemory(
   rootDir = process.cwd()
 ): Promise<void> {
   const normalizedSlug = normalizeAgentSlug(slug);
-  await writeFile(
+  await atomicWriteFile(
     getAgentMemoryPath(rootDir, normalizedSlug),
-    `${JSON.stringify(memory, null, 2)}\n`,
-    "utf8"
+    `${JSON.stringify(memory, null, 2)}\n`
   );
 
   const recentMessages = memory.conversation.messages.slice(-5).map((message) =>
@@ -801,7 +809,7 @@ export async function saveAgentMemory(
         : `@${message.endpoint}: ${message.content}`
   );
 
-  await writeFile(
+  await atomicWriteFile(
     getAgentMemoryIndexPath(rootDir, normalizedSlug),
     `${JSON.stringify(
       {
@@ -811,8 +819,7 @@ export async function saveAgentMemory(
       },
       null,
       2
-    )}\n`,
-    "utf8"
+    )}\n`
   );
 }
 

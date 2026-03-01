@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 
 import {
   getEnvList,
@@ -7,7 +8,7 @@ import {
   getOptionalEnvString,
   loadLocalEnv
 } from "./env.ts";
-import { getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
 import type { EndpointApiStyle, EndpointConfig } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
@@ -275,16 +276,27 @@ function normalizeResources(raw: unknown, rootDir = process.cwd()): Record<strin
   return resources;
 }
 
+// In-memory cache to avoid repeated sync disk reads in hot paths.
+// Populated by loadResources(), invalidated by save/add/update/remove.
+let cachedResources: Record<string, ResourceProfile> | null = null;
+let cachedRootDir: string | null = null;
+
 export async function saveResources(
   resources: Record<string, ResourceProfile>,
   rootDir = process.cwd()
 ): Promise<void> {
   const paths = getStoragePaths(rootDir);
-  mkdirSync(paths.storageDir, { recursive: true });
-  writeFileSync(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`, "utf8");
+  await mkdir(paths.storageDir, { recursive: true });
+  await atomicWriteFile(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`);
+  cachedResources = resources;
+  cachedRootDir = rootDir;
 }
 
 export function loadResources(rootDir = process.cwd()): Record<string, ResourceProfile> {
+  if (cachedResources !== null && cachedRootDir === rootDir) {
+    return cachedResources;
+  }
+
   loadLocalEnv(rootDir);
   const paths = getStoragePaths(rootDir);
   mkdirSync(paths.storageDir, { recursive: true });
@@ -292,14 +304,17 @@ export function loadResources(rootDir = process.cwd()): Record<string, ResourceP
   if (!existsSync(paths.resourcesPath)) {
     const defaultResource = getDefaultLocalResource(rootDir);
     const resources = { [defaultResource.alias]: defaultResource };
-    writeFileSync(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`, "utf8");
+    atomicWriteFileSync(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`);
+    cachedResources = resources;
+    cachedRootDir = rootDir;
     return resources;
   }
 
   try {
     const parsed = JSON.parse(readFileSync(paths.resourcesPath, "utf8"));
     const resources = normalizeResources(parsed, rootDir);
-    writeFileSync(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`, "utf8");
+    cachedResources = resources;
+    cachedRootDir = rootDir;
     return resources;
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -310,6 +325,50 @@ export function loadResources(rootDir = process.cwd()): Record<string, ResourceP
   }
 }
 
+/**
+ * Async version of loadResources — uses non-blocking I/O.
+ * Prefer this in non-hot-path code (startup, API handlers).
+ */
+export async function loadResourcesAsync(rootDir = process.cwd()): Promise<Record<string, ResourceProfile>> {
+  if (cachedResources !== null && cachedRootDir === rootDir) {
+    return cachedResources;
+  }
+
+  loadLocalEnv(rootDir);
+  const paths = getStoragePaths(rootDir);
+  await mkdir(paths.storageDir, { recursive: true });
+
+  try {
+    const raw = await readFile(paths.resourcesPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const resources = normalizeResources(parsed, rootDir);
+    cachedResources = resources;
+    cachedRootDir = rootDir;
+    return resources;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const defaultResource = getDefaultLocalResource(rootDir);
+      const resources = { [defaultResource.alias]: defaultResource };
+      await atomicWriteFile(paths.resourcesPath, `${JSON.stringify({ resources }, null, 2)}\n`);
+      cachedResources = resources;
+      cachedRootDir = rootDir;
+      return resources;
+    }
+
+    if (error instanceof SyntaxError) {
+      throw new Error(`Resources file is not valid JSON: ${error.message}`);
+    }
+
+    throw error;
+  }
+}
+
+/** Invalidate the in-memory resource cache (e.g., after external changes). */
+export function invalidateResourceCache(): void {
+  cachedResources = null;
+  cachedRootDir = null;
+}
+
 export function listResources(rootDir = process.cwd()): ResourceProfile[] {
   return Object.values(loadResources(rootDir)).sort((left, right) => left.alias.localeCompare(right.alias));
 }
@@ -318,18 +377,21 @@ export async function addResource(
   resource: Omit<ResourceProfile, "alias"> & { alias: string },
   rootDir = process.cwd()
 ): Promise<ResourceProfile> {
-  const resources = loadResources(rootDir);
-  const alias = normalizeAlias(resource.alias);
-  if (!RESOURCE_ALIAS_PATTERN.test(alias)) {
-    throw new Error(`Invalid resource alias "${resource.alias}".`);
-  }
-  if (resources[alias]) {
-    throw new Error(`Resource "${alias}" already exists.`);
-  }
+  const paths = getStoragePaths(rootDir);
+  return withFileLock(paths.resourcesPath, async () => {
+    const resources = loadResources(rootDir);
+    const alias = normalizeAlias(resource.alias);
+    if (!RESOURCE_ALIAS_PATTERN.test(alias)) {
+      throw new Error(`Invalid resource alias "${resource.alias}".`);
+    }
+    if (resources[alias]) {
+      throw new Error(`Resource "${alias}" already exists.`);
+    }
 
-  const normalized = normalizeResource(alias, resource);
-  await saveResources({ ...resources, [alias]: normalized }, rootDir);
-  return normalized;
+    const normalized = normalizeResource(alias, resource);
+    await saveResources({ ...resources, [alias]: normalized }, rootDir);
+    return normalized;
+  });
 }
 
 export async function updateResource(
@@ -337,29 +399,35 @@ export async function updateResource(
   resource: ResourceProfile,
   rootDir = process.cwd()
 ): Promise<ResourceProfile> {
-  const resources = loadResources(rootDir);
-  const normalizedAlias = normalizeAlias(alias);
-  if (!resources[normalizedAlias]) {
-    throw new Error(`Unknown resource "${alias}".`);
-  }
+  const paths = getStoragePaths(rootDir);
+  return withFileLock(paths.resourcesPath, async () => {
+    const resources = loadResources(rootDir);
+    const normalizedAlias = normalizeAlias(alias);
+    if (!resources[normalizedAlias]) {
+      throw new Error(`Unknown resource "${alias}".`);
+    }
 
-  const normalized = normalizeResource(normalizedAlias, resource);
-  await saveResources({ ...resources, [normalizedAlias]: normalized }, rootDir);
-  return normalized;
+    const normalized = normalizeResource(normalizedAlias, resource);
+    await saveResources({ ...resources, [normalizedAlias]: normalized }, rootDir);
+    return normalized;
+  });
 }
 
 export async function removeResource(alias: string, rootDir = process.cwd()): Promise<void> {
-  const resources = loadResources(rootDir);
-  const normalizedAlias = normalizeAlias(alias);
-  if (!resources[normalizedAlias]) {
-    throw new Error(`Unknown resource "${alias}".`);
-  }
-  if (Object.keys(resources).length === 1) {
-    throw new Error("At least one resource must remain configured.");
-  }
-  const next = { ...resources };
-  delete next[normalizedAlias];
-  await saveResources(next, rootDir);
+  const paths = getStoragePaths(rootDir);
+  return withFileLock(paths.resourcesPath, async () => {
+    const resources = loadResources(rootDir);
+    const normalizedAlias = normalizeAlias(alias);
+    if (!resources[normalizedAlias]) {
+      throw new Error(`Unknown resource "${alias}".`);
+    }
+    if (Object.keys(resources).length === 1) {
+      throw new Error("At least one resource must remain configured.");
+    }
+    const next = { ...resources };
+    delete next[normalizedAlias];
+    await saveResources(next, rootDir);
+  });
 }
 
 function selectModel(

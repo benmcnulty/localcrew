@@ -1,7 +1,28 @@
 {
   "name": "crusty",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first multi-device LLM inference orchestrator with REPL CLI and browser UI",
+  "private": false,
   "type": "module",
+  "license": "MIT",
+  "author": "Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ben/crusty"
+  },
+  "keywords": [
+    "llm",
+    "orchestrator",
+    "inference",
+    "local-first",
+    "multi-device",
+    "ollama",
+    "cli",
+    "repl"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "setup:crusty": "node scripts/setup-orchestrator.js",
     "setup:agent": "node scripts/setup-agent.js",
