@@ -1,6 +1,6 @@
 # Crusty
 
-Crusty is a local-first orchestration CLI for multi-node Ollama networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, and local observability tools such as `/status` and `/explore`.
+Crusty is a local-first orchestration CLI for multi-node Ollama networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, transactional telemetry, and local observability tools such as `/status`, `/hud`, and `/explore`.
 
 The repo is being prepared for public release. Local node addresses, model assignments, and hardware-specific notes are now loaded from ignored env files instead of being committed into source.
 
@@ -10,8 +10,10 @@ The repo is being prepared for public release. Local node addresses, model assig
 - Participant voices through macOS `say`
 - Shared queue with priorities and background auto pulse
 - Agent identity creation, editing, and private memory
+- Transactional audit logging and per-model telemetry summaries
+- Wikipedia search tool workflow for grounded factual retrieval in orchestrator and agent tasks
 - Local orchestrator state under `.crusty/`
-- Internal file explorer and status viewer in the terminal
+- Internal file explorer plus status and HUD views in the terminal
 - Cross-platform Ollama benchmark scripts for macOS, Windows 11, and Linux
 
 ## Quick Start
@@ -20,6 +22,12 @@ The repo is being prepared for public release. Local node addresses, model assig
 2. Fill in your local endpoint URLs and preferred models.
 3. Run `bun run src/index.ts` or `node src/index.ts`.
 4. Use `/help` in the REPL to see the current command surface.
+
+Notable views:
+
+- `/status` for a point-in-time overview
+- `/hud` for a live terminal dashboard with `status` and `detail` tabs via left/right arrow keys
+- `/explore` for direct inspection of internal state files
 
 ## Local State
 

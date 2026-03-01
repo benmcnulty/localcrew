@@ -15,6 +15,8 @@ Local runtime state lives in `.crusty/` and is intentionally ignored by git.
 - `.crusty/sessions.json`: shared chat transcript and compaction state
 - `.crusty/system/state.json`: auto queue and completion history
 - `.crusty/system/secure/orchestrator/*.md`: Erin directives, roadmap, focus todo, changelog, workflow, inventory
+- `.crusty/system/secure/orchestrator/telemetry/audit-log.jsonl`: append-only transaction log
+- `.crusty/system/secure/orchestrator/telemetry/summary.json`: indexed telemetry summary for fast reads
 - `.crusty/system/secure/agents/*`: per-agent specs and memory
 
 ## Configuration
@@ -35,10 +37,15 @@ This tiering is intentionally simple today. The next meaningful upgrade is telem
 Current observability surfaces:
 
 - `/status`: point-in-time orchestration summary
+- `/hud`: live terminal dashboard with overview and full transaction detail tabs
 - `/explore`: internal file browser
 - terminal background output in `/auto`
+- append-only audit logging for Ollama and Wikipedia transactions
+
+## Grounding
+
+Erin and agent identities can now request grounded factual context from Wikipedia through a constrained tool workflow. The model emits a `WIKIPEDIA: query` line, Crusty fetches and chunks the results, logs the transaction, and then re-prompts the same model to continue with the retrieved context.
 
 Planned observability surfaces:
 
-- `/hud`: live terminal dashboard
 - browser-based GUI with queue, agents, telemetry, and transcript parity

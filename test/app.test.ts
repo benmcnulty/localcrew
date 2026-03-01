@@ -8,6 +8,7 @@ import { CrustyApp } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { getDefaultInstruction, loadConfig } from "../src/config.ts";
 import {
+  createAgent,
   listAgents,
   loadAgentSpec,
   loadSystemState
@@ -19,6 +20,7 @@ import {
 } from "../src/session-store.ts";
 import { speakText } from "../src/speech.ts";
 import { getStoragePaths } from "../src/storage.ts";
+import { loadTelemetrySummary, readRecentAuditEvents } from "../src/telemetry.ts";
 import type { ChatMessage } from "../src/types.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
@@ -31,13 +33,28 @@ async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<voi
   }
 }
 
-function makeChatResponse(text: string): Response {
-  return new Response(JSON.stringify({ message: { content: text } }), {
-    status: 200,
-    headers: {
-      "content-type": "application/json"
+function makeChatResponse(
+  text: string,
+  options: {
+    promptEvalCount?: number;
+    evalCount?: number;
+    totalDuration?: number;
+  } = {}
+): Response {
+  return new Response(
+    JSON.stringify({
+      message: { content: text },
+      prompt_eval_count: options.promptEvalCount ?? 24,
+      eval_count: options.evalCount ?? 18,
+      total_duration: options.totalDuration ?? 125_000_000
+    }),
+    {
+      status: 200,
+      headers: {
+        "content-type": "application/json"
+      }
     }
-  });
+  );
 }
 
 describe("CrustyApp", () => {
@@ -235,6 +252,26 @@ describe("CrustyApp", () => {
       });
       expect(lines.some((line) => line.includes("Auto pulse: active every"))).toBe(true);
       expect(lines.some((line) => line.includes("Top tier: @air, @vic"))).toBe(true);
+    });
+  });
+
+  test("returns a hud viewer request and exposes telemetry-aware hud lines", async () => {
+    await withTempDir(async (rootDir) => {
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("Hello Erin"));
+      const result = await app.execute(parseCommand("/hud"));
+      const lines = await app.getHudLines("status");
+
+      expect(result.viewerRequest).toEqual({
+        kind: "hud"
+      });
+      expect(lines[0]).toContain("HUD");
+      expect(lines.some((line) => line.includes("Telemetry:"))).toBe(true);
     });
   });
 
@@ -543,6 +580,143 @@ describe("CrustyApp", () => {
       expect(result.lines).toEqual(["Compacted shared conversation using @erin."]);
       expect(getConversationCompactedUntil(sessions)).toBe(4);
       expect(getConversationSummary(sessions)).toBe("Shared summary from the default model.");
+    });
+  });
+
+  test("records telemetry for chat transactions", async () => {
+    await withTempDir(async (rootDir) => {
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse("Hello from Erin", {
+            promptEvalCount: 15,
+            evalCount: 11,
+            totalDuration: 200_000_000
+          }),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("Hello Erin"));
+      const summary = await loadTelemetrySummary(rootDir);
+      const recent = await readRecentAuditEvents(2, rootDir);
+
+      expect(summary.totalEvents).toBe(1);
+      expect(summary.byKind["ollama.chat"]).toBe(1);
+      expect(Object.keys(summary.models)).toContain("erin/llama3.1:8b");
+      expect(recent[0]?.kind).toBe("ollama.chat");
+      expect(recent[0]?.responseText).toBe("Hello from Erin");
+    });
+  });
+
+  test("uses the wikipedia tool workflow when a model requests grounded context", async () => {
+    await withTempDir(async (rootDir) => {
+      let ollamaCallCount = 0;
+
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async (input) => {
+          const url = String(input);
+
+          if (url.includes("w/api.php") && url.includes("list=search")) {
+            return new Response(
+              JSON.stringify({
+                query: {
+                  search: [
+                    {
+                      pageid: 123,
+                      title: "Grace Hopper",
+                      snippet: "American computer scientist and United States Navy rear admiral."
+                    }
+                  ]
+                }
+              }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          if (url.includes("w/api.php") && url.includes("prop=extracts%7Cinfo")) {
+            return new Response(
+              JSON.stringify({
+                query: {
+                  pages: {
+                    "123": {
+                      pageid: 123,
+                      title: "Grace Hopper",
+                      extract:
+                        "Grace Hopper was an American computer scientist, mathematician, and United States Navy rear admiral.",
+                      fullurl: "https://en.wikipedia.org/wiki/Grace_Hopper"
+                    }
+                  }
+                }
+              }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          ollamaCallCount += 1;
+          return makeChatResponse(
+            ollamaCallCount === 1 ? "WIKIPEDIA: Grace Hopper" : "Grounded answer from Erin"
+          );
+        },
+        speakFn: () => {}
+      });
+
+      const result = await app.execute(parseCommand("Tell me about Grace Hopper."));
+      const summary = await loadTelemetrySummary(rootDir);
+
+      expect(result.lines).toEqual(["@erin: Grounded answer from Erin"]);
+      expect(summary.wikipedia.calls).toBe(1);
+      expect(summary.byKind["ollama.chat"]).toBe(2);
+    });
+  });
+
+  test("supports queued model overrides for later auto execution", async () => {
+    await withTempDir(async (rootDir) => {
+      await createAgent(
+        {
+          name: "Reviewer",
+          summary: "Reviews routing choices.",
+          mission: "Inspect queue behavior.",
+          style: "Direct and analytical.",
+          skills: "Use metrics and queue analysis.",
+          preferredResource: "vic"
+        },
+        rootDir
+      );
+
+      const requestedModels: string[] = [];
+      let callCount = 0;
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { model?: string };
+          requestedModels.push(body.model ?? "");
+          callCount += 1;
+
+          if (callCount === 1) {
+            return makeChatResponse(
+              "Queue it.\nQUEUE[medium][vic][special-model]: benchmark the workhorse"
+            );
+          }
+
+          return makeChatResponse("Completed benchmark.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/agent reviewer"));
+      await app.execute(parseCommand("Review the routing."));
+      await app.execute(parseCommand("/auto"));
+      await app.runIdleCycle();
+
+      const state = await loadSystemState(rootDir);
+      expect(state.auto.completed[0]).toEqual(
+        expect.objectContaining({
+          assignedResource: "vic",
+          assignedModel: "special-model"
+        })
+      );
+      expect(requestedModels).toContain("special-model");
     });
   });
 

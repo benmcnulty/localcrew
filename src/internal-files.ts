@@ -99,6 +99,8 @@ export async function getInternalFileDetails(
     focusTodo: paths.focusTodoPath,
     changelog: paths.changelogPath,
     inventory: paths.deviceInventoryPath,
+    telemetrySummary: paths.telemetrySummaryPath,
+    auditLog: paths.auditLogPath,
     orchestratorSummary: paths.orchestratorMemorySummaryPath,
     agentsIndex: paths.agentsIndexPath,
     systemState: paths.systemStatePath

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { loadLocalEnv } from "./env.ts";
 import { getStoragePaths } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
+import { getDefaultTelemetrySummary } from "./telemetry.ts";
 import type {
   AgentCreateAnswers,
   AgentMemoryFile,
@@ -79,6 +80,9 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
     ...(typeof candidate.requestedResource === "string" &&
     candidate.requestedResource.trim() !== ""
       ? { requestedResource: candidate.requestedResource }
+      : {}),
+    ...(typeof candidate.requestedModel === "string" && candidate.requestedModel.trim() !== ""
+      ? { requestedModel: candidate.requestedModel }
       : {}),
     ...(typeof candidate.assignedResource === "string" && candidate.assignedResource.trim() !== ""
       ? { assignedResource: candidate.assignedResource }
@@ -225,6 +229,7 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await mkdir(paths.secureDir, { recursive: true });
   await mkdir(paths.orchestratorDir, { recursive: true });
   await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+  await mkdir(paths.telemetryDir, { recursive: true });
   await mkdir(paths.agentsDir, { recursive: true });
 
   await writeIfMissing(paths.systemStatePath, JSON.stringify(getDefaultSystemState(), null, 2));
@@ -234,6 +239,11 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await writeIfMissing(paths.changelogPath, getDefaultChangelog());
   await writeIfMissing(paths.deviceInventoryPath, renderResourceInventory(rootDir));
   await writeIfMissing(paths.agentWorkflowPath, getDefaultWorkflow());
+  await writeIfMissing(
+    paths.telemetrySummaryPath,
+    JSON.stringify(getDefaultTelemetrySummary(), null, 2)
+  );
+  await writeIfMissing(paths.auditLogPath, "");
   await writeIfMissing(
     paths.orchestratorMemoryIndexPath,
     JSON.stringify({ updatedAt: null, activeAgents: [], queueDepth: 0 }, null, 2)

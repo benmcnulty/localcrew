@@ -53,6 +53,7 @@ export interface AutoQueueTask {
   createdBy: string;
   status: "queued" | "completed";
   requestedResource?: string;
+  requestedModel?: string;
   assignedResource?: string;
   assignedModel?: string;
   agentName?: string;
@@ -112,7 +113,7 @@ export interface WorkflowRequest {
 }
 
 export interface ViewerRequest {
-  kind: "status" | "explore";
+  kind: "status" | "explore" | "hud";
 }
 
 export type ReplMode = "command" | "chat" | "group" | "auto" | "agent";
@@ -129,6 +130,89 @@ export interface FollowUpRequest {
   message: string;
 }
 
+export interface OllamaChatResult {
+  text: string;
+  totalDuration?: number;
+  loadDuration?: number;
+  promptEvalCount?: number;
+  promptEvalDuration?: number;
+  evalCount?: number;
+  evalDuration?: number;
+}
+
+export interface AuditEvent {
+  id: number;
+  timestamp: string;
+  kind: "ollama.chat" | "wikipedia.search" | "system";
+  scope: string;
+  summary: string;
+  success: boolean;
+  actor?: string;
+  resourceAlias?: string;
+  target?: string;
+  model?: string;
+  durationMs?: number;
+  promptMessageCount?: number;
+  promptChars?: number;
+  responseChars?: number;
+  promptEvalCount?: number;
+  evalCount?: number;
+  requestMessages?: ChatMessage[];
+  responseText?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TelemetryMetricBucket {
+  calls: number;
+  errors: number;
+  totalDurationMs: number;
+  promptEvalCount: number;
+  evalCount: number;
+  promptChars: number;
+  responseChars: number;
+}
+
+export interface TelemetryRecentEvent {
+  id: number;
+  timestamp: string;
+  kind: string;
+  scope: string;
+  summary: string;
+  success: boolean;
+}
+
+export interface TelemetrySummary {
+  updatedAt: string | null;
+  totalEvents: number;
+  lastEventId: number;
+  byKind: Record<string, number>;
+  byScope: Record<string, number>;
+  models: Record<string, TelemetryMetricBucket>;
+  resources: Record<string, TelemetryMetricBucket>;
+  wikipedia: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentQueries: string[];
+  };
+  recent: TelemetryRecentEvent[];
+}
+
+export interface WikipediaSearchPage {
+  pageId: number;
+  title: string;
+  url: string;
+  excerpt: string;
+}
+
+export interface WikipediaSearchResult {
+  query: string;
+  durationMs: number;
+  pages: WikipediaSearchPage[];
+  chunks: string[];
+}
+
 export type Command =
   | { type: "message"; text: string; alias?: string }
   | { type: "crosstalk"; fromAlias: string; toAlias: string; text: string }
@@ -137,6 +221,7 @@ export type Command =
   | { type: "autoMode" }
   | { type: "stopAuto" }
   | { type: "status" }
+  | { type: "hud" }
   | { type: "explore" }
   | { type: "endMode" }
   | { type: "help" }

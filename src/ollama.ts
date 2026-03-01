@@ -1,4 +1,4 @@
-import type { ChatMessage, EndpointConfig } from "./types.ts";
+import type { ChatMessage, EndpointConfig, OllamaChatResult } from "./types.ts";
 
 export type FetchFn = typeof fetch;
 
@@ -11,11 +11,11 @@ function formatHttpError(status: number, bodyText: string): string {
   return trimmedBody ? `HTTP ${status}: ${trimmedBody}` : `HTTP ${status}`;
 }
 
-export async function chatWithOllama(
+export async function chatWithOllamaDetailed(
   endpoint: EndpointConfig,
   messages: ChatMessage[],
   fetchFn: FetchFn = fetch
-): Promise<string> {
+): Promise<OllamaChatResult> {
   const response = await fetchFn(`${trimTrailingSlash(endpoint.baseUrl)}/api/chat`, {
     method: "POST",
     headers: {
@@ -35,11 +35,38 @@ export async function chatWithOllama(
 
   const body = (await response.json()) as {
     message?: { content?: unknown };
+    total_duration?: unknown;
+    load_duration?: unknown;
+    prompt_eval_count?: unknown;
+    prompt_eval_duration?: unknown;
+    eval_count?: unknown;
+    eval_duration?: unknown;
   };
 
   if (typeof body.message?.content !== "string" || body.message.content.trim() === "") {
     throw new Error("Ollama response was missing message.content.");
   }
 
-  return body.message.content.trim();
+  return {
+    text: body.message.content.trim(),
+    ...(typeof body.total_duration === "number" ? { totalDuration: body.total_duration } : {}),
+    ...(typeof body.load_duration === "number" ? { loadDuration: body.load_duration } : {}),
+    ...(typeof body.prompt_eval_count === "number"
+      ? { promptEvalCount: body.prompt_eval_count }
+      : {}),
+    ...(typeof body.prompt_eval_duration === "number"
+      ? { promptEvalDuration: body.prompt_eval_duration }
+      : {}),
+    ...(typeof body.eval_count === "number" ? { evalCount: body.eval_count } : {}),
+    ...(typeof body.eval_duration === "number" ? { evalDuration: body.eval_duration } : {})
+  };
+}
+
+export async function chatWithOllama(
+  endpoint: EndpointConfig,
+  messages: ChatMessage[],
+  fetchFn: FetchFn = fetch
+): Promise<string> {
+  const result = await chatWithOllamaDetailed(endpoint, messages, fetchFn);
+  return result.text;
 }

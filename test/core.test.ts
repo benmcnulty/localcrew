@@ -347,7 +347,7 @@ describe("message assembly", () => {
       {
         role: "system",
         content:
-          "You are @erin. You are one contributor in a shared multi-model conversation with these participants: @erin, @zora, @sam, @pav. The participant names are exactly: Erin (@erin), Zora (@zora), Sam (@sam), Pav (@pav). Use exactly those names and aliases, and never invent alternate names, nicknames, or expansions. Transcript lines are labeled with their @alias and may include directed participant-to-participant lines in the form @from to @to: message. Answer only as @erin, from your own perspective. If you want to suggest one directed follow-up for the user to approve, end your response with a final line exactly in this format: NEXT: @alias: message Only suggest a valid participant other than yourself, keep the NEXT message short, and omit the NEXT line when no follow-up suggestion is needed. The NEXT line is only a user-editable suggestion and is not executed automatically."
+          'You are @erin. You are one contributor in a shared multi-model conversation with these participants: @erin, @zora, @sam, @pav. The participant names are exactly: Erin (@erin), Zora (@zora), Sam (@sam), Pav (@pav). Use exactly those names and aliases, and never invent alternate names, nicknames, or expansions. Transcript lines are labeled with their @alias and may include directed participant-to-participant lines in the form @from to @to: message. Answer only as @erin, from your own perspective. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query If you want to suggest one directed follow-up for the user to approve, end your response with a final line exactly in this format: NEXT: @alias: message Only suggest a valid participant other than yourself, keep the NEXT message short, and omit the NEXT line when no follow-up suggestion is needed. The NEXT line is only a user-editable suggestion and is not executed automatically. Do not emit more than one WIKIPEDIA line.'
       },
       {
         role: "system",
@@ -398,7 +398,7 @@ describe("message assembly", () => {
       {
         role: "system",
         content:
-          "You are Reviewer (@reviewer), a persistent agent identity managed by Erin, the orchestrator. Your preferred inference resource is vic. Stay aligned with your specification and maintain continuity with your private memory. If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, or optionally QUEUE[medium][air]: task. Do not emit queue lines unless a concrete asynchronous follow-up is useful."
+          "You are Reviewer (@reviewer), a persistent agent identity managed by Erin, the orchestrator. Your preferred inference resource is vic. Stay aligned with your specification and maintain continuity with your private memory. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task. Do not emit queue lines unless a concrete asynchronous follow-up is useful."
       },
       {
         role: "system",
@@ -434,7 +434,7 @@ describe("message assembly", () => {
     expect(autoTaskMessages[1]).toEqual({
       role: "system",
       content:
-        "You are Erin, the orchestrator identity. The selected inference resource for this task is @air. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Erin. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, or optionally QUEUE[medium][air]: task."
+        'You are Erin, the orchestrator identity. The selected inference resource for this task is @air. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Erin. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][air]: task, or QUEUE[medium][air][model-name]: task.'
     });
 
     expect(autoTaskMessages.at(-1)).toEqual({
@@ -455,7 +455,7 @@ describe("message assembly", () => {
     ).toEqual({
       role: "system",
       content:
-        "You are Erin, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Propose a brief self-improvement backlog for the local orchestration system only. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
+        "You are Erin, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Propose a brief self-improvement backlog for the local orchestration system only. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
     });
   });
 });

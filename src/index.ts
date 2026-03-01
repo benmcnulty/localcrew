@@ -37,6 +37,14 @@ function isEscapeBuffer(buffer: Buffer): boolean {
   return buffer.length > 0 && buffer[0] === 27;
 }
 
+function isArrowLeftBuffer(buffer: Buffer): boolean {
+  return buffer.toString("utf8") === "\u001b[D";
+}
+
+function isArrowRightBuffer(buffer: Buffer): boolean {
+  return buffer.toString("utf8") === "\u001b[C";
+}
+
 function isEnterBuffer(buffer: Buffer): boolean {
   return buffer.includes(13) || buffer.includes(10);
 }
@@ -76,6 +84,23 @@ async function readRawBuffer(): Promise<Buffer> {
     stdin.once("data", (data) => {
       resolve(Buffer.isBuffer(data) ? data : Buffer.from(String(data)));
     });
+  });
+}
+
+async function readRawBufferWithTimeout(timeoutMs: number): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const onData = (data: string | Buffer): void => {
+      clearTimeout(timer);
+      stdin.off("data", onData);
+      resolve(Buffer.isBuffer(data) ? data : Buffer.from(String(data)));
+    };
+
+    const timer = setTimeout(() => {
+      stdin.off("data", onData);
+      resolve(null);
+    }, timeoutMs);
+
+    stdin.on("data", onData);
   });
 }
 
@@ -175,6 +200,53 @@ async function runExploreViewer(
   });
 }
 
+async function runHudViewer(
+  app: CrustyApp,
+  readline: ReturnType<typeof createInterface>
+): Promise<void> {
+  await withRawMode(readline, async () => {
+    const tabs: Array<"status" | "detail"> = ["status", "detail"];
+    let tabIndex = 0;
+    let lastPulseAt = 0;
+
+    while (true) {
+      if (app.shouldAutoPulse() && Date.now() - lastPulseAt >= app.getAutoPulseIntervalMs()) {
+        await app.runIdleCycle();
+        lastPulseAt = Date.now();
+      }
+
+      clearScreen();
+      const lines = await app.getHudLines(tabs[tabIndex]);
+      lines.forEach((line) => writeLine(stdout, line));
+
+      const buffer = await readRawBufferWithTimeout(250);
+      if (!buffer) {
+        continue;
+      }
+
+      if (buffer.includes(3)) {
+        clearScreen();
+        return;
+      }
+
+      if (isArrowLeftBuffer(buffer)) {
+        tabIndex = (tabIndex + tabs.length - 1) % tabs.length;
+        continue;
+      }
+
+      if (isArrowRightBuffer(buffer)) {
+        tabIndex = (tabIndex + 1) % tabs.length;
+        continue;
+      }
+
+      if (isEscapeBuffer(buffer)) {
+        clearScreen();
+        return;
+      }
+    }
+  });
+}
+
 async function resolveViewerRequest(
   app: CrustyApp,
   readline: ReturnType<typeof createInterface>,
@@ -186,6 +258,11 @@ async function resolveViewerRequest(
 
   if (result.viewerRequest.kind === "status") {
     await runStatusViewer(app, readline);
+    return;
+  }
+
+  if (result.viewerRequest.kind === "hud") {
+    await runHudViewer(app, readline);
     return;
   }
 

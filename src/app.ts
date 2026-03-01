@@ -38,7 +38,7 @@ import {
   buildChatMessages,
   buildQueueFillMessages
 } from "./messages.ts";
-import { chatWithOllama, type FetchFn } from "./ollama.ts";
+import { chatWithOllamaDetailed, type FetchFn } from "./ollama.ts";
 import {
   getResourceEndpoint,
   getResourceProfilesByTier,
@@ -58,12 +58,15 @@ import {
 } from "./session-store.ts";
 import { speakText, type WarnFn } from "./speech.ts";
 import { getStoragePaths } from "./storage.ts";
+import { appendAuditEvent, loadTelemetrySummary, readRecentAuditEvents } from "./telemetry.ts";
 import type {
   AgentCreateAnswers,
+  AuditEvent,
   AgentMeta,
   AppConfig,
   AssistantConversationMessage,
   AutoQueueTask,
+  EndpointConfig,
   Command,
   EditRequest,
   FollowUpRequest,
@@ -72,11 +75,15 @@ import type {
   SessionsFile,
   SystemState,
   TaskPriority,
+  TelemetrySummary,
   ViewerRequest,
   WorkflowQuestion,
-  WorkflowRequest
+  WorkflowRequest,
+  ChatMessage,
+  OllamaChatResult
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
+import { searchWikipedia } from "./wikipedia.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
@@ -139,26 +146,58 @@ function parseAssistantResponse(
   };
 }
 
+function parseWikipediaRequest(content: string): { replyText: string; query?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)WIKIPEDIA:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return {
+      replyText: trimmedContent
+    };
+  }
+
+  const query = match[1].trim().replace(/^["“]|["”]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  if (!query) {
+    return {
+      replyText: trimmedContent
+    };
+  }
+
+  return {
+    replyText,
+    query
+  };
+}
+
 function parseQueuedTasks(content: string): {
   replyText: string;
-  queuedTasks: Array<{ priority: TaskPriority; content: string; requestedResource?: string }>;
+  queuedTasks: Array<{
+    priority: TaskPriority;
+    content: string;
+    requestedResource?: string;
+    requestedModel?: string;
+  }>;
 } {
   const replyLines: string[] = [];
   const queuedTasks: Array<{
     priority: TaskPriority;
     content: string;
     requestedResource?: string;
+    requestedModel?: string;
   }> = [];
 
   for (const line of content.split("\n")) {
     const match = line
       .trim()
-      .match(/^QUEUE\[(high|medium|low)\](?:\[(air|vic|min|pav)\])?:\s*(.+)$/i);
+      .match(/^QUEUE\[(high|medium|low)\](?:\[(air|vic|min|pav)\])?(?:\[([^\]]+)\])?:\s*(.+)$/i);
     if (match) {
       queuedTasks.push({
         priority: match[1].toLowerCase() as TaskPriority,
         ...(match[2] ? { requestedResource: match[2].toLowerCase() } : {}),
-        content: match[3].trim()
+        ...(match[3] ? { requestedModel: match[3].trim() } : {}),
+        content: match[4].trim()
       });
       continue;
     }
@@ -170,6 +209,52 @@ function parseQueuedTasks(content: string): {
     replyText: replyLines.join("\n").trim(),
     queuedTasks
   };
+}
+
+function formatTelemetryBucket(summary: TelemetrySummary, key: string): string {
+  const bucket = summary.models[key];
+  const averageDurationMs =
+    bucket && bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0;
+  return `${key} ${bucket?.calls ?? 0} call(s), avg ${averageDurationMs}ms, ${bucket?.evalCount ?? 0} eval tokens`;
+}
+
+function formatAuditEventLines(event: AuditEvent): string[] {
+  const lines = [
+    `#${event.id} ${event.timestamp} ${event.kind} ${event.success ? "ok" : "error"}`,
+    `scope: ${event.scope}`,
+    `summary: ${event.summary}`
+  ];
+
+  if (event.resourceAlias || event.model) {
+    lines.push(
+      `resource: ${event.resourceAlias ?? "(n/a)"}${event.model ? ` / ${event.model}` : ""}`
+    );
+  }
+
+  if (event.durationMs !== undefined) {
+    lines.push(`duration: ${event.durationMs}ms`);
+  }
+
+  if (event.requestMessages && event.requestMessages.length > 0) {
+    lines.push("");
+    lines.push("request:");
+    for (const message of event.requestMessages) {
+      lines.push(`[${message.role}] ${message.content}`);
+    }
+  }
+
+  if (event.responseText) {
+    lines.push("");
+    lines.push("response:");
+    lines.push(event.responseText);
+  }
+
+  if (event.error) {
+    lines.push("");
+    lines.push(`error: ${event.error}`);
+  }
+
+  return lines;
 }
 
 function parseQueueFillOutput(content: string): Array<{ priority: TaskPriority; content: string }> {
@@ -333,13 +418,19 @@ export class CrustyApp {
   }
 
   async getStatusLines(): Promise<string[]> {
-    const [agents, internalFiles] = await Promise.all([
+    const [agents, internalFiles, telemetry] = await Promise.all([
       listAgents(this.rootDir),
-      getInternalFileDetails(this.rootDir)
+      getInternalFileDetails(this.rootDir),
+      loadTelemetrySummary(this.rootDir)
     ]);
     const nextTask = this.sortPendingTasks(this.systemState.auto.pending)[0];
     const lastCompleted = this.systemState.auto.completed.at(-1);
-    const tiers = getResourceProfilesByTier();
+    const tiers = getResourceProfilesByTier(this.rootDir);
+    const topModels = Object.entries(telemetry.models)
+      .sort((left, right) => right[1].calls - left[1].calls)
+      .slice(0, 3)
+      .map(([key]) => key);
+    const lastAudit = telemetry.recent[0];
 
     return [
       "Crusty Status",
@@ -353,7 +444,7 @@ export class CrustyApp {
         nextTask
           ? `#${nextTask.id} [${nextTask.priority}]${
               nextTask.requestedResource ? ` -> ${nextTask.requestedResource}` : ""
-            } ${nextTask.content}`
+            }${nextTask.requestedModel ? `/${nextTask.requestedModel}` : ""} ${nextTask.content}`
           : "(none queued)"
       }`,
       `Last completed: ${
@@ -365,11 +456,56 @@ export class CrustyApp {
       `Mid tier: ${tiers.mid.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Low tier: ${tiers.low.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
+      `Telemetry: ${telemetry.totalEvents} events, ${telemetry.byKind["ollama.chat"] ?? 0} model calls, ${telemetry.wikipedia.calls} wiki searches`,
+      `Recent model metrics: ${topModels.length > 0 ? topModels.map((key) => formatTelemetryBucket(telemetry, key)).join(" | ") : "(none yet)"}`,
+      `Last audit: ${lastAudit ? `#${lastAudit.id} ${lastAudit.summary}` : "(none yet)"}`,
       `Docs: focus ${internalFiles.focusTodo.modifiedAt} | roadmap ${internalFiles.roadmap.modifiedAt}`,
       `Docs: changelog ${internalFiles.changelog.modifiedAt} | directives ${internalFiles.directives.modifiedAt}`,
       `Internal tree root: ${getStoragePaths(this.rootDir).systemDir}`,
       "",
       "Press Esc to return."
+    ];
+  }
+
+  async getHudLines(tab: "status" | "detail"): Promise<string[]> {
+    const [statusLines, telemetry, auditEvents] = await Promise.all([
+      this.getStatusLines(),
+      loadTelemetrySummary(this.rootDir),
+      readRecentAuditEvents(tab === "detail" ? 6 : 3, this.rootDir)
+    ]);
+
+    const tabs = [
+      tab === "status" ? "[status]" : " status ",
+      tab === "detail" ? "[detail]" : " detail "
+    ].join(" ");
+
+    if (tab === "status") {
+      const recent = telemetry.recent
+        .slice(0, 5)
+        .map(
+          (event) =>
+            `${event.success ? "ok" : "err"} #${event.id} ${event.kind} ${event.scope}: ${event.summary}`
+        );
+
+      return [
+        `HUD ${tabs}`,
+        "",
+        ...statusLines.slice(0, -1),
+        "",
+        "Recent events:",
+        ...(recent.length > 0 ? recent : ["(none yet)"]),
+        "",
+        "Left/Right switches tabs. Esc returns to the prompt."
+      ];
+    }
+
+    return [
+      `HUD ${tabs}`,
+      "",
+      ...(auditEvents.length > 0
+        ? auditEvents.flatMap((event) => [...formatAuditEventLines(event), ""])
+        : ["No audit events recorded yet.", ""]),
+      "Left/Right switches tabs. Esc returns to the prompt."
     ];
   }
 
@@ -468,7 +604,7 @@ export class CrustyApp {
       `Auto queue: ${this.systemState.auto.pending.length} pending, ${this.systemState.auto.completed.length} completed.`,
       `Direct message: @alias message`,
       `Crosstalk: @from to @to: "message"`,
-      `Commands: /help, /status, /explore, /chat, /group, /auto, /stop, /agent list, /agent new, /agent edit <name>, /agent <name>, /end`,
+      `Commands: /help, /status, /hud, /explore, /chat, /group, /auto, /stop, /agent list, /agent new, /agent edit <name>, /agent <name>, /end`,
       `Commands: /priority [high|medium|low], /model [alias], /default [alias], /rename <old> <new>`,
       `Commands: /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset], /sound [on|off]`,
       "Commands: /compact, /reset, /clear, /exit"
@@ -515,6 +651,170 @@ export class CrustyApp {
     await this.persistSystemState();
   }
 
+  private async callModel(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    summary: string;
+    target?: string;
+  }): Promise<OllamaChatResult> {
+    const started = Date.now();
+
+    try {
+      const result = await chatWithOllamaDetailed(options.endpoint, options.messages, this.fetchFn);
+      const durationMs =
+        typeof result.totalDuration === "number"
+          ? Math.round(result.totalDuration / 1_000_000)
+          : Date.now() - started;
+
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "ollama.chat",
+          scope: options.scope,
+          summary: options.summary,
+          success: true,
+          actor: options.actor,
+          resourceAlias: options.resourceAlias,
+          target: options.target,
+          model: options.endpoint.model,
+          durationMs,
+          promptMessageCount: options.messages.length,
+          promptChars: options.messages.reduce((total, message) => total + message.content.length, 0),
+          responseChars: result.text.length,
+          promptEvalCount: result.promptEvalCount,
+          evalCount: result.evalCount,
+          requestMessages: options.messages,
+          responseText: result.text
+        },
+        this.rootDir
+      );
+
+      return result;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "ollama.chat",
+          scope: options.scope,
+          summary: options.summary,
+          success: false,
+          actor: options.actor,
+          resourceAlias: options.resourceAlias,
+          target: options.target,
+          model: options.endpoint.model,
+          durationMs: Date.now() - started,
+          promptMessageCount: options.messages.length,
+          promptChars: options.messages.reduce((total, message) => total + message.content.length, 0),
+          requestMessages: options.messages,
+          error: (error as Error).message
+        },
+        this.rootDir
+      );
+      throw error;
+    }
+  }
+
+  private async requestWikipediaSearch(
+    query: string,
+    scope: string,
+    actor: string
+  ): Promise<import("./types.ts").WikipediaSearchResult> {
+    try {
+      const result = await searchWikipedia(query, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "wikipedia.search",
+          scope,
+          summary: `Wikipedia search "${query}" returned ${result.pages.length} page(s).`,
+          success: true,
+          actor,
+          durationMs: result.durationMs,
+          responseChars: result.chunks.join("\n\n").length,
+          responseText: result.chunks.join("\n\n"),
+          metadata: {
+            query,
+            titles: result.pages.map((page) => page.title)
+          }
+        },
+        this.rootDir
+      );
+      return result;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "wikipedia.search",
+          scope,
+          summary: `Wikipedia search "${query}" failed.`,
+          success: false,
+          actor,
+          error: (error as Error).message,
+          metadata: {
+            query
+          }
+        },
+        this.rootDir
+      );
+      throw error;
+    }
+  }
+
+  private async resolveWikipediaTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsedToolRequest = parseWikipediaRequest(options.rawReply);
+    if (!parsedToolRequest.query) {
+      return options.rawReply;
+    }
+
+    try {
+      const wiki = await this.requestWikipediaSearch(
+        parsedToolRequest.query,
+        `${options.scope}.wikipedia`,
+        options.actor
+      );
+      const followUp = await this.callModel({
+        scope: `${options.scope}.wikipedia-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after Wikipedia search "${parsedToolRequest.query}".`,
+        messages: [
+          ...options.messages,
+          {
+            role: "assistant",
+            content: options.rawReply
+          },
+          ...wiki.chunks.map((chunk) => ({
+            role: "system" as const,
+            content: chunk
+          })),
+          {
+            role: "user",
+            content:
+              "Use the Wikipedia results above to continue the same task. Produce the final answer now. Only emit another WIKIPEDIA line if the first results were clearly insufficient."
+          }
+        ]
+      });
+
+      return parseWikipediaRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      this.warn(`Wikipedia search failed: ${(error as Error).message}`);
+      return parsedToolRequest.replyText || options.rawReply;
+    }
+  }
+
   private async compactIfNeeded(force = false): Promise<boolean> {
     const summaryAlias = this.config.defaultEndpoint;
     const endpoint = this.config.endpoints[summaryAlias];
@@ -535,7 +835,18 @@ export class CrustyApp {
       endpoint,
       getConversationSummary(this.sessions),
       unsummarizedMessages,
-      (selectedEndpoint, messages) => chatWithOllama(selectedEndpoint, messages, this.fetchFn)
+      async (selectedEndpoint, messages) =>
+        (
+          await this.callModel({
+            scope: "compact.shared",
+            actor: "erin",
+            endpoint: selectedEndpoint,
+            resourceAlias: this.config.defaultEndpoint,
+            target: this.config.defaultEndpoint,
+            messages,
+            summary: "Compacting the shared conversation summary."
+          })
+        ).text
     );
 
     this.sessions = setConversationCompaction(this.sessions, {
@@ -560,13 +871,28 @@ export class CrustyApp {
       return false;
     }
 
-    const selection = chooseResourceForTask("compact private agent memory", agent.preferredResource);
-    const endpoint = getResourceEndpoint(selection.alias, selection.purpose);
+    const selection = chooseResourceForTask(
+      "compact private agent memory",
+      agent.preferredResource,
+      this.rootDir
+    );
+    const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
     const summary = await compactConversation(
       endpoint,
       memory.conversation.summary,
       unsummarizedMessages,
-      (selectedEndpoint, messages) => chatWithOllama(selectedEndpoint, messages, this.fetchFn)
+      async (selectedEndpoint, messages) =>
+        (
+          await this.callModel({
+            scope: "compact.agent",
+            actor: `agent:${agent.slug}`,
+            endpoint: selectedEndpoint,
+            resourceAlias: selection.alias,
+            target: agent.slug,
+            messages,
+            summary: `Compacting private memory for @${agent.slug}.`
+          })
+        ).text
     );
 
     await saveAgentMemory(
@@ -602,21 +928,37 @@ export class CrustyApp {
     const recentMessages = getConversationMessages(this.sessions).slice(
       getConversationCompactedUntil(this.sessions)
     );
+    const outgoingMessages = buildChatMessages({
+      alias: normalizedAlias,
+      participants: Object.keys(this.config.endpoints),
+      instructions: endpoint.instructions,
+      summary: getConversationSummary(this.sessions),
+      recentMessages,
+      taskPrompt: options.taskPrompt
+    });
 
     let rawAssistantReply: string;
     try {
-      rawAssistantReply = await chatWithOllama(
+      rawAssistantReply = (
+        await this.callModel({
+          scope: "chat.participant",
+          actor: `participant:${normalizedAlias}`,
+          endpoint,
+          resourceAlias: normalizedAlias,
+          target: normalizedAlias,
+          messages: outgoingMessages,
+          summary: `Participant reply requested from @${normalizedAlias}.`
+        })
+      ).text;
+      rawAssistantReply = await this.resolveWikipediaTool({
+        scope: "chat.participant",
+        actor: `participant:${normalizedAlias}`,
         endpoint,
-        buildChatMessages({
-          alias: normalizedAlias,
-          participants: Object.keys(this.config.endpoints),
-          instructions: endpoint.instructions,
-          summary: getConversationSummary(this.sessions),
-          recentMessages,
-          taskPrompt: options.taskPrompt
-        }),
-        this.fetchFn
-      );
+        resourceAlias: normalizedAlias,
+        target: normalizedAlias,
+        messages: outgoingMessages,
+        rawReply: rawAssistantReply
+      });
     } catch (error) {
       return {
         lines: [],
@@ -694,6 +1036,7 @@ export class CrustyApp {
     options: {
       agentName?: string;
       requestedResource?: string;
+      requestedModel?: string;
     } = {}
   ): Promise<AutoQueueTask> {
     const task: AutoQueueTask = {
@@ -704,6 +1047,7 @@ export class CrustyApp {
       createdBy,
       status: "queued",
       ...(options.requestedResource ? { requestedResource: options.requestedResource } : {}),
+      ...(options.requestedModel ? { requestedModel: options.requestedModel } : {}),
       ...(options.agentName ? { agentName: options.agentName } : {})
     };
 
@@ -719,7 +1063,12 @@ export class CrustyApp {
   }
 
   private async queueParsedTasks(
-    queuedTasks: Array<{ priority: TaskPriority; content: string; requestedResource?: string }>,
+    queuedTasks: Array<{
+      priority: TaskPriority;
+      content: string;
+      requestedResource?: string;
+      requestedModel?: string;
+    }>,
     createdBy: string,
     options: {
       agentName?: string;
@@ -735,7 +1084,8 @@ export class CrustyApp {
       addedTasks.push(
         await this.enqueueAutoTask(task.content, task.priority, createdBy, {
           ...options,
-          requestedResource: task.requestedResource
+          requestedResource: task.requestedResource,
+          requestedModel: task.requestedModel
         })
       );
     }
@@ -754,24 +1104,40 @@ export class CrustyApp {
       loadAgentMemory(agent.slug, this.rootDir),
       loadAgentSpec(agent.slug, this.rootDir)
     ]);
-    const selection = chooseResourceForTask(userMessage, agent.preferredResource);
-    const endpoint = getResourceEndpoint(selection.alias, selection.purpose);
+    const selection = chooseResourceForTask(userMessage, agent.preferredResource, this.rootDir);
+    const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
+    const outgoingMessages = buildAgentChatMessages({
+      agentName: agent.name,
+      agentSlug: agent.slug,
+      preferredResource: agent.preferredResource,
+      spec,
+      summary: memory.conversation.summary,
+      recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
+      taskPrompt: `USER -> @${agent.slug}: ${userMessage}`
+    });
 
     let rawReply: string;
     try {
-      rawReply = await chatWithOllama(
+      rawReply = (
+        await this.callModel({
+          scope: "agent.chat",
+          actor: `agent:${agent.slug}`,
+          endpoint,
+          resourceAlias: selection.alias,
+          target: agent.slug,
+          messages: outgoingMessages,
+          summary: `Agent reply requested from @${agent.slug}.`
+        })
+      ).text;
+      rawReply = await this.resolveWikipediaTool({
+        scope: "agent.chat",
+        actor: `agent:${agent.slug}`,
         endpoint,
-        buildAgentChatMessages({
-          agentName: agent.name,
-          agentSlug: agent.slug,
-          preferredResource: agent.preferredResource,
-          spec,
-          summary: memory.conversation.summary,
-          recentMessages: memory.conversation.messages.slice(memory.conversation.compactedUntil),
-          taskPrompt: `USER -> @${agent.slug}: ${userMessage}`
-        }),
-        this.fetchFn
-      );
+        resourceAlias: selection.alias,
+        target: agent.slug,
+        messages: outgoingMessages,
+        rawReply
+      });
     } catch (error) {
       return {
         lines: [],
@@ -819,7 +1185,7 @@ export class CrustyApp {
           (task) =>
             `Queued #${task.id} [${task.priority}]${
               task.requestedResource ? ` -> ${task.requestedResource}` : ""
-            } from @${agent.slug}: ${task.content}`
+            }${task.requestedModel ? `/${task.requestedModel}` : ""} from @${agent.slug}: ${task.content}`
         )
       ],
       errors: [],
@@ -836,23 +1202,39 @@ export class CrustyApp {
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
-    const endpoint = getResourceEndpoint("air", "reasoning");
+    const endpoint = getResourceEndpoint("air", "reasoning", this.rootDir);
+    const outgoingMessages = buildQueueFillMessages({
+      directives: documents.directives,
+      inventory: documents.inventory,
+      roadmap: documents.roadmap,
+      focusTodo: documents.focusTodo,
+      changelog: documents.changelog,
+      orchestratorSummary: documents.orchestratorSummary,
+      agents: agents.map((agent) => `@${agent.slug}`)
+    });
 
     let rawReply: string;
     try {
-      rawReply = await chatWithOllama(
+      rawReply = (
+        await this.callModel({
+          scope: "auto.queue-fill",
+          actor: "erin",
+          endpoint,
+          resourceAlias: "air",
+          target: "erin",
+          messages: outgoingMessages,
+          summary: "Filling the auto queue."
+        })
+      ).text;
+      rawReply = await this.resolveWikipediaTool({
+        scope: "auto.queue-fill",
+        actor: "erin",
         endpoint,
-        buildQueueFillMessages({
-          directives: documents.directives,
-          inventory: documents.inventory,
-          roadmap: documents.roadmap,
-          focusTodo: documents.focusTodo,
-          changelog: documents.changelog,
-          orchestratorSummary: documents.orchestratorSummary,
-          agents: agents.map((agent) => `@${agent.slug}`)
-        }),
-        this.fetchFn
-      );
+        resourceAlias: "air",
+        target: "erin",
+        messages: outgoingMessages,
+        rawReply
+      });
     } catch (error) {
       return [
         await this.enqueueAutoTask(
@@ -900,29 +1282,52 @@ export class CrustyApp {
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
-    const selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto");
-    const endpoint = getResourceEndpoint(selection.alias, selection.purpose);
+    const selection = chooseResourceForTask(
+      task.content,
+      task.requestedResource ?? "auto",
+      this.rootDir
+    );
+    const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
+    if (task.requestedModel) {
+      endpoint.model = task.requestedModel;
+    }
+    const outgoingMessages = buildAutoTaskMessages({
+      directives: documents.directives,
+      inventory: documents.inventory,
+      roadmap: documents.roadmap,
+      focusTodo: documents.focusTodo,
+      changelog: documents.changelog,
+      orchestratorSummary: documents.orchestratorSummary,
+      agents: agents.map((agent) => `@${agent.slug}`),
+      task: task.content,
+      priority: task.priority,
+      createdBy: task.createdBy,
+      resourceAlias: selection.alias,
+      resourceRationale: selection.rationale
+    });
 
     let rawReply: string;
     try {
-      rawReply = await chatWithOllama(
-        endpoint,
-        buildAutoTaskMessages({
-          directives: documents.directives,
-          inventory: documents.inventory,
-          roadmap: documents.roadmap,
-          focusTodo: documents.focusTodo,
-          changelog: documents.changelog,
-          orchestratorSummary: documents.orchestratorSummary,
-          agents: agents.map((agent) => `@${agent.slug}`),
-          task: task.content,
-          priority: task.priority,
-          createdBy: task.createdBy,
+      rawReply = (
+        await this.callModel({
+          scope: "auto.task",
+          actor: "erin",
+          endpoint,
           resourceAlias: selection.alias,
-          resourceRationale: selection.rationale
-        }),
-        this.fetchFn
-      );
+          target: `task:${task.id}`,
+          messages: outgoingMessages,
+          summary: `Processing auto task #${task.id}.`
+        })
+      ).text;
+      rawReply = await this.resolveWikipediaTool({
+        scope: "auto.task",
+        actor: "erin",
+        endpoint,
+        resourceAlias: selection.alias,
+        target: `task:${task.id}`,
+        messages: outgoingMessages,
+        rawReply
+      });
     } catch (error) {
       return {
         lines: [],
@@ -968,7 +1373,7 @@ export class CrustyApp {
           (queuedTask) =>
             `Queued #${queuedTask.id} [${queuedTask.priority}]${
               queuedTask.requestedResource ? ` -> ${queuedTask.requestedResource}` : ""
-            }: ${queuedTask.content}`
+            }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
         )
       ],
       errors: [],
@@ -1041,7 +1446,7 @@ export class CrustyApp {
       };
     }
 
-    if (!isValidPreferredResource(normalizedAnswers.preferredResource)) {
+    if (!isValidPreferredResource(normalizedAnswers.preferredResource, this.rootDir)) {
       return {
         lines: [],
         errors: ['Preferred resource must be one of "air", "vic", "min", "pav", or "auto".'],
@@ -1052,10 +1457,8 @@ export class CrustyApp {
     let generatedSpec: string | undefined;
     try {
       const documents = await loadSystemDocuments(this.rootDir);
-      const endpoint = getResourceEndpoint("air", "reasoning");
-      generatedSpec = await chatWithOllama(
-        endpoint,
-        [
+      const endpoint = getResourceEndpoint("air", "reasoning", this.rootDir);
+      const specMessages: ChatMessage[] = [
           {
             role: "system",
             content: [
@@ -1081,9 +1484,18 @@ export class CrustyApp {
               `Preferred resource: ${normalizedAnswers.preferredResource}`
             ].join("\n")
           }
-        ],
-        this.fetchFn
-      );
+        ];
+      generatedSpec = (
+        await this.callModel({
+          scope: "agent.create",
+          actor: "erin",
+          endpoint,
+          resourceAlias: "air",
+          target: normalizedAnswers.name,
+          messages: specMessages,
+          summary: `Generating the initial specification for @${normalizedAnswers.name}.`
+        })
+      ).text;
     } catch {
       generatedSpec = undefined;
     }
@@ -1235,6 +1647,17 @@ export class CrustyApp {
           shouldExit: false,
           viewerRequest: {
             kind: "status"
+          }
+        };
+      }
+
+      if (command.type === "hud") {
+        return {
+          lines: [],
+          errors: [],
+          shouldExit: false,
+          viewerRequest: {
+            kind: "hud"
           }
         };
       }

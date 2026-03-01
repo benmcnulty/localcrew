@@ -54,6 +54,9 @@ describe("parseCommand", () => {
     expect(parseCommand("/status")).toEqual({
       type: "status"
     });
+    expect(parseCommand("/hud")).toEqual({
+      type: "hud"
+    });
     expect(parseCommand("/explore")).toEqual({
       type: "explore"
     });

@@ -18,6 +18,9 @@ export interface StoragePaths {
   changelogPath: string;
   deviceInventoryPath: string;
   agentWorkflowPath: string;
+  telemetryDir: string;
+  auditLogPath: string;
+  telemetrySummaryPath: string;
   agentsDir: string;
   agentsIndexPath: string;
 }
@@ -29,6 +32,7 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
   const secureDir = join(systemDir, "secure");
   const orchestratorDir = join(secureDir, "orchestrator");
   const orchestratorMemoryDir = join(orchestratorDir, "memory");
+  const telemetryDir = join(orchestratorDir, "telemetry");
   const agentsDir = join(secureDir, "agents");
 
   return {
@@ -49,6 +53,9 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     changelogPath: join(orchestratorDir, "changelog.md"),
     deviceInventoryPath: join(orchestratorDir, "device-inventory.md"),
     agentWorkflowPath: join(orchestratorDir, "agent-new-workflow.md"),
+    telemetryDir,
+    auditLogPath: join(telemetryDir, "audit-log.jsonl"),
+    telemetrySummaryPath: join(telemetryDir, "summary.json"),
     agentsDir,
     agentsIndexPath: join(agentsDir, "index.json")
   };
