@@ -1063,6 +1063,15 @@ describe("CrustyApp", () => {
                   status: "queued",
                   requestedResource: "workhorse",
                   requestedModel: "workhorse"
+                },
+                {
+                  id: 3,
+                  content: "Review queue pressure and summarize the result.",
+                  priority: "low",
+                  createdAt: "2026-03-01T00:02:00.000Z",
+                  createdBy: "orchestrator:auto-processed",
+                  status: "queued",
+                  requestedResource: "erlin"
                 }
               ],
               completed: []
@@ -1080,7 +1089,7 @@ describe("CrustyApp", () => {
       });
 
       const state = await loadSystemState(rootDir);
-      expect(state.auto.pending).toHaveLength(1);
+      expect(state.auto.pending).toHaveLength(2);
       expect(state.auto.pending[0]).toEqual(
         expect.objectContaining({
           id: 2,
@@ -1088,6 +1097,77 @@ describe("CrustyApp", () => {
         })
       );
       expect(state.auto.pending[0].requestedModel).toBeUndefined();
+      expect(state.auto.pending[1]).toEqual(
+        expect.objectContaining({
+          id: 3,
+          content: "Review queue pressure and summarize the result."
+        })
+      );
+      expect(state.auto.pending[1].requestedResource).toBeUndefined();
+    });
+  });
+
+  test("redirects autonomous external implementation work into outbox tickets instead of queueing it", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 1,
+              pending: [
+                {
+                  id: 1,
+                  content: "Review the current routing plan.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Captured the request.",
+              "WRITE[active][scripts/terminal_hud.py]",
+              "print('hud')",
+              "ENDWRITE",
+              "QUEUE[medium][erlin]: Implement a telemetry collector API endpoint.",
+              "QUEUE[low][zorin]: Review and finalize telemetry collector implementation details with Zora."
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const state = await loadSystemState(rootDir);
+      const dropbox = await app.getDropboxSnapshot();
+
+      expect(result.errors).toEqual([]);
+      expect(result.lines.some((line) => line.includes("Redirected external file request to outbox ticket"))).toBe(true);
+      expect(
+        result.lines.some((line) => line.includes("Redirected external feature request to outbox ticket"))
+      ).toBe(true);
+      expect(state.auto.pending).toHaveLength(0);
+      expect(dropbox.active.map((entry) => entry.relativePath)).not.toContain("scripts/terminal_hud.py");
+      expect(
+        dropbox.outbox.some((entry) => entry.relativePath.startsWith("feature-requests/"))
+      ).toBe(true);
     });
   });
 

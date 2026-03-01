@@ -399,8 +399,16 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       return;
     }
 
-    const result = await app.runIdleCycle();
-    renderBackgroundResult(readline, app, result);
+    try {
+      const result = await app.runIdleCycle();
+      renderBackgroundResult(readline, app, result);
+    } catch (error) {
+      renderBackgroundResult(readline, app, {
+        lines: [],
+        errors: [`Pulse recovered from an unexpected failure: ${(error as Error).message}`],
+        shouldExit: false
+      });
+    }
   };
 
   const pulseTimer = setInterval(() => {
