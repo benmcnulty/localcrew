@@ -10,8 +10,8 @@
 ## First-Run Flow
 
 1. Clone the repo and run `bun install`.
-2. On the best local device, run `bun run setup:orchestrator`.
-3. Start Crusty with `bun run src/index.ts`.
+2. On the best local device, run `node scripts/setup-orchestrator.js`.
+3. Start Crusty with `node src/index.ts`.
 4. Open the printed `Local UI` link or stay in the CLI.
 5. Bring a second device online, benchmark it with the platform script on that device if needed, then run:
    - `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310`
@@ -80,7 +80,7 @@ Shell env values take precedence over `.env`, which takes precedence over `.env.
 
 If you want a non-default orchestrator identity name during install, run:
 
-- `bun run setup:orchestrator --name "Aster"`
+- `node scripts/setup-orchestrator.js --name "Aster"`
 
 ## Device Benchmark Scripts
 

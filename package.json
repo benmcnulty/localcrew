@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup:orchestrator": "bun run scripts/setup-orchestrator.ts",
+    "setup:orchestrator": "node scripts/setup-orchestrator.js",
     "setup:node": "node scripts/setup-node.js",
     "start": "bun run src/index.ts",
     "start:node": "node src/index.ts",

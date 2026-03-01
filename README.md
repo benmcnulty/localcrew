@@ -24,8 +24,8 @@ The repo is being prepared for public release. Local node addresses, model assig
 
 ## Quick Start
 
-1. Run `bun run setup:orchestrator` on the best local device with Ollama or another supported local OpenAI-compatible endpoint.
-2. Start Crusty with `bun run src/index.ts` or `node src/index.ts`.
+1. Run `node scripts/setup-orchestrator.js` on the best local device with Ollama or another supported local OpenAI-compatible endpoint.
+2. Start Crusty with `node src/index.ts` or `bun run src/index.ts`.
 3. Open the printed `Local UI` link or stay in the CLI and use `/help`.
 4. Bring the next best device online and run `node scripts/setup-node.js --orchestrator http://your-orchestrator-ip:4310` on that device, or add it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai]`.
 
@@ -36,7 +36,7 @@ Once the orchestrator is up, the fast validation path is:
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet
 - use `/ui` for the matching browser prototype with editable resources, participants, and direct test chat
 
-The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `bun run setup:orchestrator --name "Your Name"`.
+The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `node scripts/setup-orchestrator.js --name "Your Name"`.
 
 Notable views:
 
@@ -97,7 +97,7 @@ Control the API listener with:
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
 - Linux: `scripts/ollama-optimize-linux.sh`
 
-Each script benchmarks a local Ollama node, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `bun run setup:orchestrator`, then benchmark and add secondary devices with `node scripts/setup-node.js`.
+Each script benchmarks a local Ollama node, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the orchestrator first with `node scripts/setup-orchestrator.js`, then benchmark and add secondary devices with `node scripts/setup-node.js`.
 
 ## Documentation
 
