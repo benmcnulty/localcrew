@@ -2274,10 +2274,52 @@ export function getDisplayHtml(): string {
     }
   }
 
-  // Poll
-  async function pollFast(){await checkHealth();await Promise.all([loadStatus(),loadQueue(),loadAudit()]);}
-  pollFast();loadResources();
-  setInterval(pollFast,3000);setInterval(loadResources,10000);
+  // Initial load (one fetch to populate UI before SSE kicks in)
+  async function pollFull(){await checkHealth();await Promise.all([loadStatus(),loadQueue(),loadAudit()]);}
+  pollFull();loadResources();
+
+  // SSE — real-time push from the orchestrator; no repeated polling needed.
+  var sseActive=false,fallbackTimer=null;
+  function startSSE(){
+    var es=new EventSource('/api/events');
+    es.onopen=function(){
+      sseActive=true;
+      if(fallbackTimer){clearInterval(fallbackTimer);fallbackTimer=null;}
+    };
+    es.onmessage=function(ev){
+      var msg;try{msg=JSON.parse(ev.data);}catch(e){return;}
+      if(msg.type==='connected'){pollFull();return;}
+      if(msg.type==='state'){
+        // Lightweight direct render from pushed data (no extra fetch)
+        var d=msg;
+        if(d.orchestratorName)el('dorch').textContent=d.orchestratorName;
+        if(d.mode){var modeEl=el('dmode');modeEl.textContent=d.mode.toUpperCase();modeEl.className='m-'+d.mode;}
+        var busyEl=el('dbusy');
+        if(d.auto&&d.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
+        else if(busyEl){busyEl.style.display='none';}
+        // Refresh full data on next idle cycle
+        if(document.visibilityState!=='hidden'){
+          requestIdleCallback?requestIdleCallback(function(){loadStatus();loadQueue();}):setTimeout(function(){loadStatus();loadQueue();},50);
+        }
+      }
+    };
+    es.onerror=function(){
+      sseActive=false;
+      es.close();
+      // Fall back to slow polling if SSE drops; retry SSE after 30s
+      if(!fallbackTimer){fallbackTimer=setInterval(pollFull,15000);}
+      setTimeout(startSSE,30000);
+    };
+  }
+  startSSE();
+
+  // Slow safety-net poll (30s) catches anything SSE misses
+  setInterval(pollFull,30000);setInterval(loadResources,60000);
+
+  // Pause/resume polls when tab is hidden (saves bandwidth on background displays)
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='visible')pollFull();
+  });
 </script>
 </body>
 </html>`;

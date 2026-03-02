@@ -4,6 +4,7 @@ const host = process.argv[2] ?? "127.0.0.1";
 const requestedPort = Number(process.argv[3] ?? "4310");
 let nextRequestId = 0;
 const pendingResponses = new Map();
+const sseConnections = new Set();
 
 function writeJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -16,6 +17,22 @@ function writeJson(response, statusCode, body) {
 const server = createServer((request, response) => {
   if (!process.send) {
     writeJson(response, 500, { error: "IPC channel unavailable." });
+    return;
+  }
+
+  // SSE connections are handled locally — no IPC round-trip needed.
+  const reqUrl = new URL(request.url ?? "/", "http://localhost");
+  if (reqUrl.pathname === "/api/events") {
+    response.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+      "x-accel-buffering": "no"
+    });
+    response.flushHeaders?.();
+    response.write("data: {\"type\":\"connected\"}\n\n");
+    sseConnections.add(response);
+    request.on("close", () => { sseConnections.delete(response); });
     return;
   }
 
@@ -66,7 +83,23 @@ process.on("message", (message) => {
     return;
   }
 
+  if (message.type === "event-push") {
+    const eventData = `data: ${JSON.stringify(message.payload)}\n\n`;
+    for (const res of sseConnections) {
+      try {
+        res.write(eventData);
+      } catch {
+        sseConnections.delete(res);
+      }
+    }
+    return;
+  }
+
   if (message.type === "shutdown") {
+    for (const res of sseConnections) {
+      try { res.end(); } catch { /* ignore */ }
+    }
+    sseConnections.clear();
     for (const response of pendingResponses.values()) {
       writeJson(response, 503, { error: "API server shutting down." });
     }

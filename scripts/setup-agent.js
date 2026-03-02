@@ -982,6 +982,17 @@ async function main() {
   const syncSummary = await syncToOrchestrator(verifiedOrchestrator.orchestratorUrl, report);
   console.log(`Orchestrator sync: ${syncSummary}`);
 
+  // Show billboard display URL so this device can be pointed at the dashboard immediately.
+  if (verifiedOrchestrator.verification) {
+    const orchBase = verifiedOrchestrator.verification.baseUrl;
+    console.log("");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log(`Billboard display (open in fullscreen browser):`);
+    console.log(`  ${orchBase}/display`);
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("");
+  }
+
   if (options.once) {
     if (options.once) {
       console.log(

@@ -37,6 +37,7 @@ export interface UserPreferences {
   city?: string;
   personalWebsiteUrl?: string;
   dailyDigestDirective?: string;
+  jobSearchEnabled?: boolean;
 }
 
 export interface AppConfig {

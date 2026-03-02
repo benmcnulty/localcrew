@@ -18,6 +18,7 @@ export interface ApiServerHandle {
   url: string;
   publicUrl?: string;
   close(): Promise<void>;
+  pushDisplayEvent(payload: Record<string, unknown>): void;
 }
 
 interface WorkerReadyMessage {
@@ -51,8 +52,13 @@ interface WorkerShutdownMessage {
   type: "shutdown";
 }
 
+interface WorkerEventPushMessage {
+  type: "event-push";
+  payload: Record<string, unknown>;
+}
+
 type WorkerIncomingMessage = WorkerReadyMessage | WorkerErrorMessage | WorkerRequestMessage;
-type WorkerOutgoingMessage = WorkerResponseMessage | WorkerShutdownMessage;
+type WorkerOutgoingMessage = WorkerResponseMessage | WorkerShutdownMessage | WorkerEventPushMessage;
 
 interface ApiRequest {
   method: string;
@@ -163,7 +169,7 @@ async function buildApiResponse(
   const requiredToken = getApiToken();
   if (requiredToken) {
     // Skip auth for static UI assets and health check
-    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display"];
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/events"];
     if (!publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
@@ -628,6 +634,11 @@ async function startNodeWorkerApi(
           ...(publicHost && publicHost !== localHost
             ? { publicUrl: `http://${publicHost}:${message.port}` }
             : {}),
+          pushDisplayEvent: (payload: Record<string, unknown>): void => {
+            if (child.connected) {
+              child.send({ type: "event-push", payload } satisfies WorkerOutgoingMessage);
+            }
+          },
           close: async () =>
             await new Promise<void>((resolveClose) => {
               let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -737,6 +748,7 @@ function startVirtualApiServer(
   warn(`HTTP API socket unavailable. Using in-process API transport at ${origin}.`);
   return {
     url: origin,
+    pushDisplayEvent: () => {},
     close: async () => {
       Object.defineProperty(globalThis, "fetch", {
         configurable: true,
@@ -845,6 +857,7 @@ export async function startApiServer(
   return {
     url: `http://${localHost}:${port}`,
     ...(publicHost && publicHost !== localHost ? { publicUrl: `http://${publicHost}:${port}` } : {}),
+    pushDisplayEvent: () => {},
     close: async () =>
       new Promise<void>((resolve, reject) => {
         listeningServer.close((error) => {
