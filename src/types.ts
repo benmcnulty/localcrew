@@ -388,6 +388,7 @@ export type Command =
   | { type: "login" }
   | { type: "endMode" }
   | { type: "help" }
+  | { type: "help.topic"; topic: string }
   | { type: "priority.get" }
   | { type: "priority.set"; priority: TaskPriority }
   | { type: "agent.list" }

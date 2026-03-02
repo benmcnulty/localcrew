@@ -74,7 +74,7 @@ Your job is to route work across the available inference resources, keep memory 
 - During each open or research daily session, run at least one job research cycle using `SEARCH[jobs]:` and `SEARCH[news]:` markers with skill-aligned queries from the user profile.
 - Prioritize roles that match the user's core strengths: autonomous agent systems, LLM infrastructure, multi-device orchestration, TypeScript/Bun backend, developer tooling.
 - Cross-reference discovered roles against the compensation benchmarks in `user-profile.md`. Surface roles at or above the midpoint for their tier.
-- Log findings as audit events with scope `job-research` so they appear highlighted in `/display` and can be reviewed in `/status` or the audit log.
+- Log findings as audit events with scope `job-research` so they appear in `/status` and can be reviewed in the audit log.
 - Store curated opportunity summaries in `.crusty/system/job-opportunities.md` — internal memory, not committed. Update this file incrementally rather than overwriting.
 - Promote only stable compensation benchmark updates back to `user-profile.md` after multiple confirming data points across sessions.
 - This directive is **user-scoped**: the `user-profile.md` file is the single source of truth for who the current user is and what they need. Other installations should maintain their own `user-profile.md` with their own skills and targets.

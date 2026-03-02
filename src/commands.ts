@@ -34,7 +34,7 @@ function usage(command: string): string {
     case "/end":
       return "Usage: /end";
     case "/help":
-      return "Usage: /help";
+      return "Usage: /help [topic] — topics: chat, auto, resources, participants, agents, tools, topology, preferences, daily";
     case "/priority":
       return "Usage: /priority [high|medium|low]";
     case "/agent":
@@ -72,7 +72,7 @@ function usage(command: string): string {
     case "/reset":
       return "Usage: /reset";
     case "/preferences":
-      return 'Usage: /preferences | /preferences set <key> <value> — keys: zipCode, city, personalWebsiteUrl, dailyDigestDirective';
+      return 'Usage: /preferences | /preferences set <key> <value> — keys: city, zipCode (or zip), website, directive';
     case "/daily":
       return "Usage: /daily | /daily start | /daily finish";
     case "/promote":
@@ -343,10 +343,10 @@ export function parseCommand(input: string): Command {
       }
       return { type: "endMode" };
     case "/help":
-      if (rest.length > 0) {
-        throw new CommandParseError(usage("/help"));
+      if (rest.length === 0) {
+        return { type: "help" };
       }
-      return { type: "help" };
+      return { type: "help.topic", topic: rest[0].toLowerCase() };
     case "/priority":
       if (rest.length === 0) {
         return { type: "priority.get" };
@@ -681,14 +681,16 @@ export function parseCommand(input: string): Command {
       }
       if (rest.length >= 3 && rest[0].toLowerCase() === "set") {
         const key = rest[1].toLowerCase();
-        const validKeys = ["zipcode", "city", "personalwebsiteurl", "dailydigestdirective"];
         const keyMap: Record<string, string> = {
           zipcode: "zipCode",
+          zip: "zipCode",
           city: "city",
           personalwebsiteurl: "personalWebsiteUrl",
+          website: "personalWebsiteUrl",
           dailydigestdirective: "dailyDigestDirective",
+          directive: "dailyDigestDirective",
         };
-        if (!validKeys.includes(key)) {
+        if (!keyMap[key]) {
           throw new CommandParseError(usage("/preferences"));
         }
         return {
