@@ -1,10 +1,10 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { loadLocalEnv } from "./env.ts";
 import { loadBuiltinAgentSeeds, loadSeedFile } from "./external-memory.ts";
 import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
-import { atomicWriteFile, getStoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths, withFileLock } from "./storage.ts";
 import { getResourceAliases, renderResourceInventory } from "./resources.ts";
 import { getDefaultTelemetrySummary } from "./telemetry.ts";
 import { getEmptyConversation } from "./utils.ts";
@@ -272,7 +272,7 @@ async function writeIfMissing(path: string, content: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-    await writeFile(path, `${content.trimEnd()}\n`, "utf8");
+    await atomicWriteFile(path, `${content.trimEnd()}\n`);
   }
 }
 
@@ -296,7 +296,7 @@ async function replaceGeneratedOrchestratorIdentityText(
       );
 
     if (next !== current) {
-      await writeFile(path, next, "utf8");
+      await atomicWriteFile(path, next);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -341,24 +341,22 @@ async function seedBuiltinAgents(rootDir = process.cwd()): Promise<void> {
 
     const agentDir = getAgentDir(rootDir, seed.slug);
     await mkdir(agentDir, { recursive: true });
-    await writeFile(getAgentMetaPath(rootDir, seed.slug), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-    await writeFile(getAgentSpecPath(rootDir, seed.slug), `${seed.spec.trimEnd()}\n`, "utf8");
-    await writeFile(
+    await atomicWriteFile(getAgentMetaPath(rootDir, seed.slug), `${JSON.stringify(meta, null, 2)}\n`);
+    await atomicWriteFile(getAgentSpecPath(rootDir, seed.slug), `${seed.spec.trimEnd()}\n`);
+    await atomicWriteFile(
       getAgentMemoryPath(rootDir, seed.slug),
       `${JSON.stringify(getEmptyAgentMemory(), null, 2)}\n`,
-      "utf8"
     );
-    await writeFile(
+    await atomicWriteFile(
       getAgentMemoryIndexPath(rootDir, seed.slug),
       `${JSON.stringify({ updatedAt: now, summary: "", recentMessages: [] }, null, 2)}\n`,
-      "utf8"
     );
     agents.push(meta);
     changed = true;
   }
 
   if (changed) {
-    await writeFile(paths.agentsIndexPath, `${JSON.stringify({ agents }, null, 2)}\n`, "utf8");
+    await atomicWriteFile(paths.agentsIndexPath, `${JSON.stringify({ agents }, null, 2)}\n`);
   }
 }
 
@@ -372,7 +370,7 @@ async function ensureDocumentContains(
     return;
   }
 
-  await writeFile(path, `${existing.trimEnd()}\n\n${appendix.trim()}\n`, "utf8");
+  await atomicWriteFile(path, `${existing.trimEnd()}\n\n${appendix.trim()}\n`);
 }
 
 export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void> {
@@ -570,7 +568,7 @@ export async function saveFocusTodo(
           ...tasks.map((task) => `- [${task.priority}] #${task.id} ${task.content}`)
         ].join("\n");
 
-  await writeFile(paths.focusTodoPath, `${lines.trimEnd()}\n`, "utf8");
+  await atomicWriteFile(paths.focusTodoPath, `${lines.trimEnd()}\n`);
 }
 
 export async function appendChangelogEntry(
@@ -579,10 +577,12 @@ export async function appendChangelogEntry(
 ): Promise<void> {
   const paths = getStoragePaths(rootDir);
   await ensureSystemLayout(rootDir);
-  const previous = await readFile(paths.changelogPath, "utf8");
-  const timestamp = new Date().toISOString();
-  const next = `${previous.trimEnd()}\n- ${timestamp} ${entry}\n`;
-  await writeFile(paths.changelogPath, next, "utf8");
+  await withFileLock(paths.changelogPath, async () => {
+    const previous = await readFile(paths.changelogPath, "utf8");
+    const timestamp = new Date().toISOString();
+    const next = `${previous.trimEnd()}\n- ${timestamp} ${entry}\n`;
+    await atomicWriteFile(paths.changelogPath, next);
+  });
 }
 
 /**
@@ -856,10 +856,9 @@ export async function createAgent(
   const agentDir = getAgentDir(rootDir, slug);
   await mkdir(agentDir, { recursive: true });
   await atomicWriteFile(getAgentMetaPath(rootDir, slug), `${JSON.stringify(meta, null, 2)}\n`);
-  await writeFile(
+  await atomicWriteFile(
     getAgentSpecPath(rootDir, slug),
     `${(generatedSpec?.trim() || buildAgentSpec(answers)).trimEnd()}\n`,
-    "utf8"
   );
   await atomicWriteFile(
     getAgentMemoryPath(rootDir, slug),
@@ -901,7 +900,7 @@ export async function saveAgentSpec(
     throw new Error(`Unknown agent "${slug}".`);
   }
 
-  await writeFile(getAgentSpecPath(rootDir, normalizedSlug), `${text.trimEnd()}\n`, "utf8");
+  await atomicWriteFile(getAgentSpecPath(rootDir, normalizedSlug), `${text.trimEnd()}\n`);
   const updatedSummaryLine =
     text
       .split("\n")

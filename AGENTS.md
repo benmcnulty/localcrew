@@ -45,7 +45,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `resource-discovery.ts` | Probe resource endpoints for available models |
 | `orchestrator-identity.ts` | Orchestrator name/alias from config + env |
 | `external-memory.ts` | Read committed seed documents from `external-memory/` |
-| `internal-files.ts` | Read/write internal orchestrator memory files |
+| `internal-files.ts` | Read + search internal orchestrator memory files |
 | `speech.ts` | macOS `say` voice playback |
 | `voices.ts` | Voice preset definitions and defaults |
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
@@ -89,4 +89,30 @@ Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Ever
 
 - No hardcoded secrets, node addresses, or machine-specific values in source — use ignored env files
 - API authentication uses `CRUSTY_API_TOKEN` (Bearer token); CORS origin is `CRUSTY_API_CORS_ORIGIN`
+- All API endpoints (including SSE `/api/events`) require Bearer token authentication when `CRUSTY_API_TOKEN` is set; only static UI assets and `/api/health` are public
 - Audit log writes use `withFileLock` to prevent corruption on concurrent appends
+- Changelog appends are serialized with `withFileLock` and written atomically
+- Dropbox inbox ingestion uses `withFileLock` to prevent double-processing under concurrent auto-pulse
+- `readInternalFile()` validates paths stay within `.crusty/system/` or `external-memory/` via `relative()` containment check
+- `ensureSafeRelativePath()` (dropbox) rejects `..`, hidden files, and empty segments
+- `ensureSafeGeneratedRelativePath()` (app.ts) prevents traversal in autonomous WRITE blocks
+- `loadSeedFile()` validates the resolved path stays within the external-memory directory
+- Agents receive only their own spec and memory in prompts — not the full orchestrator state
+- Autonomous writes are redirected away from external dropbox by `shouldPreferInternalWrite()`
+
+## File Access Layers
+
+Autonomous agents interact with the file system through a layered architecture with strict boundaries:
+
+| Layer | Module | Access | Sandboxed |
+|---|---|---|---|
+| Atomic primitives | `storage.ts` | `atomicWriteFile()`, `withFileLock()` | N/A |
+| Internal files | `internal-files.ts` | Read + search `.crusty/system/` and `external-memory/` | Yes — path traversal prevented |
+| External memory | `external-memory.ts` | Read-only committed seed documents | Yes — path escape validated |
+| Dropbox workflow | `dropbox.ts` | inbox → active → outbox file lifecycle | Yes — `ensureSafeRelativePath()` |
+| Autonomous writes | `app.ts` | WRITE[internal], WRITE[active], WRITE[outbox] blocks | Yes — `ensureSafeGeneratedRelativePath()` |
+| API explore | `api-server.ts` | `/api/explore/tree`, `/api/explore/file`, `/api/explore/search` | Yes — delegates to `readInternalFile()` / `searchInternalFiles()` |
+
+### Search Capability
+
+`searchInternalFiles(query, rootDir)` provides case-insensitive full-text search across `.crusty/system/` and `external-memory/`. Returns up to 100 matching lines with file paths and line numbers. Exposed via `GET /api/explore/search?q=<query>` (auth required). Binary files and files larger than 512 KB are skipped.

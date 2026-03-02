@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface BuiltinAgentSeed {
@@ -45,8 +45,14 @@ export async function loadSeedFile(
   fallback: string,
   rootDir = process.cwd()
 ): Promise<string> {
+  const base = resolve(getExternalMemoryDir(rootDir));
+  const target = resolve(base, relativePath);
+  const rel = relative(base, target);
+  if (rel.startsWith("..") || rel.startsWith("/")) {
+    throw new Error(`Path escapes the external-memory directory: ${relativePath}`);
+  }
   try {
-    return await readFile(join(getExternalMemoryDir(rootDir), relativePath), "utf8");
+    return await readFile(target, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return fallback;

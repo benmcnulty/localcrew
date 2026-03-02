@@ -48,7 +48,8 @@ import {
 import {
   getInternalFileDetails,
   getInternalFileTree,
-  readInternalFile
+  readInternalFile,
+  searchInternalFiles,
 } from "./internal-files.ts";
 import {
   clearDropboxState,
@@ -1785,6 +1786,10 @@ export class CrustyApp {
       path: file.path,
       content: file.content
     };
+  }
+
+  async searchExploreFiles(query: string) {
+    return searchInternalFiles(query, this.rootDir);
   }
 
   private async setAutoEnabled(enabled: boolean): Promise<void> {
