@@ -1,4 +1,5 @@
 import type { ChatMessage, ConversationMessage } from "./types.ts";
+import { budgetContextBlocks } from "./utils.ts";
 
 function formatConversationLine(message: ConversationMessage): string {
   if (message.speaker === "user") {
@@ -230,6 +231,8 @@ export function buildAutoTaskMessages(options: {
   resourceRoster?: string;
   extraContextBlocks?: string[];
   currentDateTime?: string;
+  maxContextTokens?: number;
+  dailySessionContext?: string;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -243,9 +246,15 @@ export function buildAutoTaskMessages(options: {
         `The selected inference resource for this task is @${options.resourceAlias}.`,
         `Selection rationale: ${options.resourceRationale}`,
         `You are using that resource as a tool, but you still answer as ${options.orchestratorName}.`,
+        ...(options.maxContextTokens
+          ? [`This resource has a context window of approximately ${options.maxContextTokens.toLocaleString()} tokens. Keep your reasoning and output proportionate to this limit. If a task is too large for one context pass, break it into smaller follow-up QUEUE items that each fit comfortably.`]
+          : []),
         "Keep outputs concise and actionable.",
         "In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it.",
         "Prioritize self-improvement work that better understands and exploits the current local hardware profile, context limits, and delegation opportunities of this specific network.",
+        "Consistently reference the project directives, roadmap, and focus-todo to maintain orientation and alignment within each task. Every step should connect to the broader objective scope.",
+        "When a task set exceeds a single context window, decompose it into a coordinated sequence of QUEUE items with clear handoff state. Each follow-up task must include enough context in its description to be self-contained within one context pass.",
+        "Update working memory (orchestrator summary, focus-todo) to track the current state of multi-step work so that subsequent context windows can resume without losing progress or orientation.",
         "Stay inside internal process improvement unless the user explicitly asks for external system changes.",
         "Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions.',
@@ -260,6 +269,7 @@ export function buildAutoTaskMessages(options: {
         "Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome.",
         "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences.",
         "Use WRITE[internal] for local memory/process artifacts that belong inside `.crusty/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets.",
+        "To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], or WRITE[internal][roadmap.md]. These will update the actual orchestrator memory rather than writing to the generated directory. Use this to track cross-context-window state, record progress, and maintain orientation for subsequent tasks.",
         "Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work."
       ].join(" ")
     },
@@ -274,33 +284,72 @@ export function buildAutoTaskMessages(options: {
             content: `Valid resource aliases for QUEUE lines: ${options.resourceRoster.trim()}. Use only these exact aliases and never invent new resource names.`
           }
         ]
-      : []),
-    {
-      role: "system",
-      content: `Orchestrator memory summary:\n${options.orchestratorSummary.trim() || "(none)"}`
-    },
-    {
-      role: "system",
-      content: `Roadmap:\n${options.roadmap.trim()}`
-    },
-    {
-      role: "system",
-      content: `In-focus todo:\n${options.focusTodo.trim()}`
-    },
-    {
-      role: "system",
-      content: `Recent changelog:\n${options.changelog.trim()}`
-    },
-    {
-      role: "system",
-      content: `Resource inventory:\n${options.inventory.trim()}`
-    }
+      : [])
   ];
+
+  // Context-budgeted reference documents: prioritize directives and
+  // current state over historical changelog when context is limited.
+  const contextBlocks = [
+    { label: "Orchestrator memory summary", content: options.orchestratorSummary.trim() || "(none)" },
+    { label: "In-focus todo", content: options.focusTodo.trim() },
+    { label: "Roadmap", content: options.roadmap.trim() },
+    { label: "Resource inventory", content: options.inventory.trim() },
+    { label: "Recent changelog", content: options.changelog.trim(), minChars: 300 },
+  ];
+
+  if (options.maxContextTokens && options.maxContextTokens > 0) {
+    // Budget the reference documents to fit within the context window.
+    // The system prompt and task already consume a baseline. Reserve
+    // the remaining budget for reference material.
+    const baselineChars = outgoing.reduce(
+      (sum, msg) => sum + msg.content.length,
+      0
+    );
+    const taskChars = options.task.length + 200; // task + priority/createdBy framing
+    const extraChars = (options.extraContextBlocks ?? []).reduce(
+      (sum, block) => sum + block.length,
+      0
+    );
+    const usedTokens = Math.ceil((baselineChars + taskChars + extraChars) / 4);
+    const availableTokens = Math.max(
+      2000,
+      Math.floor(options.maxContextTokens * 0.8) - usedTokens
+    );
+
+    const budgeted = budgetContextBlocks(contextBlocks, availableTokens);
+    for (const block of budgeted.blocks) {
+      outgoing.push({
+        role: "system",
+        content: `${block.label}:\n${block.content}`
+      });
+    }
+    if (budgeted.dropped.length > 0) {
+      outgoing.push({
+        role: "system",
+        content: `[Context budget: dropped ${budgeted.dropped.join(", ")} to fit within ${options.maxContextTokens.toLocaleString()} token limit]`
+      });
+    }
+  } else {
+    // No context limit known — include everything untruncated.
+    for (const block of contextBlocks) {
+      outgoing.push({
+        role: "system",
+        content: `${block.label}:\n${block.content}`
+      });
+    }
+  }
 
   if (options.currentDateTime) {
     outgoing.push({
       role: "system",
       content: `Current date and time: ${options.currentDateTime}`
+    });
+  }
+
+  if (options.dailySessionContext) {
+    outgoing.push({
+      role: "system",
+      content: options.dailySessionContext
     });
   }
 

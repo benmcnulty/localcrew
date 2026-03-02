@@ -328,3 +328,52 @@ describe("parseCommand — /preferences", () => {
     expect(() => parseCommand("/preferences set city")).toThrow(CommandParseError);
   });
 });
+
+describe("parseCommand — /daily", () => {
+  test("parses /daily as daily.status", () => {
+    expect(parseCommand("/daily")).toEqual({ type: "daily.status" });
+  });
+
+  test("parses /daily status as daily.status", () => {
+    expect(parseCommand("/daily status")).toEqual({ type: "daily.status" });
+  });
+
+  test("parses /daily start as daily.start", () => {
+    expect(parseCommand("/daily start")).toEqual({ type: "daily.start" });
+  });
+
+  test("parses /daily finish as daily.finish", () => {
+    expect(parseCommand("/daily finish")).toEqual({ type: "daily.finish" });
+  });
+
+  test("throws on unknown /daily subcommand", () => {
+    expect(() => parseCommand("/daily foo")).toThrow(CommandParseError);
+  });
+});
+
+describe("parseCommand — /promote", () => {
+  test("parses /promote with alias", () => {
+    expect(parseCommand("/promote workhorse")).toEqual({
+      type: "promote",
+      alias: "workhorse",
+    });
+  });
+
+  test("normalizes alias to lowercase", () => {
+    expect(parseCommand("/promote WorkHorse")).toEqual({
+      type: "promote",
+      alias: "workhorse",
+    });
+  });
+
+  test("strips @ prefix from alias", () => {
+    expect(parseCommand("/promote @workhorse")).toEqual({
+      type: "promote",
+      alias: "workhorse",
+    });
+  });
+
+  test("throws when alias is missing", () => {
+    expect(() => parseCommand("/promote")).toThrow(CommandParseError);
+  });
+});

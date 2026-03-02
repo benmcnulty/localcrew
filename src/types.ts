@@ -27,10 +27,12 @@ export interface UserPreferences {
   zipCode?: string;
   city?: string;
   personalWebsiteUrl?: string;
+  dailyDigestDirective?: string;
 }
 
 export interface AppConfig {
   orchestratorName: string;
+  orchestratorResourceAlias?: string;
   defaultEndpoint: string;
   soundEnabled: boolean;
   endpoints: Record<string, EndpointConfig>;
@@ -86,12 +88,21 @@ export interface AutoQueueTask {
   sourceDocumentName?: string;
 }
 
+export interface DailyWorkSession {
+  startedAt: string;
+  completedAt?: string;
+  tasksCompleted: number;
+  tasksErrored: number;
+  digestPath?: string;
+}
+
 export interface AutoState {
   enabled: boolean;
   defaultPriority: TaskPriority;
   lastTaskId: number;
   pending: AutoQueueTask[];
   completed: AutoQueueTask[];
+  dailySession?: DailyWorkSession;
 }
 
 export interface SystemState {
@@ -413,4 +424,8 @@ export type Command =
   | { type: "reset" }
   | { type: "preferences.get" }
   | { type: "preferences.set"; key: string; value: string }
+  | { type: "daily.status" }
+  | { type: "daily.start" }
+  | { type: "daily.finish" }
+  | { type: "promote"; alias: string }
   | { type: "exit" };
