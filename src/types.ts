@@ -156,7 +156,7 @@ export interface OllamaChatResult {
 export interface AuditEvent {
   id: number;
   timestamp: string;
-  kind: "ollama.chat" | "wikipedia.search" | "system";
+  kind: "ollama.chat" | "wikipedia.search" | "reddit.search" | "system";
   scope: string;
   summary: string;
   success: boolean;
@@ -209,6 +209,12 @@ export interface TelemetrySummary {
     totalDurationMs: number;
     recentQueries: string[];
   };
+  reddit: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentQueries: string[];
+  };
   recent: TelemetryRecentEvent[];
 }
 
@@ -250,6 +256,23 @@ export interface WikipediaSearchResult {
   query: string;
   durationMs: number;
   pages: WikipediaSearchPage[];
+  chunks: string[];
+}
+
+export interface RedditSearchPost {
+  subreddit: string;
+  title: string;
+  url: string;
+  permalink: string;
+  excerpt: string;
+  score: number;
+  numComments: number;
+}
+
+export interface RedditSearchResult {
+  query: string;
+  durationMs: number;
+  posts: RedditSearchPost[];
   chunks: string[];
 }
 

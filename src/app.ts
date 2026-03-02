@@ -119,6 +119,7 @@ import type {
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
+import { searchReddit } from "./reddit.ts";
 import { formatCurrentDateTime, titleCase } from "./utils.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
@@ -138,6 +139,8 @@ const INTERNAL_MEMORY_PATH_HINT_PATTERN =
   /(?:^|\/)(?:internal|internal-memory|memory|index|indexes|summary|summaries|heuristics|routing|telemetry|diagnostics|notes|verification|plans)(?:\/|[-_])/i;
 const INTERNAL_WIKIPEDIA_QUERY_PATTERN =
   /\b(crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\s+is\s+required)?|telemetry|hud|prompt|resource alias|erin|zora|min|pav)\b/i;
+const INTERNAL_REDDIT_QUERY_PATTERN =
+  /\b(crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias|erin|zora|min|pav)\b/i;
 const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
 const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
@@ -200,6 +203,31 @@ function parseWikipediaRequest(content: string): { replyText: string; query?: st
   }
 
   const query = match[1].trim().replace(/^["“]|["”]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  if (!query) {
+    return {
+      replyText: trimmedContent
+    };
+  }
+
+  return {
+    replyText,
+    query
+  };
+}
+
+function parseRedditRequest(content: string): { replyText: string; query?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)REDDIT:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return {
+      replyText: trimmedContent
+    };
+  }
+
+  const query = match[1].trim().replace(/^[""]|[""]$/g, "");
   const replyText = trimmedContent.slice(0, match.index).trimEnd();
 
   if (!query) {
@@ -1845,6 +1873,111 @@ export class CrustyApp {
     }
   }
 
+  private async requestRedditSearch(
+    query: string,
+    scope: string,
+    actor: string
+  ): Promise<import("./types.ts").RedditSearchResult> {
+    try {
+      const result = await searchReddit(query, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "reddit.search",
+          scope,
+          summary: `Reddit search "${query}" returned ${result.posts.length} post(s).`,
+          success: true,
+          actor,
+          durationMs: result.durationMs,
+          responseChars: result.chunks.join("\n\n").length,
+          responseText: result.chunks.join("\n\n"),
+          metadata: {
+            query,
+            subreddits: [...new Set(result.posts.map((post) => post.subreddit))]
+          }
+        },
+        this.rootDir
+      );
+      return result;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "reddit.search",
+          scope,
+          summary: `Reddit search "${query}" failed.`,
+          success: false,
+          actor,
+          error: (error as Error).message,
+          metadata: {
+            query
+          }
+        },
+        this.rootDir
+      );
+      throw error;
+    }
+  }
+
+  private async resolveRedditTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsedToolRequest = parseRedditRequest(options.rawReply);
+    if (!parsedToolRequest.query) {
+      return options.rawReply;
+    }
+
+    if (
+      (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
+      INTERNAL_REDDIT_QUERY_PATTERN.test(parsedToolRequest.query)
+    ) {
+      return parsedToolRequest.replyText || options.rawReply;
+    }
+
+    try {
+      const reddit = await this.requestRedditSearch(
+        parsedToolRequest.query,
+        `${options.scope}.reddit`,
+        options.actor
+      );
+      const followUp = await this.callModel({
+        scope: `${options.scope}.reddit-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after Reddit search "${parsedToolRequest.query}".`,
+        messages: [
+          ...options.messages,
+          {
+            role: "assistant",
+            content: options.rawReply
+          },
+          ...reddit.chunks.map((chunk) => ({
+            role: "system" as const,
+            content: chunk
+          })),
+          {
+            role: "user",
+            content:
+              "Use the Reddit discussion results above to continue the same task. Produce the final answer now. Only emit another REDDIT line if the first results were clearly insufficient."
+          }
+        ]
+      });
+
+      return parseRedditRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      this.warn(`Reddit search failed: ${(error as Error).message}`);
+      return parsedToolRequest.replyText || options.rawReply;
+    }
+  }
+
   private async compactIfNeeded(force = false): Promise<boolean> {
     const summaryAlias = this.config.defaultEndpoint;
     const endpoint = this.getEndpoint(summaryAlias);
@@ -1984,6 +2117,15 @@ export class CrustyApp {
         })
       ).text;
       rawAssistantReply = await this.resolveWikipediaTool({
+        scope: "chat.participant",
+        actor: `participant:${normalizedAlias}`,
+        endpoint,
+        resourceAlias: endpoint.resourceAlias,
+        target: normalizedAlias,
+        messages: outgoingMessages,
+        rawReply: rawAssistantReply
+      });
+      rawAssistantReply = await this.resolveRedditTool({
         scope: "chat.participant",
         actor: `participant:${normalizedAlias}`,
         endpoint,
@@ -2908,6 +3050,15 @@ export class CrustyApp {
         messages: outgoingMessages,
         rawReply
       });
+      rawReply = await this.resolveRedditTool({
+        scope: "agent.chat",
+        actor: `agent:${agent.slug}`,
+        endpoint,
+        resourceAlias: selection.alias,
+        target: agent.slug,
+        messages: outgoingMessages,
+        rawReply
+      });
     } catch (error) {
       return {
         lines: [],
@@ -3026,6 +3177,15 @@ export class CrustyApp {
         messages: draftMessages,
         rawReply: draftReply
       });
+      draftReply = await this.resolveRedditTool({
+        scope: "auto.queue-fill.draft",
+        actor: "orchestrator",
+        endpoint: draftEndpoint,
+        resourceAlias: orchestratorAlias,
+        target: this.getOrchestratorName(),
+        messages: draftMessages,
+        rawReply: draftReply
+      });
     } catch (error) {
       return {
         queued: [
@@ -3093,6 +3253,15 @@ export class CrustyApp {
           messages: reviewMessages,
           rawReply: reviewFeedback
         });
+        reviewFeedback = await this.resolveRedditTool({
+          scope: "auto.queue-fill.review",
+          actor: "orchestrator",
+          endpoint: reviewEndpoint,
+          resourceAlias: reviewerResource.alias,
+          target: reviewerResource.alias,
+          messages: reviewMessages,
+          rawReply: reviewFeedback
+        });
       } catch (error) {
         reviewFeedback = `Critique unavailable because the reviewer step failed: ${(error as Error).message}\nVERDICT: revise`;
       }
@@ -3129,6 +3298,15 @@ export class CrustyApp {
         })
       ).text;
       finalReply = await this.resolveWikipediaTool({
+        scope: "auto.queue-fill.finalize",
+        actor: "orchestrator",
+        endpoint: draftEndpoint,
+        resourceAlias: orchestratorAlias,
+        target: this.getOrchestratorName(),
+        messages: finalizeMessages,
+        rawReply: finalReply
+      });
+      finalReply = await this.resolveRedditTool({
         scope: "auto.queue-fill.finalize",
         actor: "orchestrator",
         endpoint: draftEndpoint,
@@ -3313,6 +3491,15 @@ export class CrustyApp {
         })
       ).text;
       rawReply = await this.resolveWikipediaTool({
+        scope: "auto.task",
+        actor: "orchestrator",
+        endpoint,
+        resourceAlias: selection.alias,
+        target: `task:${task.id}`,
+        messages: outgoingMessages,
+        rawReply
+      });
+      rawReply = await this.resolveRedditTool({
         scope: "auto.task",
         actor: "orchestrator",
         endpoint,
