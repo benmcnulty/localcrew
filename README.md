@@ -23,7 +23,7 @@ Provider foundation is built around:
 - DuckDuckGo web search (topic-gated: news, jobs, software-engineering, ai-engineering)
 - Weather forecasts via Open-Meteo (no API key required, preferences-aware location)
 - Ben Live skill — built-in access to benlive.tv with llms.txt discovery
-- Personal website tool — configurable via `/preferences website <url>`
+- Personal website tool — configurable via `/preferences set website <url>`
 - User preferences (`/preferences`) for weather location, website URL, and daily digest directive
 - Daily work sessions (`/daily start | finish | status`) with task tracking and digest generation
 - Local HTTP API and browser dashboard served from the same surface
@@ -45,7 +45,7 @@ Once the orchestrator is up, the fast validation path is:
 - use `/participant list`, `/nickname`, `/bind`, `/model`, and `/models` to shape the chat roster
 - use `/chat`, `/group`, and `/direct <resource> "message" [model]` to confirm each node is reachable and behaving as expected
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet
-- use `/ui` for the matching browser prototype with editable resources, participants, and direct test chat
+- use the browser UI at the printed `Local UI` link for editable resources, participants, and direct test chat
 
 The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `npm run setup:crusty -- --name "Your Name"`.
 
@@ -54,7 +54,7 @@ Notable views:
 - `/status` for a point-in-time overview
 - `/hud` for a live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs via left/right arrow keys
 - `/explore` for direct inspection of internal state files
-- `/ui` in a browser for the prototype GUI backed by the same local API
+- Browser UI at the printed `Local UI` link (e.g. `http://localhost:4310/ui`) for the prototype GUI backed by the same local API
 - `/resource list` and `/resource edit <alias>` for dynamic device inventory management
 
 Additional CLI commands:
@@ -122,7 +122,7 @@ Crusty exposes six external data tools to orchestrators and agents. Models emit 
 | `SEARCH[topic]: query` | `SEARCH[software-engineering]: typescript generics` | DuckDuckGo web search |
 | `WEATHER: location` | `WEATHER: San Francisco` | Open-Meteo weather forecast |
 | `BENLIVE: path` | `BENLIVE: /blog` | benlive.tv content |
-| `WEBSITE: path` | `WEBSITE: /about` | Personal website (requires `/preferences website`) |
+| `WEBSITE: path` | `WEBSITE: /about` | Personal website (requires `/preferences set website`) |
 
 Web search is topic-gated to: `news`, `jobs`, `software-engineering`, `ai-engineering`. This prevents internal orchestration decisions from leaking to external search and keeps queries focused on current real-world information.
 

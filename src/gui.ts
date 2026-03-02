@@ -41,6 +41,9 @@ export function getGuiHtml(): string {
           <div class="nav-item" data-section="direct">
             <span class="nav-icon">&#x21DD;</span><span>Direct Chat</span>
           </div>
+          <div class="nav-item" data-section="topology">
+            <span class="nav-icon">&#x2442;</span><span>Topology</span>
+          </div>
           <div class="nav-item" data-section="dropbox">
             <span class="nav-icon">&#x229E;</span><span>Dropbox</span>
           </div>
@@ -49,6 +52,9 @@ export function getGuiHtml(): string {
           </div>
           <div class="nav-item" data-section="settings">
             <span class="nav-icon">&#x2699;</span><span>Settings</span>
+          </div>
+          <div class="nav-item" data-section="guide">
+            <span class="nav-icon">&#x2753;</span><span>Guide</span>
           </div>
         </nav>
 
@@ -302,6 +308,100 @@ export function getGuiHtml(): string {
                 </div>
                 <button type="submit" style="margin-top:10px">Save Preferences</button>
               </form>
+            </div>
+          </section>
+
+          <!-- Topology -->
+          <section id="section-topology" hidden>
+            <div class="card">
+              <div class="card-title-row">
+                <span class="card-title">Network Topology</span>
+                <button class="btn-ghost" id="topology-refresh">Refresh</button>
+              </div>
+              <pre id="topology-output">(loading...)</pre>
+            </div>
+            <div class="card">
+              <div class="card-title">Assign Resource Role</div>
+              <form id="topology-assign-form">
+                <div class="form-grid">
+                  <div class="field-group">
+                    <label class="field-label">Resource alias</label>
+                    <input id="topo-assign-alias" name="alias" type="text" placeholder="workhorse">
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Role</label>
+                    <select id="topo-assign-role" name="role">
+                      <option value="orchestrator">orchestrator</option>
+                      <option value="agent" selected>agent</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit">Assign Role</button>
+              </form>
+            </div>
+            <div class="card">
+              <div class="card-title">Delegate Agent to Sub-Orchestrator</div>
+              <form id="topology-delegate-form">
+                <div class="form-grid">
+                  <div class="field-group">
+                    <label class="field-label">Orchestrator alias</label>
+                    <input id="topo-delegate-orch" name="orchestrator" type="text" placeholder="workhorse">
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Agent alias</label>
+                    <input id="topo-delegate-agent" name="agent" type="text" placeholder="helper">
+                  </div>
+                </div>
+                <div class="command-buttons" style="margin-top:8px">
+                  <button type="submit">Delegate</button>
+                  <button type="button" id="topo-undelegate-btn" class="btn-ghost">Undelegate</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <!-- Guide -->
+          <section id="section-guide" hidden>
+            <div class="card">
+              <div class="card-title">Getting Started</div>
+              <div class="guide-content">
+                <p>Crusty is a local-first multi-device inference orchestrator. Use the sidebar to navigate between sections.</p>
+                <ol>
+                  <li><strong>Dashboard</strong> &mdash; run commands, view live status, and control modes (chat, group, auto)</li>
+                  <li><strong>Resources</strong> &mdash; add and manage inference endpoints (Ollama, OpenAI-compatible, Anthropic)</li>
+                  <li><strong>Participants</strong> &mdash; configure chat personas with nicknames, instructions, and resource bindings</li>
+                  <li><strong>Queue &amp; Auto</strong> &mdash; manage the autonomous task queue and daily work sessions</li>
+                  <li><strong>Direct Chat</strong> &mdash; test any resource directly with a message and model override</li>
+                  <li><strong>Topology</strong> &mdash; view and manage the hierarchical device network</li>
+                  <li><strong>Dropbox</strong> &mdash; submit documents for orchestrated processing</li>
+                  <li><strong>Explorer</strong> &mdash; browse internal and external memory files</li>
+                  <li><strong>Settings</strong> &mdash; configure orchestrator identity and user preferences</li>
+                </ol>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Quick Reference</div>
+              <div id="guide-topics" class="guide-content">
+                <div class="guide-topic-buttons command-buttons">
+                  <button class="btn-ghost" data-guide-topic="chat">Chat</button>
+                  <button class="btn-ghost" data-guide-topic="auto">Auto Mode</button>
+                  <button class="btn-ghost" data-guide-topic="resources">Resources</button>
+                  <button class="btn-ghost" data-guide-topic="participants">Participants</button>
+                  <button class="btn-ghost" data-guide-topic="agents">Agents</button>
+                  <button class="btn-ghost" data-guide-topic="tools">Web Tools</button>
+                  <button class="btn-ghost" data-guide-topic="topology">Topology</button>
+                  <button class="btn-ghost" data-guide-topic="preferences">Preferences</button>
+                  <button class="btn-ghost" data-guide-topic="daily">Daily Sessions</button>
+                </div>
+                <pre id="guide-topic-output" style="margin-top:12px"></pre>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">CLI Command Reference</div>
+              <div class="guide-content">
+                <pre id="guide-help-output">(click Refresh to load)</pre>
+                <button class="btn-ghost" id="guide-help-refresh" style="margin-top:8px">Refresh</button>
+              </div>
             </div>
           </section>
         </main>
@@ -905,7 +1005,19 @@ const els = {
   prefZip: document.getElementById("pref-zip"),
   prefWebsite: document.getElementById("pref-website"),
   prefDirective: document.getElementById("pref-directive"),
-  connectionLine: document.getElementById("connection-line")
+  connectionLine: document.getElementById("connection-line"),
+  topologyOutput: document.getElementById("topology-output"),
+  topologyRefresh: document.getElementById("topology-refresh"),
+  topologyAssignForm: document.getElementById("topology-assign-form"),
+  topoAssignAlias: document.getElementById("topo-assign-alias"),
+  topoAssignRole: document.getElementById("topo-assign-role"),
+  topoDelegateForm: document.getElementById("topology-delegate-form"),
+  topoDelegateOrch: document.getElementById("topo-delegate-orch"),
+  topoDelegateAgent: document.getElementById("topo-delegate-agent"),
+  topoUndelegateBtn: document.getElementById("topo-undelegate-btn"),
+  guideTopicOutput: document.getElementById("guide-topic-output"),
+  guideHelpOutput: document.getElementById("guide-help-output"),
+  guideHelpRefresh: document.getElementById("guide-help-refresh")
 };
 
 function selectSection(name) {
@@ -1309,6 +1421,15 @@ async function refreshView() {
         "Enter a full path above to open a file."
       ].join("\\n");
     }
+  } else if (state.selectedSection === "topology") {
+    try {
+      const payload = await postJson("/api/command", { input: "/topology" });
+      if (els.topologyOutput && payload.result && payload.result.lines) {
+        els.topologyOutput.textContent = payload.result.lines.join("\\n") || "(no topology data)";
+      }
+    } catch (e) {
+      if (els.topologyOutput) els.topologyOutput.textContent = String(e);
+    }
   }
 }
 
@@ -1544,6 +1665,102 @@ if (els.preferencesForm) {
       if (els.resultOutput) els.resultOutput.textContent = "Preferences saved.";
     } catch (error) {
       if (els.resultOutput) els.resultOutput.textContent = String(error);
+    }
+  });
+}
+
+// Topology refresh
+if (els.topologyRefresh) {
+  els.topologyRefresh.addEventListener("click", async () => {
+    try {
+      const payload = await postJson("/api/command", { input: "/topology" });
+      if (els.topologyOutput && payload.result && payload.result.lines) {
+        els.topologyOutput.textContent = payload.result.lines.join("\\n") || "(no topology data)";
+      }
+    } catch (error) {
+      if (els.topologyOutput) els.topologyOutput.textContent = String(error);
+    }
+  });
+}
+
+// Topology assign form
+if (els.topologyAssignForm) {
+  els.topologyAssignForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const alias = els.topoAssignAlias ? els.topoAssignAlias.value.trim() : "";
+    const role = els.topoAssignRole ? els.topoAssignRole.value : "agent";
+    if (!alias) return;
+    try {
+      const payload = await postJson("/api/command", { input: "/topology assign " + alias + " " + role });
+      renderResult(payload);
+      if (els.topologyOutput && payload.result && payload.result.lines) {
+        els.topologyOutput.textContent = payload.result.lines.join("\\n");
+      }
+      await refreshView();
+    } catch (error) {
+      if (els.resultOutput) els.resultOutput.textContent = String(error);
+    }
+  });
+}
+
+// Topology delegate form
+if (els.topoDelegateForm) {
+  els.topoDelegateForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const orch = els.topoDelegateOrch ? els.topoDelegateOrch.value.trim() : "";
+    const agent = els.topoDelegateAgent ? els.topoDelegateAgent.value.trim() : "";
+    if (!orch || !agent) return;
+    try {
+      const payload = await postJson("/api/command", { input: "/topology delegate " + orch + " " + agent });
+      renderResult(payload);
+      await refreshView();
+    } catch (error) {
+      if (els.resultOutput) els.resultOutput.textContent = String(error);
+    }
+  });
+}
+
+// Topology undelegate
+if (els.topoUndelegateBtn) {
+  els.topoUndelegateBtn.addEventListener("click", async () => {
+    const orch = els.topoDelegateOrch ? els.topoDelegateOrch.value.trim() : "";
+    const agent = els.topoDelegateAgent ? els.topoDelegateAgent.value.trim() : "";
+    if (!orch || !agent) return;
+    try {
+      const payload = await postJson("/api/command", { input: "/topology undelegate " + orch + " " + agent });
+      renderResult(payload);
+      await refreshView();
+    } catch (error) {
+      if (els.resultOutput) els.resultOutput.textContent = String(error);
+    }
+  });
+}
+
+// Guide topic buttons
+document.querySelectorAll("[data-guide-topic]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const topic = button.getAttribute("data-guide-topic");
+    try {
+      const payload = await postJson("/api/command", { input: "/help " + topic });
+      if (els.guideTopicOutput && payload.result && payload.result.lines) {
+        els.guideTopicOutput.textContent = payload.result.lines.join("\\n");
+      }
+    } catch (error) {
+      if (els.guideTopicOutput) els.guideTopicOutput.textContent = String(error);
+    }
+  });
+});
+
+// Guide help refresh
+if (els.guideHelpRefresh) {
+  els.guideHelpRefresh.addEventListener("click", async () => {
+    try {
+      const payload = await postJson("/api/command", { input: "/help" });
+      if (els.guideHelpOutput && payload.result && payload.result.lines) {
+        els.guideHelpOutput.textContent = payload.result.lines.join("\\n");
+      }
+    } catch (error) {
+      if (els.guideHelpOutput) els.guideHelpOutput.textContent = String(error);
     }
   });
 }

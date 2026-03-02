@@ -51,6 +51,30 @@ describe("parseCommand", () => {
     expect(parseCommand("/help")).toEqual({
       type: "help"
     });
+    expect(parseCommand("/help chat")).toEqual({
+      type: "help.topic",
+      topic: "chat"
+    });
+    expect(parseCommand("/help auto")).toEqual({
+      type: "help.topic",
+      topic: "auto"
+    });
+    expect(parseCommand("/help resources")).toEqual({
+      type: "help.topic",
+      topic: "resources"
+    });
+    expect(parseCommand("/help topology")).toEqual({
+      type: "help.topic",
+      topic: "topology"
+    });
+    expect(parseCommand("/help tools")).toEqual({
+      type: "help.topic",
+      topic: "tools"
+    });
+    expect(parseCommand("/help preferences")).toEqual({
+      type: "help.topic",
+      topic: "preferences"
+    });
     expect(parseCommand("/status")).toEqual({
       type: "status"
     });
@@ -315,6 +339,34 @@ describe("parseCommand — /preferences", () => {
       type: "preferences.set",
       key: "city",
       value: "Denver",
+    });
+  });
+
+  test("accepts short alias 'zip' for zipCode", () => {
+    expect(parseCommand("/preferences set zip 97201")).toEqual({
+      type: "preferences.set",
+      key: "zipCode",
+      value: "97201",
+    });
+  });
+
+  test("accepts short alias 'website' for personalWebsiteUrl", () => {
+    expect(
+      parseCommand("/preferences set website https://example.com")
+    ).toEqual({
+      type: "preferences.set",
+      key: "personalWebsiteUrl",
+      value: "https://example.com",
+    });
+  });
+
+  test("accepts short alias 'directive' for dailyDigestDirective", () => {
+    expect(
+      parseCommand("/preferences set directive Focus on AI topics")
+    ).toEqual({
+      type: "preferences.set",
+      key: "dailyDigestDirective",
+      value: "Focus on AI topics",
     });
   });
 

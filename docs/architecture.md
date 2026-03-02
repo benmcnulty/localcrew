@@ -93,9 +93,9 @@ Current observability surfaces:
 - `/explore`: internal and external-memory file browser
 - local HTTP API for browser-based status, queue, telemetry, audit, explorer, command, and edit flows
 - local HTTP API for browser-based participant/resource config, direct chat, and orchestrator profile editing
-- `/ui`: local browser prototype backed by the same API routes
+- browser UI served at `/ui` from the same local API
 - terminal background output in `/auto`
-- append-only audit logging for Ollama and Wikipedia transactions
+- append-only audit logging for all inference and tool transactions (chat, Wikipedia, Reddit, web search, weather, website)
 
 ## Dropbox Workflow
 
@@ -108,11 +108,20 @@ When `/auto` is idle and the queue is empty, the orchestrator checks `external-m
 - the orchestrator can emit `WRITE[active][path] ... ENDWRITE` for rough drafts and `WRITE[outbox][path] ... ENDWRITE` for final deliverables
 - after a successful source-document task, the source document is moved from `active` to `outbox` and retagged as `outbox`
 
-## Grounding
+## Grounding & Web Tools
 
-The orchestrator and agent identities can now request grounded factual context from Wikipedia through a constrained tool workflow. The model emits a `WIKIPEDIA: query` line, Crusty fetches and chunks the results, logs the transaction, and then re-prompts the same model to continue with the retrieved context.
+Orchestrators and agents can request external data through six constrained tool workflows. The model emits a marker line in its response (e.g. `WIKIPEDIA: query`), Crusty resolves the request, logs the transaction, and re-prompts the model with the retrieved context.
 
-Planned observability surfaces:
+Available tools:
 
-- browser-based GUI with queue, agents, telemetry, and transcript parity
-- richer live HUD layers for direct chat, participant config, and subscription-aware remote connection state
+- **Wikipedia** (`WIKIPEDIA: query`) — factual grounding from Wikipedia articles
+- **Reddit** (`REDDIT: query`) — tech subreddit search for real-world discussions
+- **Web search** (`SEARCH[topic]: query`) — DuckDuckGo search, topic-gated to `news`, `jobs`, `software-engineering`, `ai-engineering`
+- **Weather** (`WEATHER: location`) — Open-Meteo weather forecasts (no API key required)
+- **Ben Live** (`BENLIVE: path`) — benlive.tv content via llms.txt discovery
+- **Personal website** (`WEBSITE: path`) — user-configured website (set via `/preferences set website <url>`)
+
+Planned enhancements:
+
+- richer live HUD layers for direct chat and participant config
+- subscription-aware remote connection state

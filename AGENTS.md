@@ -24,12 +24,31 @@ Module boundaries (each has a single job; do not mix concerns):
 | `utils.ts` | Pure functions, no I/O (see shared helpers below) |
 | `storage.ts` | File read/write primitives + `getStoragePaths()` |
 | `commands.ts` | Parse slash-command input → typed `Command` union |
-| `ollama.ts` | HTTP calls to inference endpoints |
+| `ollama.ts` | HTTP calls to inference endpoints (ollama, openai, anthropic) |
 | `messages.ts` | Build prompt message arrays — no I/O |
-| `resources.ts` | Resource CRUD, tier routing, capacity summary |
+| `resources.ts` | Resource CRUD, tier routing, capacity summary, network topology |
 | `config.ts` | Load/save participant config from `.crusty/config.json` |
 | `session-store.ts` | Load/save shared conversation transcript |
+| `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
 | `api-server.ts` | Fork + IPC management for the HTTP child process |
+| `compact.ts` | Conversation compaction (summarize old messages) |
+| `telemetry.ts` | Append audit events, index into telemetry summary |
+| `dropbox.ts` | inbox → active → outbox file workflow |
+| `env.ts` | Environment variable loading from `.env` / `.env.local` |
+| `wikipedia.ts` | Wikipedia search + chunking for factual grounding |
+| `reddit.ts` | Reddit search tool |
+| `web-search.ts` | DuckDuckGo web search (topic-gated) |
+| `page-fetcher.ts` | HTML fetch, strip, and chunking shared by web tools |
+| `weather.ts` | Open-Meteo weather forecast tool |
+| `benlive.ts` | Ben Live content tool via llms.txt discovery |
+| `website.ts` | Personal website content tool |
+| `resource-discovery.ts` | Probe resource endpoints for available models |
+| `orchestrator-identity.ts` | Orchestrator name/alias from config + env |
+| `external-memory.ts` | Read committed seed documents from `external-memory/` |
+| `internal-files.ts` | Read/write internal orchestrator memory files |
+| `speech.ts` | macOS `say` voice playback |
+| `voices.ts` | Voice preset definitions and defaults |
+| `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
 
 Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored local runtime state. Never commit `.crusty/`, `.env`, or `.env.local`.
 

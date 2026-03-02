@@ -800,6 +800,20 @@ export class CrustyApp {
     return [...aliases];
   }
 
+  /** Cached internal-query patterns keyed by system terms string. */
+  private internalQueryPatternCache = new Map<string, { aliases: string; pattern: RegExp }>();
+
+  /** Get or build a cached internal query pattern for the given system terms. */
+  private getInternalQueryPattern(systemTerms: string): RegExp {
+    const aliases = this.getNetworkAliases();
+    const aliasKey = aliases.sort().join(",");
+    const cached = this.internalQueryPatternCache.get(systemTerms);
+    if (cached && cached.aliases === aliasKey) return cached.pattern;
+    const pattern = buildInternalQueryPattern(systemTerms, aliases);
+    this.internalQueryPatternCache.set(systemTerms, { aliases: aliasKey, pattern });
+    return pattern;
+  }
+
   shouldAutoPulse(): boolean {
     return this.isAutoMode() && !this.isAutoBusy();
   }
@@ -1861,8 +1875,162 @@ export class CrustyApp {
       `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
       `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
       `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
-      "Commands: /daily [start|finish], /promote <resource>, /topology [assign|delegate|undelegate], /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
+      "Commands: /daily [start|finish], /promote <resource>, /topology [assign|delegate|undelegate], /preferences [set <key> <value>], /compact, /reset, /clear, /exit",
+      "",
+      "Tip: /help <topic> for details — topics: chat, auto, resources, participants, agents, tools, topology, preferences, daily"
     ];
+  }
+
+  getHelpTopic(topic: string): string[] {
+    const topics: Record<string, string[]> = {
+      chat: [
+        "# Chat",
+        "",
+        "  /chat                      Start a 1-on-1 chat session with the default participant",
+        "  /group                     Start a group chat with all participants",
+        "  /end                       End the current chat or group session",
+        "  @alias message             Send a message to a specific participant",
+        '  @from to @to: "message"    Crosstalk — send a directed message between two participants',
+        "  /direct <resource> \"msg\"   Send a message directly to a specific inference resource",
+        "  /direct <resource> \"msg\" model   Same, with an explicit model override",
+        "",
+        "In chat mode, plain messages go to the default participant. In group mode,",
+        "all participants respond in round-robin. Use /default <alias> to change the",
+        "default. Use /end to return to command mode.",
+      ],
+      auto: [
+        "# Auto Mode",
+        "",
+        "  /auto                      Enter autonomous orchestration mode",
+        "  /stop                      Stop the auto pulse and return to command mode",
+        "  /priority [high|medium|low]  Set or show default task priority",
+        "  /compact                   Summarize older messages to free context space",
+        "",
+        "In auto mode, plain messages are queued as tasks. The background pulse",
+        "processes tasks by routing them to the best available resource by tier.",
+        "Complex tasks are automatically delegated to idle sub-orchestrators when",
+        "the network topology has them configured.",
+        "",
+        "The queue uses a 3-phase consensus flow: draft → review → finalize.",
+        "Tasks can also be ingested from the external-memory/inbox dropbox.",
+      ],
+      resources: [
+        "# Resources",
+        "",
+        "  /resource list             List all configured inference resources",
+        "  /resource add <alias> \"Label\" <url> [top|mid|low] [ollama|openai|anthropic]",
+        "                             Add a new resource",
+        "  /resource edit <alias>     Edit resource metadata (hardware, context, models)",
+        "  /resource refresh <alias>  Probe the endpoint for available models",
+        "  /resource remove <alias>   Remove a resource from the inventory",
+        "",
+        "Resources are inference endpoints (Ollama, OpenAI-compatible, or Anthropic).",
+        "Each has a tier (top, mid, low) that controls task routing priority.",
+        "Hardware metadata (CPU, RAM, GPU, VRAM, context tokens) is optional but",
+        "improves routing decisions. Use the setup-agent.js script to onboard",
+        "remote devices automatically.",
+      ],
+      participants: [
+        "# Participants",
+        "",
+        "  /participant list          List all chat participants",
+        "  /participant add <alias> <resource> [\"nickname\"]",
+        "                             Add a new participant bound to a resource",
+        "  /participant edit <alias>  Edit participant configuration",
+        "  /participant remove <alias> Remove a participant",
+        "  /nickname [@alias] [\"name\"]  Set or show participant nickname",
+        "  /bind [@alias] [resource]  Bind a participant to a different resource",
+        "  /model [alias model]       Set the model for a participant",
+        "  /models [resource|@alias]  List available models on a resource or participant",
+        "  /default [alias]           Set or show the default participant",
+        "  /rename <old> <new>        Rename a participant alias",
+        "  /instructions [@alias] [\"text\"]  View or set participant instructions",
+        "  /voice [@alias] [preset|list]    Set or list voice presets (macOS only)",
+        "  /sound [on|off]            Toggle voice playback (macOS only)",
+      ],
+      agents: [
+        "# Agents",
+        "",
+        "  /agent list                List all agent identities",
+        "  /agent new                 Create a new agent (interactive workflow)",
+        "  /agent <name>              Enter agent chat mode",
+        "  /agent edit <name>         Edit an agent's spec or memory",
+        "  /end                       Leave agent chat mode",
+        "",
+        "Agents are persistent working identities with their own specs, memory,",
+        "and resource bindings — separate from chat participants. The built-in",
+        "data-analyst agent is seeded from external-memory/agents/.",
+      ],
+      tools: [
+        "# Web Tools & Grounding",
+        "",
+        "Models can request external data by emitting special marker lines:",
+        "",
+        "  WIKIPEDIA: <query>           Wikipedia article search",
+        "  REDDIT: <query>              Reddit discussion search (tech subreddits)",
+        "  SEARCH[<topic>]: <query>     DuckDuckGo web search",
+        "  WEATHER: <location>          Open-Meteo weather forecast",
+        "  BENLIVE: <path>              benlive.tv content",
+        "  WEBSITE: <path>              Personal website content",
+        "",
+        "Web search topics: news, jobs, software-engineering, ai-engineering.",
+        "Set your personal website: /preferences set website <url>",
+        "Set weather location: /preferences set city <name> or /preferences set zip <code>",
+      ],
+      topology: [
+        "# Network Topology",
+        "",
+        "  /topology                  View the current network hierarchy",
+        "  /topology assign <alias> <role>",
+        "                             Assign a resource role: primary-orchestrator, orchestrator, or agent",
+        "  /topology delegate <orchestrator> <agent>",
+        "                             Assign an agent as a subordinate of a sub-orchestrator",
+        "  /topology undelegate <orchestrator> <agent>",
+        "                             Remove an agent from a sub-orchestrator",
+        "  /promote <alias>           Reassign the primary orchestrator to a different device",
+        "",
+        "Only top-tier resources with ≥16k context tokens qualify as orchestrators.",
+        "Sub-orchestrators coordinate their subordinate agents independently and",
+        "continue operating when the primary orchestrator is offline.",
+      ],
+      preferences: [
+        "# Preferences",
+        "",
+        "  /preferences               View all current preferences",
+        "  /preferences set city <name>        Set default weather city",
+        "  /preferences set zip <code>         Set default weather zip code",
+        "  /preferences set website <url>      Set personal website URL",
+        "  /preferences set directive \"text\"    Set daily digest directive",
+        "",
+        "Preferences are stored locally in .crusty/config.json and used by",
+        "the weather tool, personal website tool, and daily digest generation.",
+        "",
+        "Full key names also accepted: zipCode, personalWebsiteUrl, dailyDigestDirective.",
+      ],
+      daily: [
+        "# Daily Work Sessions",
+        "",
+        "  /daily                     Show current daily session status",
+        "  /daily status              Same as bare /daily",
+        "  /daily start               Begin a tracked daily work session",
+        "  /daily finish              Complete the session and generate a digest",
+        "",
+        "Daily sessions bound autonomous work into coherent cycles. The orchestrator",
+        "tracks tasks completed and errors during the session. On finish, a digest",
+        "is generated summarizing what was accomplished, what failed, and next priorities.",
+        "Set /preferences set directive \"...\" to customize the digest format.",
+      ],
+    };
+
+    const help = topics[topic];
+    if (!help) {
+      return [
+        `Unknown help topic: ${topic}`,
+        "",
+        "Available topics: " + Object.keys(topics).join(", "),
+      ];
+    }
+    return help;
   }
 
   private getResolvedAlias(alias?: string): string {
@@ -2066,7 +2234,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      buildInternalQueryPattern(INTERNAL_WIKIPEDIA_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedToolRequest.query)
+      this.getInternalQueryPattern(INTERNAL_WIKIPEDIA_SYSTEM_TERMS).test(parsedToolRequest.query)
     ) {
       return parsedToolRequest.replyText || options.rawReply;
     }
@@ -2171,7 +2339,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      buildInternalQueryPattern(INTERNAL_REDDIT_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedToolRequest.query)
+      this.getInternalQueryPattern(INTERNAL_REDDIT_SYSTEM_TERMS).test(parsedToolRequest.query)
     ) {
       return parsedToolRequest.replyText || options.rawReply;
     }
@@ -2274,7 +2442,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      buildInternalQueryPattern(INTERNAL_SEARCH_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedRequest.query)
+      this.getInternalQueryPattern(INTERNAL_SEARCH_SYSTEM_TERMS).test(parsedRequest.query)
     ) {
       return parsedRequest.replyText || options.rawReply;
     }
@@ -4641,6 +4809,14 @@ export class CrustyApp {
       if (command.type === "help") {
         return {
           lines: this.getHelpLines(),
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "help.topic") {
+        return {
+          lines: this.getHelpTopic(command.topic),
           errors: [],
           shouldExit: false
         };
