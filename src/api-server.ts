@@ -269,6 +269,9 @@ async function buildApiResponse(
     if (!query || query.trim().length === 0) {
       return jsonResponse(400, { error: "The q query parameter is required." });
     }
+    if (query.length > 200) {
+      return jsonResponse(400, { error: "Search query must be 200 characters or fewer." });
+    }
 
     return jsonResponse(200, await app.searchExploreFiles(query));
   }
