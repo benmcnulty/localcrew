@@ -142,11 +142,19 @@ function pickModel(names, candidates, fallback) {
 
 async function probeResourceModels(baseUrl, apiStyle, apiKeyEnv) {
   const headers = getAuthHeaders(apiStyle, apiKeyEnv);
+  const trimmedBase = trimTrailingSlash(baseUrl);
 
   if (apiStyle === "openai" || apiStyle === "anthropic") {
-    const response = await fetch(`${trimTrailingSlash(baseUrl)}/v1/models`, {
-      headers
-    });
+    let response;
+    try {
+      response = await fetch(`${trimmedBase}/v1/models`, {
+        headers
+      });
+    } catch (error) {
+      throw new Error(
+        `Could not reach local endpoint ${trimmedBase}/v1/models (apiStyle=${apiStyle}). Check that the local model server is running, --host is correct, and required API key env vars are set. Original error: ${error.message}`
+      );
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
@@ -168,10 +176,18 @@ async function probeResourceModels(baseUrl, apiStyle, apiKeyEnv) {
     };
   }
 
-  const [versionResponse, tagsResponse] = await Promise.all([
-    fetch(`${trimTrailingSlash(baseUrl)}/api/version`, { headers }),
-    fetch(`${trimTrailingSlash(baseUrl)}/api/tags`, { headers })
-  ]);
+  let versionResponse;
+  let tagsResponse;
+  try {
+    [versionResponse, tagsResponse] = await Promise.all([
+      fetch(`${trimmedBase}/api/version`, { headers }),
+      fetch(`${trimmedBase}/api/tags`, { headers })
+    ]);
+  } catch (error) {
+    throw new Error(
+      `Could not reach local endpoint ${trimmedBase} (expected Ollama routes /api/version and /api/tags). Check that Ollama is running and --host points to the correct machine/port. Original error: ${error.message}`
+    );
+  }
 
   if (!tagsResponse.ok) {
     throw new Error(`HTTP ${tagsResponse.status}: ${await tagsResponse.text()}`);
@@ -551,7 +567,12 @@ async function syncToOrchestrator(orchestratorUrl, report) {
     );
   }
 
-  const payload = await syncResponse.json();
+  let payload;
+  try {
+    payload = await syncResponse.json();
+  } catch {
+    payload = {};
+  }
   if (!syncResponse.ok) {
     throw new Error(payload.error ?? `Resource sync failed with HTTP ${syncResponse.status}.`);
   }
