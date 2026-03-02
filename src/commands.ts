@@ -72,7 +72,11 @@ function usage(command: string): string {
     case "/reset":
       return "Usage: /reset";
     case "/preferences":
-      return 'Usage: /preferences | /preferences set <key> <value> — keys: zipCode, city, personalWebsiteUrl';
+      return 'Usage: /preferences | /preferences set <key> <value> — keys: zipCode, city, personalWebsiteUrl, dailyDigestDirective';
+    case "/daily":
+      return "Usage: /daily | /daily start | /daily finish";
+    case "/promote":
+      return "Usage: /promote <resourceAlias>";
     case "/exit":
       return "Usage: /exit";
     default:
@@ -675,11 +679,12 @@ export function parseCommand(input: string): Command {
       }
       if (rest.length >= 3 && rest[0].toLowerCase() === "set") {
         const key = rest[1].toLowerCase();
-        const validKeys = ["zipcode", "city", "personalwebsiteurl"];
+        const validKeys = ["zipcode", "city", "personalwebsiteurl", "dailydigestdirective"];
         const keyMap: Record<string, string> = {
           zipcode: "zipCode",
           city: "city",
           personalwebsiteurl: "personalWebsiteUrl",
+          dailydigestdirective: "dailyDigestDirective",
         };
         if (!validKeys.includes(key)) {
           throw new CommandParseError(usage("/preferences"));
@@ -691,6 +696,17 @@ export function parseCommand(input: string): Command {
         };
       }
       throw new CommandParseError(usage("/preferences"));
+    case "/daily":
+      if (rest.length === 0 || (rest.length === 1 && rest[0].toLowerCase() === "status")) {
+        return { type: "daily.status" };
+      }
+      if (rest.length === 1 && rest[0].toLowerCase() === "start") {
+        return { type: "daily.start" };
+      }
+      if (rest.length === 1 && rest[0].toLowerCase() === "finish") {
+        return { type: "daily.finish" };
+      }
+      throw new CommandParseError(usage("/daily"));
     case "/clear":
       if (rest.length > 0) {
         throw new CommandParseError(usage("/clear"));
@@ -706,6 +722,11 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/exit"));
       }
       return { type: "exit" };
+    case "/promote":
+      if (rest.length !== 1) {
+        throw new CommandParseError(usage("/promote"));
+      }
+      return { type: "promote", alias: normalizeAlias(rest[0]) };
     default:
       throw new CommandParseError(`Unknown command "${name}".`);
   }

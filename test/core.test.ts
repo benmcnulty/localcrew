@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
-import { getDefaultInstruction, loadConfig } from "../src/config.ts";
+import { getDefaultInstruction, loadConfig, saveConfig } from "../src/config.ts";
 import {
   buildAgentChatMessages,
   buildAutoTaskMessages,
@@ -14,7 +14,16 @@ import {
   buildQueueFillReviewMessages,
   formatConversationTranscript
 } from "../src/messages.ts";
-import { loadSystemDocuments, loadSystemState } from "../src/orchestrator-store.ts";
+import {
+  buildDailyDigest,
+  completeDailySession,
+  loadSystemDocuments,
+  loadSystemState,
+  recordDailyTaskCompletion,
+  saveSystemState,
+  startDailySession,
+} from "../src/orchestrator-store.ts";
+import type { AutoQueueTask, DailyWorkSession } from "../src/types.ts";
 import {
   chooseResourceForTask,
   detectTaskPurpose,
@@ -571,7 +580,7 @@ describe("message assembly", () => {
     expect(autoTaskMessages[1]).toEqual({
       role: "system",
       content:
-        'You are Aster, the orchestrator identity. The selected inference resource for this task is @orchestrator. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Aster. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. Prioritize self-improvement work that better understands and exploits the current local hardware profile, context limits, and delegation opportunities of this specific network. Stay inside internal process improvement unless the user explicitly asks for external system changes. Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Crusty decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or include an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit. Use only the exact installed resource aliases provided by Crusty for any QUEUE line. If you are unsure which resource to target, omit the alias and let Crusty route it automatically. Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences. Use WRITE[internal] for local memory/process artifacts that belong inside `.crusty/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets. Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work.'
+        'You are Aster, the orchestrator identity. The selected inference resource for this task is @orchestrator. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Aster. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. Prioritize self-improvement work that better understands and exploits the current local hardware profile, context limits, and delegation opportunities of this specific network. Consistently reference the project directives, roadmap, and focus-todo to maintain orientation and alignment within each task. Every step should connect to the broader objective scope. When a task set exceeds a single context window, decompose it into a coordinated sequence of QUEUE items with clear handoff state. Each follow-up task must include enough context in its description to be self-contained within one context pass. Update working memory (orchestrator summary, focus-todo) to track the current state of multi-step work so that subsequent context windows can resume without losing progress or orientation. Stay inside internal process improvement unless the user explicitly asks for external system changes. Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Crusty decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or include an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit. Use only the exact installed resource aliases provided by Crusty for any QUEUE line. If you are unsure which resource to target, omit the alias and let Crusty route it automatically. Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences. Use WRITE[internal] for local memory/process artifacts that belong inside `.crusty/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets. To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], or WRITE[internal][roadmap.md]. These will update the actual orchestrator memory rather than writing to the generated directory. Use this to track cross-context-window state, record progress, and maintain orientation for subsequent tasks. Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work.'
     });
 
     expect(autoTaskMessages.at(-1)).toEqual({
@@ -715,6 +724,185 @@ describe("message assembly", () => {
         expect(typeof result).toBe("string");
         expect(result.length).toBeGreaterThan(0);
       });
+    });
+  });
+});
+
+describe("daily work session functions", () => {
+  test("startDailySession creates a new session with zero counters", () => {
+    const session = startDailySession();
+    expect(session.startedAt).toBeDefined();
+    expect(session.tasksCompleted).toBe(0);
+    expect(session.tasksErrored).toBe(0);
+    expect(session.completedAt).toBeUndefined();
+    expect(session.digestPath).toBeUndefined();
+  });
+
+  test("recordDailyTaskCompletion increments success counter", () => {
+    const session = startDailySession();
+    const updated = recordDailyTaskCompletion(session, false);
+    expect(updated.tasksCompleted).toBe(1);
+    expect(updated.tasksErrored).toBe(0);
+  });
+
+  test("recordDailyTaskCompletion increments error counter", () => {
+    const session = startDailySession();
+    const updated = recordDailyTaskCompletion(session, true);
+    expect(updated.tasksCompleted).toBe(0);
+    expect(updated.tasksErrored).toBe(1);
+  });
+
+  test("completeDailySession marks session finished", () => {
+    const session = startDailySession();
+    const completed = completeDailySession(session, "/some/path.md");
+    expect(completed.completedAt).toBeDefined();
+    expect(completed.digestPath).toBe("/some/path.md");
+  });
+
+  test("completeDailySession works without digestPath", () => {
+    const session = startDailySession();
+    const completed = completeDailySession(session);
+    expect(completed.completedAt).toBeDefined();
+    expect(completed.digestPath).toBeUndefined();
+  });
+
+  test("buildDailyDigest produces markdown with expected sections", () => {
+    const session: DailyWorkSession = {
+      startedAt: "2025-01-15T08:00:00.000Z",
+      tasksCompleted: 3,
+      tasksErrored: 1,
+    };
+    const completedTasks: AutoQueueTask[] = [
+      {
+        id: 1,
+        content: "Update routing summary",
+        createdAt: "2025-01-15T08:01:00.000Z",
+        createdBy: "orchestrator",
+        status: "completed",
+        priority: "high",
+        assignedResource: "orchestrator",
+        assignedModel: "llama3.1:8b",
+        durationMs: 15000,
+      },
+      {
+        id: 2,
+        content: "Re-index telemetry",
+        createdAt: "2025-01-15T08:10:00.000Z",
+        createdBy: "orchestrator",
+        status: "completed",
+        priority: "medium",
+        assignedResource: "workhorse",
+        assignedModel: "qwen3:8b",
+        durationMs: 30000,
+        errorMessage: "Context exceeded",
+      },
+    ];
+
+    const digest = buildDailyDigest({
+      session,
+      completedTasks,
+      orchestratorName: "TestOrch",
+      orchestratorSummary: "All went well.",
+      focusTodo: "- Continue improving memory.",
+      customDirective: "Keep it brief.",
+    });
+
+    expect(digest).toContain("# Daily Digest");
+    expect(digest).toContain("**Orchestrator:** TestOrch");
+    expect(digest).toContain("**Tasks completed:** 3");
+    expect(digest).toContain("**Tasks errored:** 1");
+    expect(digest).toContain("## Digest Directive");
+    expect(digest).toContain("Keep it brief.");
+    expect(digest).toContain("## Completed Tasks");
+    expect(digest).toContain("**#1** [high] ✓");
+    expect(digest).toContain("**#2** [medium] ⚠️ errored");
+    expect(digest).toContain("Error: Context exceeded");
+    expect(digest).toContain("## Orchestrator Summary");
+    expect(digest).toContain("All went well.");
+    expect(digest).toContain("## Current Focus");
+    expect(digest).toContain("- Continue improving memory.");
+  });
+
+  test("buildDailyDigest handles empty completed tasks", () => {
+    const session: DailyWorkSession = {
+      startedAt: "2025-01-15T08:00:00.000Z",
+      tasksCompleted: 0,
+      tasksErrored: 0,
+    };
+    const digest = buildDailyDigest({
+      session,
+      completedTasks: [],
+      orchestratorName: "TestOrch",
+      orchestratorSummary: "",
+      focusTodo: "",
+    });
+
+    expect(digest).toContain("No tasks completed during this session.");
+  });
+
+  test("buildDailyDigest omits directive section when no custom directive", () => {
+    const session: DailyWorkSession = {
+      startedAt: "2025-01-15T08:00:00.000Z",
+      tasksCompleted: 0,
+      tasksErrored: 0,
+    };
+    const digest = buildDailyDigest({
+      session,
+      completedTasks: [],
+      orchestratorName: "Orch",
+      orchestratorSummary: "",
+      focusTodo: "",
+    });
+
+    expect(digest).not.toContain("## Digest Directive");
+  });
+});
+
+describe("config orchestratorResourceAlias", () => {
+  test("loadConfig preserves orchestratorResourceAlias when present", async () => {
+    await withTempDir(async (rootDir) => {
+      const config = await loadConfig(rootDir);
+      config.orchestratorResourceAlias = "workhorse";
+      await saveConfig(config, rootDir);
+      const reloaded = await loadConfig(rootDir);
+      expect(reloaded.orchestratorResourceAlias).toBe("workhorse");
+    });
+  });
+
+  test("loadConfig omits orchestratorResourceAlias when not set", async () => {
+    await withTempDir(async (rootDir) => {
+      const config = await loadConfig(rootDir);
+      expect(config.orchestratorResourceAlias).toBeUndefined();
+    });
+  });
+});
+
+describe("daily session state persistence", () => {
+  test("daily session roundtrips through system state", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+
+      // Load default state, verify no session
+      let state = await loadSystemState(rootDir);
+      expect(state.auto.dailySession).toBeUndefined();
+
+      // Start a session and save
+      state = {
+        ...state,
+        auto: {
+          ...state.auto,
+          dailySession: startDailySession(),
+        },
+      };
+      await saveSystemState(state, rootDir);
+
+      // Reload and verify it persisted
+      const reloaded = await loadSystemState(rootDir);
+      expect(reloaded.auto.dailySession).toBeDefined();
+      expect(reloaded.auto.dailySession!.startedAt).toBe(state.auto.dailySession!.startedAt);
+      expect(reloaded.auto.dailySession!.tasksCompleted).toBe(0);
     });
   });
 });

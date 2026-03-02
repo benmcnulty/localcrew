@@ -283,12 +283,16 @@ function normalizePreferences(raw: unknown): UserPreferences | undefined {
     result.personalWebsiteUrl = candidate.personalWebsiteUrl.trim();
     hasField = true;
   }
+  if (typeof candidate.dailyDigestDirective === "string" && candidate.dailyDigestDirective.trim() !== "") {
+    result.dailyDigestDirective = candidate.dailyDigestDirective.trim();
+    hasField = true;
+  }
 
   return hasField ? result : undefined;
 }
 
 export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
-  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl"];
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective"];
   if (!validKeys.includes(key as keyof UserPreferences)) {
     throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
   }
@@ -325,6 +329,7 @@ function normalizeConfig(
 
   const candidate = raw as {
     orchestratorName?: unknown;
+    orchestratorResourceAlias?: unknown;
     defaultEndpoint?: unknown;
     soundEnabled?: unknown;
     endpoints?: unknown;
@@ -367,6 +372,12 @@ function normalizeConfig(
       ? candidate.orchestratorName.trim()
       : getOrchestratorIdentityName(rootDir);
 
+  const orchestratorResourceAlias =
+    typeof candidate.orchestratorResourceAlias === "string" &&
+    candidate.orchestratorResourceAlias.trim() !== ""
+      ? candidate.orchestratorResourceAlias.trim().toLowerCase()
+      : undefined;
+
   changed ||=
     typeof candidate.defaultEndpoint !== "string" ||
     requestedDefault !== defaultEndpoint ||
@@ -381,6 +392,7 @@ function normalizeConfig(
       defaultEndpoint,
       soundEnabled,
       endpoints,
+      ...(orchestratorResourceAlias ? { orchestratorResourceAlias } : {}),
       ...(preferences ? { preferences } : {}),
     },
     changed

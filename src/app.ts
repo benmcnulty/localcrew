@@ -39,7 +39,11 @@ import {
   saveSystemState,
   clearSystemState,
   updateOrchestratorIndex,
-  getAgentWorkflowLines
+  getAgentWorkflowLines,
+  startDailySession,
+  recordDailyTaskCompletion,
+  completeDailySession,
+  buildDailyDigest
 } from "./orchestrator-store.ts";
 import {
   getInternalFileDetails,
@@ -96,7 +100,7 @@ import {
   setConversationCompaction
 } from "./session-store.ts";
 import { isSpeechSupported, speakText, type WarnFn } from "./speech.ts";
-import { getStoragePaths } from "./storage.ts";
+import { getStoragePaths, type StoragePaths } from "./storage.ts";
 import { appendAuditEvent, loadTelemetrySummary, readRecentAuditEvents } from "./telemetry.ts";
 import type {
   AgentCreateAnswers,
@@ -105,6 +109,7 @@ import type {
   AppConfig,
   AssistantConversationMessage,
   AutoQueueTask,
+  DailyWorkSession,
   EndpointConfig,
   Command,
   EditRequest,
@@ -401,6 +406,11 @@ function parseQueuedTasks(content: string): {
         ...(match[4] ? { delegationRole: match[4].trim() } : {}),
         content: match[5].trim()
       });
+      continue;
+    }
+
+    // Strip the DAILY_COMPLETE signal from visible reply text.
+    if (/^DAILY_COMPLETE\s*$/i.test(line.trim())) {
       continue;
     }
 
@@ -954,7 +964,7 @@ export class CrustyApp {
       : normalizedTarget
         ? normalizedTarget.replace(/^@/, "").toLowerCase()
         : this.config.endpoints[this.runtime.currentEndpoint]?.resourceAlias;
-    const resource = getResourceProfile(resourceAlias ?? getOrchestratorResourceAlias(this.rootDir), this.rootDir);
+    const resource = getResourceProfile(resourceAlias ?? this.resolveOrchestratorAlias(), this.rootDir);
     const models = await listOllamaModels(
       resource.baseUrl,
       this.fetchFn,
@@ -1109,7 +1119,7 @@ export class CrustyApp {
     } catch {
       throw new Error(`Invalid base URL for synced resource @${alias}.`);
     }
-    if (alias !== getOrchestratorResourceAlias(this.rootDir) && isLoopbackHost(reportHost)) {
+    if (alias !== this.resolveOrchestratorAlias() && isLoopbackHost(reportHost)) {
       throw new Error(
         `Refusing to sync non-orchestrator resource @${alias} with loopback base URL ${report.baseUrl}. Re-run setup-agent on that device so it advertises its LAN-reachable endpoint instead.`
       );
@@ -1685,6 +1695,56 @@ export class CrustyApp {
     }
   }
 
+  /**
+   * Finish the daily work session: generate a Daily Digest document, write
+   * it to the outbox, and mark the daily session as complete. Returns a
+   * status line for the REPL or `null` if no session is active.
+   */
+  private async finishDailyWork(): Promise<string | null> {
+    const session = this.systemState.auto.dailySession;
+    if (!session || session.completedAt) {
+      return null;
+    }
+
+    const documents = await loadSystemDocuments(this.rootDir);
+    // Gather tasks completed during *this* session.
+    const sessionStart = new Date(session.startedAt).getTime();
+    const sessionTasks = this.systemState.auto.completed.filter(
+      (t) => t.completedAt && new Date(t.completedAt).getTime() >= sessionStart
+    );
+
+    const digestContent = buildDailyDigest({
+      session,
+      completedTasks: sessionTasks,
+      orchestratorName: this.getOrchestratorName(),
+      orchestratorSummary: documents.orchestratorSummary,
+      focusTodo: documents.focusTodo,
+      customDirective: this.config.preferences?.dailyDigestDirective
+    });
+
+    const dateSlug = new Date().toISOString().slice(0, 10);
+    const entry = await writeGeneratedDropboxDocument(
+      "outbox",
+      `daily-digest/daily-digest-${dateSlug}.md`,
+      digestContent,
+      this.rootDir
+    );
+
+    this.systemState = {
+      ...this.systemState,
+      auto: {
+        ...this.systemState.auto,
+        dailySession: completeDailySession(session, entry.path)
+      }
+    };
+    await this.persistSystemState();
+    await appendChangelogEntry(
+      `Daily work session completed. Digest written to ${entry.path}. ${session.tasksCompleted} tasks completed, ${session.tasksErrored} errored.`,
+      this.rootDir
+    );
+    return `Daily Digest written to ${entry.path}. Session completed: ${session.tasksCompleted} tasks completed, ${session.tasksErrored} errored.`;
+  }
+
   private async runAutoCycleLocked(run: () => Promise<CommandResult>): Promise<CommandResult> {
     if (this.autoCyclePromise) {
       return {
@@ -1749,7 +1809,7 @@ export class CrustyApp {
       `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
       `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
       `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
-      "Commands: /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
+      "Commands: /daily [start|finish], /promote <resource>, /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
     ];
   }
 
@@ -1764,6 +1824,23 @@ export class CrustyApp {
     return this.config.orchestratorName;
   }
 
+  /**
+   * Build a short context block describing the current daily work session
+   * state for injection into auto task and queue fill messages.
+   */
+  private getDailySessionContext(): string | undefined {
+    const session = this.systemState.auto.dailySession;
+    if (!session) {
+      return undefined;
+    }
+    if (session.completedAt) {
+      return `Daily work session completed at ${session.completedAt}. ${session.tasksCompleted} tasks completed, ${session.tasksErrored} errored.${session.digestPath ? ` Digest written to ${session.digestPath}.` : ""}`;
+    }
+    const startedAt = new Date(session.startedAt);
+    const elapsed = Math.round((Date.now() - startedAt.getTime()) / 60_000);
+    return `Active daily work session started at ${session.startedAt} (${elapsed} minutes ago). ${session.tasksCompleted} tasks completed so far, ${session.tasksErrored} errored. When the queue is empty and no more productive self-improvement work remains for this session, emit exactly one line: DAILY_COMPLETE to signal daily work is finished and trigger digest generation.`;
+  }
+
   private getEndpoint(alias: string): EndpointConfig {
     return resolveEndpointConfig(this.config, alias, this.rootDir);
   }
@@ -1774,6 +1851,10 @@ export class CrustyApp {
     }
 
     return this.config.defaultEndpoint;
+  }
+
+  private resolveOrchestratorAlias(): string {
+    return this.config.orchestratorResourceAlias ?? getOrchestratorResourceAlias(this.rootDir);
   }
 
   private async persistConfig(): Promise<void> {
@@ -2858,7 +2939,7 @@ export class CrustyApp {
       .join("\n");
 
     return this.enqueueAutoTask(content, "high", "orchestrator:safe-mode", {
-      requestedResource: getOrchestratorResourceAlias(this.rootDir)
+      requestedResource: this.resolveOrchestratorAlias()
     });
   }
 
@@ -2970,6 +3051,42 @@ export class CrustyApp {
       this.rootDir
     );
     return entry.path;
+  }
+
+  /**
+   * Map of canonical orchestrator memory filenames to their storage paths.
+   * When a WRITE[internal] targets one of these, the content is written to
+   * the canonical location instead of `generated/`.
+   */
+  private readonly CANONICAL_MEMORY_FILES: Record<string, (paths: StoragePaths) => string> = {
+    "summary.md": (paths) => paths.orchestratorMemorySummaryPath,
+    "memory/summary.md": (paths) => paths.orchestratorMemorySummaryPath,
+    "orchestrator-summary.md": (paths) => paths.orchestratorMemorySummaryPath,
+    "focus-todo.md": (paths) => paths.focusTodoPath,
+    "roadmap.md": (paths) => paths.roadmapPath,
+  };
+
+  /**
+   * Attempt to write content to a canonical orchestrator memory file
+   * (summary, focus-todo, roadmap). Returns null if the filename does not
+   * match a known canonical path.
+   */
+  private async writeCanonicalMemoryFile(
+    filename: string,
+    content: string
+  ): Promise<{ path: string; relativePath: string } | null> {
+    const normalized = filename.replace(/^\/+/, "").toLowerCase();
+    const resolver = this.CANONICAL_MEMORY_FILES[normalized];
+    if (!resolver) {
+      return null;
+    }
+    const paths = getStoragePaths(this.rootDir);
+    const targetPath = resolver(paths);
+    await writeFile(targetPath, `${content.trimEnd()}\n`, "utf8");
+    return {
+      path: targetPath,
+      relativePath: normalized
+    };
   }
 
   private async writeInternalGeneratedDocument(filename: string, content: string): Promise<{
@@ -3299,6 +3416,28 @@ export class CrustyApp {
           sourceDocumentRelativePath: options.sourceDocumentRelativePath
         })
       ) {
+        // Check if this targets a canonical memory file (summary, focus-todo, roadmap).
+        const canonicalEntry = await this.writeCanonicalMemoryFile(safeFilename, fileWrite.content);
+        if (canonicalEntry) {
+          await appendAuditEvent(
+            {
+              timestamp: new Date().toISOString(),
+              kind: "system",
+              scope: "memory.update",
+              summary: `Updated canonical orchestrator memory file ${canonicalEntry.relativePath}.`,
+              success: true,
+              actor: "orchestrator",
+              target: canonicalEntry.relativePath,
+              metadata: {
+                path: canonicalEntry.path
+              }
+            },
+            this.rootDir
+          );
+          writtenLines.push(`Updated memory: ${canonicalEntry.relativePath}`);
+          continue;
+        }
+
         const entry = await this.writeInternalGeneratedDocument(safeFilename, fileWrite.content);
         await appendAuditEvent(
           {
@@ -3651,7 +3790,7 @@ export class CrustyApp {
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
-    const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
+    const orchestratorAlias = this.resolveOrchestratorAlias();
     const resourceRoster = this.getResourceRosterText();
     const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
     const fillDateTime = formatCurrentDateTime();
@@ -3944,6 +4083,7 @@ export class CrustyApp {
       extraContextBlocks.push(preflightContext);
     }
 
+    const resourceProfile = getResourceProfile(selection.alias, this.rootDir);
     const outgoingMessages = buildAutoTaskMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -3960,7 +4100,9 @@ export class CrustyApp {
       resourceRationale: selection.rationale,
       resourceRoster: this.getResourceRosterText(),
       extraContextBlocks,
-      currentDateTime: formatCurrentDateTime()
+      currentDateTime: formatCurrentDateTime(),
+      maxContextTokens: resourceProfile.maxContextTokens,
+      dailySessionContext: this.getDailySessionContext()
     });
 
     let rawReply: string;
@@ -4043,6 +4185,21 @@ export class CrustyApp {
         )
       }
     };
+
+    // Track daily session progress if active.
+    if (this.systemState.auto.dailySession && !this.systemState.auto.dailySession.completedAt) {
+      this.systemState = {
+        ...this.systemState,
+        auto: {
+          ...this.systemState.auto,
+          dailySession: recordDailyTaskCompletion(
+            this.systemState.auto.dailySession,
+            !!completedTask.errorMessage
+          )
+        }
+      };
+    }
+
     await this.persistSystemState();
     const queuedResult = await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed");
     const queued = queuedResult.tasks;
@@ -4076,6 +4233,12 @@ export class CrustyApp {
       this.rootDir
     );
 
+    // Check whether the model signaled daily work complete.
+    let dailyDigestLine: string | null = null;
+    if (/^DAILY_COMPLETE\s*$/m.test(rawReply)) {
+      dailyDigestLine = await this.finishDailyWork();
+    }
+
     return {
       lines: [
         `${this.getOrchestratorName()} completed #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
@@ -4089,7 +4252,8 @@ export class CrustyApp {
             `Queued #${queuedTask.id} [${queuedTask.priority}]${queuedTask.delegationRole ? ` {${queuedTask.delegationRole}}` : ""}${
               queuedTask.requestedResource ? ` -> ${queuedTask.requestedResource}` : ""
             }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
-        )
+        ),
+        ...(dailyDigestLine ? [dailyDigestLine] : [])
       ],
       errors: postProcessErrors,
       shouldExit: false
@@ -4212,7 +4376,7 @@ export class CrustyApp {
     let generatedSpec: string | undefined;
     try {
       const documents = await loadSystemDocuments(this.rootDir);
-      const orchestratorAlias = getOrchestratorResourceAlias(this.rootDir);
+      const orchestratorAlias = this.resolveOrchestratorAlias();
       const endpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
       const specMessages: ChatMessage[] = [
           {
@@ -4965,6 +5129,7 @@ export class CrustyApp {
         if (prefs.zipCode) lines.push(`  zipCode: ${prefs.zipCode}`);
         if (prefs.city) lines.push(`  city: ${prefs.city}`);
         if (prefs.personalWebsiteUrl) lines.push(`  personalWebsiteUrl: ${prefs.personalWebsiteUrl}`);
+        if (prefs.dailyDigestDirective) lines.push(`  dailyDigestDirective: ${prefs.dailyDigestDirective}`);
         return { lines, errors: [], shouldExit: false };
       }
 
@@ -4975,6 +5140,110 @@ export class CrustyApp {
           const display = command.value.trim() || "(cleared)";
           return {
             lines: [`Preference ${command.key} set to: ${display}`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "daily.status") {
+        const session = this.systemState.auto.dailySession;
+        if (!session) {
+          return {
+            lines: ["No daily work session active. Use /daily start to begin one."],
+            errors: [],
+            shouldExit: false
+          };
+        }
+        if (session.completedAt) {
+          return {
+            lines: [
+              `Daily work session completed at ${session.completedAt}.`,
+              `Tasks completed: ${session.tasksCompleted}, errored: ${session.tasksErrored}.`,
+              ...(session.digestPath ? [`Digest: ${session.digestPath}`] : [])
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        }
+        const elapsed = Math.round((Date.now() - new Date(session.startedAt).getTime()) / 60_000);
+        return {
+          lines: [
+            `Daily work session in progress (started ${elapsed} minutes ago).`,
+            `Tasks completed: ${session.tasksCompleted}, errored: ${session.tasksErrored}.`
+          ],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "daily.start") {
+        if (this.systemState.auto.dailySession && !this.systemState.auto.dailySession.completedAt) {
+          return {
+            lines: [],
+            errors: ["A daily work session is already active. Use /daily finish to complete it first."],
+            shouldExit: false
+          };
+        }
+        this.systemState = {
+          ...this.systemState,
+          auto: {
+            ...this.systemState.auto,
+            dailySession: startDailySession()
+          }
+        };
+        await this.persistSystemState();
+        await appendChangelogEntry("Daily work session started.", this.rootDir);
+        return {
+          lines: [`Daily work session started. Enter /auto to begin autonomous work. The orchestrator will generate a Daily Digest when the session concludes.`],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "daily.finish") {
+        const session = this.systemState.auto.dailySession;
+        if (!session || session.completedAt) {
+          return {
+            lines: [],
+            errors: ["No active daily work session to finish. Use /daily start to begin one."],
+            shouldExit: false
+          };
+        }
+        const digestLine = await this.finishDailyWork();
+        return {
+          lines: [digestLine ?? "Daily work session finished."],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "promote") {
+        try {
+          const resource = getResourceProfile(command.alias, this.rootDir);
+          if (resource.tier !== "top") {
+            return {
+              lines: [],
+              errors: [
+                `Resource @${resource.alias} is tier "${resource.tier}". Only top-tier resources can be promoted to orchestrator.`
+              ],
+              shouldExit: false
+            };
+          }
+          this.config = { ...this.config, orchestratorResourceAlias: resource.alias };
+          await this.persistConfig();
+          return {
+            lines: [
+              `Orchestrator resource promoted to @${resource.alias}.`,
+              `All orchestrator-routed tasks will now use this resource.`,
+              `Use /promote with the original alias to revert, or remove orchestratorResourceAlias from config.json.`
+            ],
             errors: [],
             shouldExit: false
           };

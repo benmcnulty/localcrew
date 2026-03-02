@@ -13,6 +13,7 @@ import type {
   AgentMemoryFile,
   AgentMeta,
   AutoQueueTask,
+  DailyWorkSession,
   SharedConversationState,
   SystemState,
   TaskPriority
@@ -115,6 +116,27 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
   };
 }
 
+function normalizeDailySession(raw: unknown): DailyWorkSession | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const candidate = raw as Partial<DailyWorkSession>;
+  if (typeof candidate.startedAt !== "string" || candidate.startedAt.trim() === "") {
+    return undefined;
+  }
+  return {
+    startedAt: candidate.startedAt,
+    tasksCompleted: typeof candidate.tasksCompleted === "number" ? candidate.tasksCompleted : 0,
+    tasksErrored: typeof candidate.tasksErrored === "number" ? candidate.tasksErrored : 0,
+    ...(typeof candidate.completedAt === "string" && candidate.completedAt.trim() !== ""
+      ? { completedAt: candidate.completedAt }
+      : {}),
+    ...(typeof candidate.digestPath === "string" && candidate.digestPath.trim() !== ""
+      ? { digestPath: candidate.digestPath }
+      : {})
+  };
+}
+
 function normalizeSystemState(raw: unknown): SystemState {
   if (!raw || typeof raw !== "object") {
     return getDefaultSystemState();
@@ -140,7 +162,10 @@ function normalizeSystemState(raw: unknown): SystemState {
       lastTaskId:
         typeof auto.lastTaskId === "number" && auto.lastTaskId >= 0 ? auto.lastTaskId : 0,
       pending,
-      completed
+      completed,
+      ...(auto.dailySession && typeof auto.dailySession === "object"
+        ? { dailySession: normalizeDailySession(auto.dailySession) }
+        : {})
     }
   };
 }
@@ -558,6 +583,113 @@ export async function appendChangelogEntry(
   const timestamp = new Date().toISOString();
   const next = `${previous.trimEnd()}\n- ${timestamp} ${entry}\n`;
   await writeFile(paths.changelogPath, next, "utf8");
+}
+
+/**
+ * Start a new daily work session. Returns the session object that should
+ * be stored on `systemState.auto.dailySession`.
+ */
+export function startDailySession(): DailyWorkSession {
+  return {
+    startedAt: new Date().toISOString(),
+    tasksCompleted: 0,
+    tasksErrored: 0,
+  };
+}
+
+/**
+ * Record a completed task in the daily session.
+ */
+export function recordDailyTaskCompletion(
+  session: DailyWorkSession,
+  errored: boolean
+): DailyWorkSession {
+  return {
+    ...session,
+    tasksCompleted: session.tasksCompleted + (errored ? 0 : 1),
+    tasksErrored: session.tasksErrored + (errored ? 1 : 0),
+  };
+}
+
+/**
+ * Mark the daily session as complete.
+ */
+export function completeDailySession(
+  session: DailyWorkSession,
+  digestPath?: string
+): DailyWorkSession {
+  return {
+    ...session,
+    completedAt: new Date().toISOString(),
+    digestPath,
+  };
+}
+
+/**
+ * Build the Daily Digest markdown document content from the completed daily
+ * work session and the recently completed auto queue tasks.
+ */
+export function buildDailyDigest(options: {
+  session: DailyWorkSession;
+  completedTasks: AutoQueueTask[];
+  orchestratorName: string;
+  orchestratorSummary: string;
+  focusTodo: string;
+  customDirective?: string;
+}): string {
+  const now = new Date();
+  const dateLabel = now.toISOString().slice(0, 10);
+  const sessionStart = new Date(options.session.startedAt);
+  const durationMs = now.getTime() - sessionStart.getTime();
+  const durationMinutes = Math.round(durationMs / 60_000);
+
+  const lines: string[] = [
+    `# Daily Digest — ${dateLabel}`,
+    "",
+    `**Orchestrator:** ${options.orchestratorName}`,
+    `**Session started:** ${options.session.startedAt}`,
+    `**Duration:** ${durationMinutes} minutes`,
+    `**Tasks completed:** ${options.session.tasksCompleted}`,
+    `**Tasks errored:** ${options.session.tasksErrored}`,
+    "",
+  ];
+
+  if (options.customDirective) {
+    lines.push(
+      "## Digest Directive",
+      "",
+      options.customDirective,
+      "",
+    );
+  }
+
+  lines.push("## Completed Tasks", "");
+  if (options.completedTasks.length === 0) {
+    lines.push("No tasks completed during this session.", "");
+  } else {
+    for (const task of options.completedTasks) {
+      const resource = task.assignedResource ? ` (@${task.assignedResource})` : "";
+      const model = task.assignedModel ? ` [${task.assignedModel}]` : "";
+      const duration = task.durationMs ? ` (${Math.round(task.durationMs / 1000)}s)` : "";
+      const status = task.errorMessage ? " ⚠️ errored" : " ✓";
+      lines.push(`- **#${task.id}** [${task.priority}]${status}${resource}${model}${duration}`);
+      lines.push(`  ${task.content}`);
+      if (task.errorMessage) {
+        lines.push(`  Error: ${task.errorMessage}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (options.orchestratorSummary.trim()) {
+    lines.push("## Orchestrator Summary", "", options.orchestratorSummary.trim(), "");
+  }
+
+  if (options.focusTodo.trim()) {
+    lines.push("## Current Focus", "", options.focusTodo.trim(), "");
+  }
+
+  return lines.join("\n");
 }
 
 export async function updateOrchestratorIndex(options: {
