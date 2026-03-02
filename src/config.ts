@@ -4,7 +4,7 @@ import { getEnvBoolean, getEnvString, loadLocalEnv } from "./env.ts";
 import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
 import { getResourceProfile, listResources } from "./resources.ts";
 import { atomicWriteFile, getStoragePaths } from "./storage.ts";
-import type { AppConfig, EndpointConfig } from "./types.ts";
+import type { AppConfig, EndpointConfig, ModelPolicy, UserPreferences } from "./types.ts";
 import { titleCase } from "./utils.ts";
 import {
   getDefaultVoicePreset,
@@ -217,6 +217,23 @@ function normalizeEndpoint(
     ? defaultVoicePreset
     : normalizedRequestedVoicePreset;
 
+  const modelPolicy: ModelPolicy | undefined =
+    candidate.modelPolicy === "auto" || candidate.modelPolicy === "fixed"
+      ? candidate.modelPolicy
+      : undefined;
+  const reasoningModel =
+    typeof candidate.reasoningModel === "string" && candidate.reasoningModel.trim() !== ""
+      ? candidate.reasoningModel.trim()
+      : undefined;
+  const codingModel =
+    typeof candidate.codingModel === "string" && candidate.codingModel.trim() !== ""
+      ? candidate.codingModel.trim()
+      : undefined;
+  const toolsModel =
+    typeof candidate.toolsModel === "string" && candidate.toolsModel.trim() !== ""
+      ? candidate.toolsModel.trim()
+      : undefined;
+
   return {
     endpoint: {
       resourceAlias,
@@ -225,6 +242,10 @@ function normalizeEndpoint(
       apiStyle,
       ...(apiKeyEnv ? { apiKeyEnv } : {}),
       model,
+      ...(modelPolicy ? { modelPolicy } : {}),
+      ...(reasoningModel ? { reasoningModel } : {}),
+      ...(codingModel ? { codingModel } : {}),
+      ...(toolsModel ? { toolsModel } : {}),
       instructions: instructions.value,
       voicePreset
     },
@@ -241,6 +262,59 @@ function normalizeEndpoint(
   };
 }
 
+function normalizePreferences(raw: unknown): UserPreferences | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  const result: UserPreferences = {};
+  let hasField = false;
+
+  if (typeof candidate.zipCode === "string" && candidate.zipCode.trim() !== "") {
+    result.zipCode = candidate.zipCode.trim();
+    hasField = true;
+  }
+  if (typeof candidate.city === "string" && candidate.city.trim() !== "") {
+    result.city = candidate.city.trim();
+    hasField = true;
+  }
+  if (typeof candidate.personalWebsiteUrl === "string" && candidate.personalWebsiteUrl.trim() !== "") {
+    result.personalWebsiteUrl = candidate.personalWebsiteUrl.trim();
+    hasField = true;
+  }
+
+  return hasField ? result : undefined;
+}
+
+export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl"];
+  if (!validKeys.includes(key as keyof UserPreferences)) {
+    throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
+  }
+
+  const trimmed = value.trim();
+  const existing = config.preferences ?? {};
+
+  if (trimmed === "") {
+    const updated = { ...existing };
+    delete updated[key as keyof UserPreferences];
+    const hasFields = Object.values(updated).some((v) => v !== undefined);
+    return {
+      ...config,
+      ...(hasFields ? { preferences: updated } : {}),
+    };
+  }
+
+  return {
+    ...config,
+    preferences: {
+      ...existing,
+      [key]: trimmed,
+    },
+  };
+}
+
 function normalizeConfig(
   raw: unknown,
   rootDir = process.cwd()
@@ -254,6 +328,7 @@ function normalizeConfig(
     defaultEndpoint?: unknown;
     soundEnabled?: unknown;
     endpoints?: unknown;
+    preferences?: unknown;
   };
 
   if (!candidate.endpoints || typeof candidate.endpoints !== "object") {
@@ -298,12 +373,15 @@ function normalizeConfig(
     typeof candidate.soundEnabled !== "boolean" ||
     typeof candidate.orchestratorName !== "string";
 
+  const preferences = normalizePreferences(candidate.preferences);
+
   return {
     config: {
       orchestratorName,
       defaultEndpoint,
       soundEnabled,
-      endpoints
+      endpoints,
+      ...(preferences ? { preferences } : {}),
     },
     changed
   };
@@ -445,6 +523,56 @@ export function setEndpointModel(config: AppConfig, alias: string, model: string
       [normalizedAlias]: {
         ...config.endpoints[normalizedAlias],
         model: trimmedModel
+      }
+    }
+  };
+}
+
+export function setEndpointModelPolicy(
+  config: AppConfig,
+  alias: string,
+  policy: ModelPolicy
+): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        ...config.endpoints[normalizedAlias],
+        modelPolicy: policy
+      }
+    }
+  };
+}
+
+export function setEndpointPurposeModel(
+  config: AppConfig,
+  alias: string,
+  purpose: "reasoning" | "coding" | "tools",
+  model: string
+): AppConfig {
+  const normalizedAlias = ensureEndpointAlias(config, alias);
+  const trimmedModel = model.trim();
+  if (!trimmedModel) {
+    throw new Error("Model cannot be empty.");
+  }
+
+  const purposeKey =
+    purpose === "reasoning"
+      ? "reasoningModel"
+      : purpose === "coding"
+        ? "codingModel"
+        : "toolsModel";
+
+  return {
+    ...config,
+    endpoints: {
+      ...config.endpoints,
+      [normalizedAlias]: {
+        ...config.endpoints[normalizedAlias],
+        [purposeKey]: trimmedModel
       }
     }
   };

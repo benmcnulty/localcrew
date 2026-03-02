@@ -48,7 +48,7 @@ function usage(command: string): string {
     case "/direct":
       return 'Usage: /direct <resourceAlias> "<message>" [model]';
     case "/model":
-      return "Usage: /model [alias] | /model <alias> <model>";
+      return "Usage: /model [alias] | /model <alias> <model> | /model <alias> policy auto|fixed | /model <alias> coding|reasoning|tools <model>";
     case "/default":
       return "Usage: /default [alias]";
     case "/nickname":
@@ -71,6 +71,8 @@ function usage(command: string): string {
       return "Usage: /clear";
     case "/reset":
       return "Usage: /reset";
+    case "/preferences":
+      return 'Usage: /preferences | /preferences set <key> <value> — keys: zipCode, city, personalWebsiteUrl';
     case "/exit":
       return "Usage: /exit";
     default:
@@ -475,6 +477,37 @@ export function parseCommand(input: string): Command {
           alias: normalizeAlias(rest[0])
         };
       }
+      if (rest.length === 2 && rest[1].toLowerCase() === "policy") {
+        throw new CommandParseError(
+          "Usage: /model <alias> policy auto|fixed"
+        );
+      }
+      if (rest.length === 2 && (rest[1].toLowerCase() === "coding" || rest[1].toLowerCase() === "reasoning" || rest[1].toLowerCase() === "tools")) {
+        throw new CommandParseError(
+          `Usage: /model <alias> ${rest[1].toLowerCase()} <model-name>`
+        );
+      }
+      if (rest[1].toLowerCase() === "policy") {
+        const policy = rest[2].toLowerCase();
+        if (policy !== "auto" && policy !== "fixed") {
+          throw new CommandParseError(
+            "Usage: /model <alias> policy auto|fixed"
+          );
+        }
+        return {
+          type: "model.policy",
+          alias: normalizeAlias(rest[0]),
+          policy
+        };
+      }
+      if (rest[1].toLowerCase() === "coding" || rest[1].toLowerCase() === "reasoning" || rest[1].toLowerCase() === "tools") {
+        return {
+          type: "model.purpose",
+          alias: normalizeAlias(rest[0]),
+          purpose: rest[1].toLowerCase() as "reasoning" | "coding" | "tools",
+          model: rest.slice(2).join(" ")
+        };
+      }
       return {
         type: "model.assign",
         alias: normalizeAlias(rest[0]),
@@ -636,6 +669,28 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/compact"));
       }
       return { type: "compact" };
+    case "/preferences":
+      if (rest.length === 0) {
+        return { type: "preferences.get" };
+      }
+      if (rest.length >= 3 && rest[0].toLowerCase() === "set") {
+        const key = rest[1].toLowerCase();
+        const validKeys = ["zipcode", "city", "personalwebsiteurl"];
+        const keyMap: Record<string, string> = {
+          zipcode: "zipCode",
+          city: "city",
+          personalwebsiteurl: "personalWebsiteUrl",
+        };
+        if (!validKeys.includes(key)) {
+          throw new CommandParseError(usage("/preferences"));
+        }
+        return {
+          type: "preferences.set",
+          key: keyMap[key],
+          value: rest.slice(2).join(" "),
+        };
+      }
+      throw new CommandParseError(usage("/preferences"));
     case "/clear":
       if (rest.length > 0) {
         throw new CommandParseError(usage("/clear"));

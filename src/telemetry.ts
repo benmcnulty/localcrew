@@ -45,6 +45,30 @@ export function getDefaultTelemetrySummary(): TelemetrySummary {
       totalDurationMs: 0,
       recentQueries: []
     },
+    search: {
+      calls: 0,
+      errors: 0,
+      totalDurationMs: 0,
+      recentQueries: []
+    },
+    weather: {
+      calls: 0,
+      errors: 0,
+      totalDurationMs: 0,
+      recentLocations: []
+    },
+    benlive: {
+      calls: 0,
+      errors: 0,
+      totalDurationMs: 0,
+      recentPaths: []
+    },
+    website: {
+      calls: 0,
+      errors: 0,
+      totalDurationMs: 0,
+      recentPaths: []
+    },
     recent: []
   };
 }
@@ -159,6 +183,58 @@ export async function appendAuditEvent(
     const query = typeof nextEvent.metadata?.query === "string" ? nextEvent.metadata.query : undefined;
     if (query) {
       summary.reddit.recentQueries = [query, ...summary.reddit.recentQueries.filter((value) => value !== query)].slice(0, 10);
+    }
+  }
+
+  if (nextEvent.kind === "search.web") {
+    summary.search ??= { calls: 0, errors: 0, totalDurationMs: 0, recentQueries: [] };
+    summary.search.calls += 1;
+    if (!nextEvent.success) {
+      summary.search.errors += 1;
+    }
+    summary.search.totalDurationMs += nextEvent.durationMs ?? 0;
+    const query = typeof nextEvent.metadata?.query === "string" ? nextEvent.metadata.query : undefined;
+    if (query) {
+      summary.search.recentQueries = [query, ...summary.search.recentQueries.filter((value) => value !== query)].slice(0, 10);
+    }
+  }
+
+  if (nextEvent.kind === "weather.fetch") {
+    summary.weather ??= { calls: 0, errors: 0, totalDurationMs: 0, recentLocations: [] };
+    summary.weather.calls += 1;
+    if (!nextEvent.success) {
+      summary.weather.errors += 1;
+    }
+    summary.weather.totalDurationMs += nextEvent.durationMs ?? 0;
+    const location = typeof nextEvent.metadata?.location === "string" ? nextEvent.metadata.location : undefined;
+    if (location) {
+      summary.weather.recentLocations = [location, ...summary.weather.recentLocations.filter((value) => value !== location)].slice(0, 10);
+    }
+  }
+
+  if (nextEvent.kind === "benlive.fetch") {
+    summary.benlive ??= { calls: 0, errors: 0, totalDurationMs: 0, recentPaths: [] };
+    summary.benlive.calls += 1;
+    if (!nextEvent.success) {
+      summary.benlive.errors += 1;
+    }
+    summary.benlive.totalDurationMs += nextEvent.durationMs ?? 0;
+    const topic = typeof nextEvent.metadata?.topic === "string" ? nextEvent.metadata.topic : undefined;
+    if (topic) {
+      summary.benlive.recentPaths = [topic, ...summary.benlive.recentPaths.filter((value) => value !== topic)].slice(0, 10);
+    }
+  }
+
+  if (nextEvent.kind === "website.fetch") {
+    summary.website ??= { calls: 0, errors: 0, totalDurationMs: 0, recentPaths: [] };
+    summary.website.calls += 1;
+    if (!nextEvent.success) {
+      summary.website.errors += 1;
+    }
+    summary.website.totalDurationMs += nextEvent.durationMs ?? 0;
+    const topic = typeof nextEvent.metadata?.topic === "string" ? nextEvent.metadata.topic : undefined;
+    if (topic) {
+      summary.website.recentPaths = [topic, ...summary.website.recentPaths.filter((value) => value !== topic)].slice(0, 10);
     }
   }
 

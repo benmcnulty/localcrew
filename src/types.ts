@@ -1,5 +1,7 @@
 export type Role = "system" | "user" | "assistant";
 export type EndpointApiStyle = "ollama" | "openai" | "anthropic";
+export type ModelPolicy = "fixed" | "auto";
+export type ModelPurpose = "default" | "reasoning" | "coding" | "tools";
 
 export interface ChatMessage {
   role: Role;
@@ -13,8 +15,18 @@ export interface EndpointConfig {
   apiStyle?: EndpointApiStyle;
   apiKeyEnv?: string;
   model: string;
+  modelPolicy?: ModelPolicy;
+  reasoningModel?: string;
+  codingModel?: string;
+  toolsModel?: string;
   instructions: string;
   voicePreset: string;
+}
+
+export interface UserPreferences {
+  zipCode?: string;
+  city?: string;
+  personalWebsiteUrl?: string;
 }
 
 export interface AppConfig {
@@ -22,6 +34,7 @@ export interface AppConfig {
   defaultEndpoint: string;
   soundEnabled: boolean;
   endpoints: Record<string, EndpointConfig>;
+  preferences?: UserPreferences;
 }
 
 export interface UserConversationMessage {
@@ -156,7 +169,7 @@ export interface OllamaChatResult {
 export interface AuditEvent {
   id: number;
   timestamp: string;
-  kind: "ollama.chat" | "wikipedia.search" | "reddit.search" | "system";
+  kind: "ollama.chat" | "wikipedia.search" | "reddit.search" | "search.web" | "weather.fetch" | "benlive.fetch" | "website.fetch" | "system";
   scope: string;
   summary: string;
   success: boolean;
@@ -214,6 +227,30 @@ export interface TelemetrySummary {
     errors: number;
     totalDurationMs: number;
     recentQueries: string[];
+  };
+  search: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentQueries: string[];
+  };
+  weather: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentLocations: string[];
+  };
+  benlive: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentPaths: string[];
+  };
+  website: {
+    calls: number;
+    errors: number;
+    totalDurationMs: number;
+    recentPaths: string[];
   };
   recent: TelemetryRecentEvent[];
 }
@@ -276,6 +313,43 @@ export interface RedditSearchResult {
   chunks: string[];
 }
 
+export interface WebSearchResultEntry {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface WebSearchResult {
+  query: string;
+  topic: string;
+  durationMs: number;
+  entries: WebSearchResultEntry[];
+  chunks: string[];
+}
+
+export interface WeatherResult {
+  location: string;
+  durationMs: number;
+  summary: string;
+  chunks: string[];
+}
+
+export interface BenLiveResult {
+  url: string;
+  path: string;
+  durationMs: number;
+  text: string;
+  chunks: string[];
+}
+
+export interface WebsiteFetchResult {
+  url: string;
+  path: string;
+  durationMs: number;
+  text: string;
+  chunks: string[];
+}
+
 export type Command =
   | { type: "message"; text: string; alias?: string }
   | { type: "crosstalk"; fromAlias: string; toAlias: string; text: string }
@@ -316,6 +390,8 @@ export type Command =
   | { type: "model.get" }
   | { type: "model.set"; alias: string }
   | { type: "model.assign"; alias: string; model: string }
+  | { type: "model.policy"; alias: string; policy: ModelPolicy }
+  | { type: "model.purpose"; alias: string; purpose: "reasoning" | "coding" | "tools"; model: string }
   | { type: "default.get" }
   | { type: "default.set"; alias: string }
   | { type: "nickname.get"; alias?: string }
@@ -335,4 +411,6 @@ export type Command =
   | { type: "compact" }
   | { type: "clear" }
   | { type: "reset" }
+  | { type: "preferences.get" }
+  | { type: "preferences.set"; key: string; value: string }
   | { type: "exit" };

@@ -9,7 +9,7 @@ import {
   loadLocalEnv
 } from "./env.ts";
 import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
-import type { EndpointApiStyle, EndpointConfig } from "./types.ts";
+import type { EndpointApiStyle, EndpointConfig, ModelPurpose } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
 export type ResourceApiStyle = EndpointApiStyle;
@@ -430,7 +430,7 @@ export async function removeResource(alias: string, rootDir = process.cwd()): Pr
   });
 }
 
-function selectModel(
+export function selectModel(
   profile: ResourceProfile,
   purpose: "default" | "reasoning" | "coding" | "tools"
 ): string {
@@ -474,6 +474,65 @@ export function getResourceEndpoint(
     instructions: "",
     voicePreset: ""
   };
+}
+
+/**
+ * Classify a message or task description into a model purpose.
+ * Uses the same regex heuristics as `chooseResourceForTask()`.
+ */
+export function detectTaskPurpose(text: string): ModelPurpose {
+  const normalized = text.toLowerCase();
+
+  if (
+    /\b(code|patch|refactor|typescript|node|bun|test|bug|implement|diff|compile|fix)\b/.test(
+      normalized
+    )
+  ) {
+    return "coding";
+  }
+
+  if (
+    /\b(json|queue|route|router|classify|index|memory|tag|organize|metadata|changelog|todo|log|inventory|benchmark result|summary table)\b/.test(
+      normalized
+    )
+  ) {
+    return "tools";
+  }
+
+  if (
+    /\b(reason|think|explain|why|analyze|compare|evaluate|critique|assess|debate|argue|logic|proof|math|calculate)\b/.test(
+      normalized
+    )
+  ) {
+    return "reasoning";
+  }
+
+  return "default";
+}
+
+/**
+ * Select the best model for an endpoint given a detected purpose.
+ * Checks endpoint purpose-specific slots first, then falls back to the
+ * bound resource's purpose slots, then the endpoint's default model.
+ */
+export function selectModelForEndpoint(
+  endpoint: EndpointConfig,
+  purpose: ModelPurpose,
+  rootDir = process.cwd()
+): string {
+  if (purpose === "coding" && endpoint.codingModel) return endpoint.codingModel;
+  if (purpose === "reasoning" && endpoint.reasoningModel) return endpoint.reasoningModel;
+  if (purpose === "tools" && endpoint.toolsModel) return endpoint.toolsModel;
+
+  try {
+    const resource = getResourceProfile(endpoint.resourceAlias, rootDir);
+    const resourceModel = selectModel(resource, purpose);
+    if (resourceModel !== resource.defaultModel) return resourceModel;
+  } catch {
+    // Resource binding not resolved — use endpoint default
+  }
+
+  return endpoint.model;
 }
 
 function pickFirst(

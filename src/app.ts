@@ -12,11 +12,14 @@ import {
   resolveEndpointConfig,
   saveConfig,
   setEndpointModel,
+  setEndpointModelPolicy,
   setEndpointNickname,
+  setEndpointPurposeModel,
   setEndpointResourceAlias,
   setEndpointInstructions,
   setOrchestratorName,
-  setEndpointVoicePreset
+  setEndpointVoicePreset,
+  setPreference
 } from "./config.ts";
 import { getEnvNumber } from "./env.ts";
 import {
@@ -68,6 +71,7 @@ import { probeResourceModels } from "./resource-discovery.ts";
 import {
   addResource,
   chooseResourceForTask,
+  detectTaskPurpose,
   getResourceCapacitySummary,
   getOrchestratorResourceAlias,
   getResourceEndpoint,
@@ -76,6 +80,7 @@ import {
   listResources,
   removeResource,
   renderResourceInventory,
+  selectModelForEndpoint,
   updateResource
 } from "./resources.ts";
 import {
@@ -120,6 +125,11 @@ import type {
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
 import { searchReddit } from "./reddit.ts";
+import { searchWeb, isAllowedSearchTopic } from "./web-search.ts";
+import { fetchPageText } from "./page-fetcher.ts";
+import { fetchWeather } from "./weather.ts";
+import { fetchBenLive } from "./benlive.ts";
+import { fetchWebsite } from "./website.ts";
 import { formatCurrentDateTime, titleCase } from "./utils.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
@@ -140,6 +150,8 @@ const INTERNAL_MEMORY_PATH_HINT_PATTERN =
 const INTERNAL_WIKIPEDIA_QUERY_PATTERN =
   /\b(crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\s+is\s+required)?|telemetry|hud|prompt|resource alias|erin|zora|min|pav)\b/i;
 const INTERNAL_REDDIT_QUERY_PATTERN =
+  /\b(crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias|erin|zora|min|pav)\b/i;
+const INTERNAL_SEARCH_QUERY_PATTERN =
   /\b(crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias|erin|zora|min|pav)\b/i;
 const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
 const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
@@ -240,6 +252,97 @@ function parseRedditRequest(content: string): { replyText: string; query?: strin
     replyText,
     query
   };
+}
+
+function parseSearchRequest(content: string): { replyText: string; query?: string; topic?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)SEARCH\[([^\]]+)\]:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return { replyText: trimmedContent };
+  }
+
+  const topic = match[1].trim().toLowerCase();
+  const query = match[2].trim().replace(/^[""]|[""]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  if (!query || !topic) {
+    return { replyText: trimmedContent };
+  }
+
+  return { replyText, query, topic };
+}
+
+function parseSearchSelectResponse(content: string): { replyText: string; indices?: number[] } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)SEARCH_SELECT:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return { replyText: trimmedContent };
+  }
+
+  const raw = match[1].trim();
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+  const indices = raw
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n >= 1);
+
+  if (indices.length === 0) {
+    return { replyText: trimmedContent };
+  }
+
+  return { replyText, indices };
+}
+
+function parseWeatherRequest(content: string): { replyText: string; location?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)WEATHER:\s*(.*)\s*$/is);
+
+  if (!match) {
+    return { replyText: trimmedContent };
+  }
+
+  const location = match[1].trim().replace(/^[""]|[""]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  return { replyText, location: location || undefined };
+}
+
+function parseBenLiveRequest(content: string): { replyText: string; topicOrPath?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)BENLIVE:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return { replyText: trimmedContent };
+  }
+
+  const topicOrPath = match[1].trim().replace(/^[""]|[""]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  if (!topicOrPath) {
+    return { replyText: trimmedContent };
+  }
+
+  return { replyText, topicOrPath };
+}
+
+function parseWebsiteRequest(content: string): { replyText: string; topicOrPath?: string } {
+  const trimmedContent = content.trim();
+  const match = trimmedContent.match(/(?:^|\n)WEBSITE:\s*(.+)\s*$/is);
+
+  if (!match) {
+    return { replyText: trimmedContent };
+  }
+
+  const topicOrPath = match[1].trim().replace(/^[""]|[""]$/g, "");
+  const replyText = trimmedContent.slice(0, match.index).trimEnd();
+
+  if (!topicOrPath) {
+    return { replyText: trimmedContent };
+  }
+
+  return { replyText, topicOrPath };
 }
 
 function parseQueuedTasks(content: string): {
@@ -1646,7 +1749,7 @@ export class CrustyApp {
       `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
       `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
       `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
-      "Commands: /compact, /reset, /clear, /exit"
+      "Commands: /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
     ];
   }
 
@@ -1978,6 +2081,426 @@ export class CrustyApp {
     }
   }
 
+  /* ---- Web Search Tool ---- */
+
+  private async requestWebSearch(
+    query: string,
+    topic: string,
+    scope: string,
+    actor: string
+  ): Promise<import("./types.ts").WebSearchResult> {
+    try {
+      const result = await searchWeb(query, topic, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "search.web",
+          scope,
+          summary: `Web search "${query}" (${topic}) returned ${result.entries.length} result(s).`,
+          success: true,
+          actor,
+          durationMs: result.durationMs,
+          responseChars: result.chunks.join("\n\n").length,
+          responseText: result.chunks.join("\n\n"),
+          metadata: { query, topic }
+        },
+        this.rootDir
+      );
+      return result;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "search.web",
+          scope,
+          summary: `Web search "${query}" (${topic}) failed.`,
+          success: false,
+          actor,
+          error: (error as Error).message,
+          metadata: { query, topic }
+        },
+        this.rootDir
+      );
+      throw error;
+    }
+  }
+
+  private async resolveSearchTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsedRequest = parseSearchRequest(options.rawReply);
+    if (!parsedRequest.query || !parsedRequest.topic) {
+      return options.rawReply;
+    }
+
+    if (
+      (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
+      INTERNAL_SEARCH_QUERY_PATTERN.test(parsedRequest.query)
+    ) {
+      return parsedRequest.replyText || options.rawReply;
+    }
+
+    if (!isAllowedSearchTopic(parsedRequest.topic)) {
+      this.warn(`Web search topic "${parsedRequest.topic}" not allowed, stripping.`);
+      return parsedRequest.replyText || options.rawReply;
+    }
+
+    try {
+      const searchResult = await this.requestWebSearch(
+        parsedRequest.query,
+        parsedRequest.topic,
+        `${options.scope}.search`,
+        options.actor
+      );
+
+      // Multi-turn: present results, ask model to select, then fetch pages
+      const selectionMessages: ChatMessage[] = [
+        ...options.messages,
+        { role: "assistant", content: options.rawReply },
+        ...searchResult.chunks.map((chunk) => ({
+          role: "system" as const,
+          content: chunk
+        })),
+        {
+          role: "user",
+          content:
+            "Review the search results above. Select the most relevant results by ending with a line in the format: SEARCH_SELECT: 1,3 (comma-separated result numbers). If none are relevant, just provide your answer without a SEARCH_SELECT line."
+        }
+      ];
+
+      const selectionReply = await this.callModel({
+        scope: `${options.scope}.search-select`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Selecting search results for "${parsedRequest.query}".`,
+        messages: selectionMessages
+      });
+
+      const selection = parseSearchSelectResponse(selectionReply.text);
+      if (!selection.indices || selection.indices.length === 0) {
+        // Model declined to select — use search summary as final
+        return parseSearchRequest(selectionReply.text).replyText || selectionReply.text;
+      }
+
+      // Fetch selected pages
+      const selectedEntries = selection.indices
+        .filter((i) => i <= searchResult.entries.length)
+        .map((i) => searchResult.entries[i - 1]);
+
+      const pageTexts: string[] = [];
+      for (const entry of selectedEntries) {
+        try {
+          const page = await fetchPageText(entry.url, this.fetchFn);
+          pageTexts.push(`Page: ${entry.title}\nURL: ${entry.url}\n\n${page.text}`);
+        } catch {
+          pageTexts.push(`Page: ${entry.title}\nURL: ${entry.url}\n\n(Failed to fetch)`);
+        }
+      }
+
+      // Final follow-up with fetched pages
+      const followUp = await this.callModel({
+        scope: `${options.scope}.search-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after web search "${parsedRequest.query}".`,
+        messages: [
+          ...options.messages,
+          { role: "assistant", content: options.rawReply },
+          ...pageTexts.map((text) => ({
+            role: "system" as const,
+            content: text.slice(0, 4000)
+          })),
+          {
+            role: "user",
+            content:
+              "Use the fetched web page content above to answer the original question. Produce the final answer now. Do not emit another SEARCH line."
+          }
+        ]
+      });
+
+      return parseSearchRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      this.warn(`Web search failed: ${(error as Error).message}`);
+      return parsedRequest.replyText || options.rawReply;
+    }
+  }
+
+  /* ---- Weather Tool ---- */
+
+  private async resolveWeatherTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsed = parseWeatherRequest(options.rawReply);
+    if (parsed.location === undefined && !options.rawReply.match(/(?:^|\n)WEATHER:\s*$/im)) {
+      return options.rawReply;
+    }
+
+    // Resolve location: explicit > preferences city > preferences zip
+    let location = parsed.location;
+    if (!location) {
+      const prefs = this.config.preferences;
+      location = prefs?.city || prefs?.zipCode;
+    }
+    if (!location) {
+      this.warn("Weather requested but no location provided and no default configured.");
+      return parsed.replyText || options.rawReply;
+    }
+
+    try {
+      const weather = await fetchWeather(location, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "weather.fetch",
+          scope: `${options.scope}.weather`,
+          summary: `Weather for "${location}" fetched.`,
+          success: true,
+          actor: options.actor,
+          durationMs: weather.durationMs,
+          responseChars: weather.summary.length,
+          responseText: weather.summary,
+          metadata: { location }
+        },
+        this.rootDir
+      );
+
+      const followUp = await this.callModel({
+        scope: `${options.scope}.weather-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after weather fetch for "${location}".`,
+        messages: [
+          ...options.messages,
+          { role: "assistant", content: options.rawReply },
+          ...weather.chunks.map((chunk) => ({
+            role: "system" as const,
+            content: chunk
+          })),
+          {
+            role: "user",
+            content:
+              "Use the weather data above to continue. Produce the final answer now. Do not emit another WEATHER line."
+          }
+        ]
+      });
+
+      return parseWeatherRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "weather.fetch",
+          scope: `${options.scope}.weather`,
+          summary: `Weather for "${location}" failed.`,
+          success: false,
+          actor: options.actor,
+          error: (error as Error).message,
+          metadata: { location }
+        },
+        this.rootDir
+      );
+      this.warn(`Weather fetch failed: ${(error as Error).message}`);
+      return parsed.replyText || options.rawReply;
+    }
+  }
+
+  /* ---- Ben Live Tool ---- */
+
+  private async resolveBenLiveTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsed = parseBenLiveRequest(options.rawReply);
+    if (!parsed.topicOrPath) {
+      return options.rawReply;
+    }
+
+    try {
+      const result = await fetchBenLive(parsed.topicOrPath, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "benlive.fetch",
+          scope: `${options.scope}.benlive`,
+          summary: `Ben Live fetch "${parsed.topicOrPath}" completed.`,
+          success: true,
+          actor: options.actor,
+          durationMs: result.durationMs,
+          responseChars: result.text.length,
+          responseText: result.text.slice(0, 500),
+          metadata: { path: result.path, url: result.url }
+        },
+        this.rootDir
+      );
+
+      const followUp = await this.callModel({
+        scope: `${options.scope}.benlive-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after Ben Live fetch "${parsed.topicOrPath}".`,
+        messages: [
+          ...options.messages,
+          { role: "assistant", content: options.rawReply },
+          ...result.chunks.map((chunk) => ({
+            role: "system" as const,
+            content: chunk
+          })),
+          {
+            role: "user",
+            content:
+              "Use the Ben Live content above to continue. Produce the final answer now. Do not emit another BENLIVE line."
+          }
+        ]
+      });
+
+      return parseBenLiveRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "benlive.fetch",
+          scope: `${options.scope}.benlive`,
+          summary: `Ben Live fetch "${parsed.topicOrPath}" failed.`,
+          success: false,
+          actor: options.actor,
+          error: (error as Error).message,
+          metadata: { topicOrPath: parsed.topicOrPath }
+        },
+        this.rootDir
+      );
+      this.warn(`Ben Live fetch failed: ${(error as Error).message}`);
+      return parsed.replyText || options.rawReply;
+    }
+  }
+
+  /* ---- Website Tool ---- */
+
+  private async resolveWebsiteTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsed = parseWebsiteRequest(options.rawReply);
+    if (!parsed.topicOrPath) {
+      return options.rawReply;
+    }
+
+    const baseUrl = this.config.preferences?.personalWebsiteUrl;
+    if (!baseUrl) {
+      this.warn("WEBSITE tool used but personalWebsiteUrl not configured.");
+      return parsed.replyText || options.rawReply;
+    }
+
+    try {
+      const result = await fetchWebsite(baseUrl, parsed.topicOrPath, this.fetchFn);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "website.fetch",
+          scope: `${options.scope}.website`,
+          summary: `Website fetch "${parsed.topicOrPath}" completed.`,
+          success: true,
+          actor: options.actor,
+          durationMs: result.durationMs,
+          responseChars: result.text.length,
+          responseText: result.text.slice(0, 500),
+          metadata: { path: result.path, url: result.url }
+        },
+        this.rootDir
+      );
+
+      const followUp = await this.callModel({
+        scope: `${options.scope}.website-followup`,
+        actor: options.actor,
+        endpoint: options.endpoint,
+        resourceAlias: options.resourceAlias,
+        target: options.target,
+        summary: `Follow-up after website fetch "${parsed.topicOrPath}".`,
+        messages: [
+          ...options.messages,
+          { role: "assistant", content: options.rawReply },
+          ...result.chunks.map((chunk) => ({
+            role: "system" as const,
+            content: chunk
+          })),
+          {
+            role: "user",
+            content:
+              "Use the website content above to continue. Produce the final answer now. Do not emit another WEBSITE line."
+          }
+        ]
+      });
+
+      return parseWebsiteRequest(followUp.text).replyText || followUp.text;
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "website.fetch",
+          scope: `${options.scope}.website`,
+          summary: `Website fetch "${parsed.topicOrPath}" failed.`,
+          success: false,
+          actor: options.actor,
+          error: (error as Error).message,
+          metadata: { topicOrPath: parsed.topicOrPath }
+        },
+        this.rootDir
+      );
+      this.warn(`Website fetch failed: ${(error as Error).message}`);
+      return parsed.replyText || options.rawReply;
+    }
+  }
+
+  /* ---- Unified External Tools Resolution ---- */
+
+  private async resolveExternalTools(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    let reply = options.rawReply;
+    reply = await this.resolveWikipediaTool({ ...options, rawReply: reply });
+    reply = await this.resolveRedditTool({ ...options, rawReply: reply });
+    reply = await this.resolveSearchTool({ ...options, rawReply: reply });
+    reply = await this.resolveWeatherTool({ ...options, rawReply: reply });
+    reply = await this.resolveBenLiveTool({ ...options, rawReply: reply });
+    reply = await this.resolveWebsiteTool({ ...options, rawReply: reply });
+    return reply;
+  }
+
   private async compactIfNeeded(force = false): Promise<boolean> {
     const summaryAlias = this.config.defaultEndpoint;
     const endpoint = this.getEndpoint(summaryAlias);
@@ -2088,6 +2611,14 @@ export class CrustyApp {
     }
 
     const endpoint = this.getEndpoint(normalizedAlias);
+
+    if (endpoint.modelPolicy === "auto") {
+      const purpose = detectTaskPurpose(options.taskPrompt);
+      if (purpose !== "default") {
+        endpoint.model = selectModelForEndpoint(endpoint, purpose, this.rootDir);
+      }
+    }
+
     const recentMessages = getConversationMessages(this.sessions).slice(
       getConversationCompactedUntil(this.sessions)
     );
@@ -2116,16 +2647,7 @@ export class CrustyApp {
           summary: `Participant reply requested from @${normalizedAlias}.`
         })
       ).text;
-      rawAssistantReply = await this.resolveWikipediaTool({
-        scope: "chat.participant",
-        actor: `participant:${normalizedAlias}`,
-        endpoint,
-        resourceAlias: endpoint.resourceAlias,
-        target: normalizedAlias,
-        messages: outgoingMessages,
-        rawReply: rawAssistantReply
-      });
-      rawAssistantReply = await this.resolveRedditTool({
+      rawAssistantReply = await this.resolveExternalTools({
         scope: "chat.participant",
         actor: `participant:${normalizedAlias}`,
         endpoint,
@@ -3041,16 +3563,7 @@ export class CrustyApp {
           summary: `Agent reply requested from @${agent.slug}.`
         })
       ).text;
-      rawReply = await this.resolveWikipediaTool({
-        scope: "agent.chat",
-        actor: `agent:${agent.slug}`,
-        endpoint,
-        resourceAlias: selection.alias,
-        target: agent.slug,
-        messages: outgoingMessages,
-        rawReply
-      });
-      rawReply = await this.resolveRedditTool({
+      rawReply = await this.resolveExternalTools({
         scope: "agent.chat",
         actor: `agent:${agent.slug}`,
         endpoint,
@@ -3168,16 +3681,7 @@ export class CrustyApp {
           summary: "Drafting the auto queue backlog."
         })
       ).text;
-      draftReply = await this.resolveWikipediaTool({
-        scope: "auto.queue-fill.draft",
-        actor: "orchestrator",
-        endpoint: draftEndpoint,
-        resourceAlias: orchestratorAlias,
-        target: this.getOrchestratorName(),
-        messages: draftMessages,
-        rawReply: draftReply
-      });
-      draftReply = await this.resolveRedditTool({
+      draftReply = await this.resolveExternalTools({
         scope: "auto.queue-fill.draft",
         actor: "orchestrator",
         endpoint: draftEndpoint,
@@ -3244,16 +3748,7 @@ export class CrustyApp {
             summary: `Reviewing the drafted auto queue backlog with @${reviewerResource.alias}.`
           })
         ).text;
-        reviewFeedback = await this.resolveWikipediaTool({
-          scope: "auto.queue-fill.review",
-          actor: "orchestrator",
-          endpoint: reviewEndpoint,
-          resourceAlias: reviewerResource.alias,
-          target: reviewerResource.alias,
-          messages: reviewMessages,
-          rawReply: reviewFeedback
-        });
-        reviewFeedback = await this.resolveRedditTool({
+        reviewFeedback = await this.resolveExternalTools({
           scope: "auto.queue-fill.review",
           actor: "orchestrator",
           endpoint: reviewEndpoint,
@@ -3297,16 +3792,7 @@ export class CrustyApp {
             : "Finalizing the auto queue backlog without a secondary reviewer."
         })
       ).text;
-      finalReply = await this.resolveWikipediaTool({
-        scope: "auto.queue-fill.finalize",
-        actor: "orchestrator",
-        endpoint: draftEndpoint,
-        resourceAlias: orchestratorAlias,
-        target: this.getOrchestratorName(),
-        messages: finalizeMessages,
-        rawReply: finalReply
-      });
-      finalReply = await this.resolveRedditTool({
+      finalReply = await this.resolveExternalTools({
         scope: "auto.queue-fill.finalize",
         actor: "orchestrator",
         endpoint: draftEndpoint,
@@ -3490,16 +3976,7 @@ export class CrustyApp {
           summary: `Processing auto task #${task.id}.`
         })
       ).text;
-      rawReply = await this.resolveWikipediaTool({
-        scope: "auto.task",
-        actor: "orchestrator",
-        endpoint,
-        resourceAlias: selection.alias,
-        target: `task:${task.id}`,
-        messages: outgoingMessages,
-        rawReply
-      });
-      rawReply = await this.resolveRedditTool({
+      rawReply = await this.resolveExternalTools({
         scope: "auto.task",
         actor: "orchestrator",
         endpoint,
@@ -4304,9 +4781,18 @@ export class CrustyApp {
 
       if (command.type === "model.get") {
         const endpoint = this.config.endpoints[this.runtime.currentEndpoint];
+        const policyLabel = endpoint.modelPolicy === "auto" ? "auto" : "fixed";
+        const purposeModels = [
+          endpoint.reasoningModel ? `reasoning=${endpoint.reasoningModel}` : null,
+          endpoint.codingModel ? `coding=${endpoint.codingModel}` : null,
+          endpoint.toolsModel ? `tools=${endpoint.toolsModel}` : null,
+        ].filter(Boolean);
+        const purposeSuffix = purposeModels.length > 0
+          ? ` | ${purposeModels.join(", ")}`
+          : "";
         return {
           lines: [
-            `Current participant: @${this.runtime.currentEndpoint} (${endpoint.nickname}) using @${endpoint.resourceAlias}/${endpoint.model}. Plain messages still go to @${this.config.defaultEndpoint}.`
+            `Current participant: @${this.runtime.currentEndpoint} (${endpoint.nickname}) using @${endpoint.resourceAlias}/${endpoint.model} [policy=${policyLabel}${purposeSuffix}]. Plain messages still go to @${this.config.defaultEndpoint}.`
           ],
           errors: [],
           shouldExit: false
@@ -4330,6 +4816,53 @@ export class CrustyApp {
           await this.persistConfig();
           return {
             lines: [`Model for @${command.alias} is now ${this.config.endpoints[command.alias].model}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "model.policy") {
+        try {
+          this.config = setEndpointModelPolicy(this.config, command.alias, command.policy);
+          await this.persistConfig();
+          const endpoint = this.config.endpoints[command.alias];
+          const policyLabel = command.policy === "auto"
+            ? "auto (purpose-based model switching enabled)"
+            : "fixed (static model)";
+          return {
+            lines: [`Model policy for @${command.alias} is now ${policyLabel}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "model.purpose") {
+        try {
+          this.config = setEndpointPurposeModel(
+            this.config,
+            command.alias,
+            command.purpose,
+            command.model
+          );
+          await this.persistConfig();
+          return {
+            lines: [
+              `${command.purpose} model for @${command.alias} is now ${command.model}. Set policy to "auto" to enable: /model ${command.alias} policy auto`
+            ],
             errors: [],
             shouldExit: false
           };
@@ -4407,6 +4940,41 @@ export class CrustyApp {
           await this.persistConfig();
           return {
             lines: [`@${alias} is now bound to resource @${this.config.endpoints[alias].resourceAlias}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "preferences.get") {
+        const prefs = this.config.preferences;
+        if (!prefs || Object.keys(prefs).length === 0) {
+          return {
+            lines: ["No preferences configured. Use /preferences set <key> <value>"],
+            errors: [],
+            shouldExit: false
+          };
+        }
+        const lines = ["User preferences:"];
+        if (prefs.zipCode) lines.push(`  zipCode: ${prefs.zipCode}`);
+        if (prefs.city) lines.push(`  city: ${prefs.city}`);
+        if (prefs.personalWebsiteUrl) lines.push(`  personalWebsiteUrl: ${prefs.personalWebsiteUrl}`);
+        return { lines, errors: [], shouldExit: false };
+      }
+
+      if (command.type === "preferences.set") {
+        try {
+          this.config = setPreference(this.config, command.key, command.value);
+          await saveConfig(this.config, this.rootDir);
+          const display = command.value.trim() || "(cleared)";
+          return {
+            lines: [`Preference ${command.key} set to: ${display}`],
             errors: [],
             shouldExit: false
           };
