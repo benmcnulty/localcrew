@@ -90,8 +90,8 @@ Current observability surfaces:
 
 - `/status`: point-in-time orchestration summary
 - `/hud`: live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs
-- `/explore`: internal and external-memory file browser
-- local HTTP API for browser-based status, queue, telemetry, audit, explorer, command, and edit flows
+- `/explore`: internal and external-memory file browser with full-text search
+- local HTTP API for browser-based status, queue, telemetry, audit, explorer, search, command, and edit flows
 - local HTTP API for browser-based participant/resource config, direct chat, and orchestrator profile editing
 - browser UI served at `/ui` from the same local API
 - terminal background output in `/auto`

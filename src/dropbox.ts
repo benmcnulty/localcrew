@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { getLocalExternalMemoryDir } from "./external-memory.ts";
+import { withFileLock } from "./storage.ts";
 
 export type DropboxStage = "inbox" | "active" | "outbox";
 
@@ -244,27 +245,31 @@ export async function ingestNextInboxDocument(
   rootDir = process.cwd()
 ): Promise<IngestedDropboxDocument | null> {
   const paths = await ensureDropboxLayout(rootDir);
-  const [nextEntry] = await walkStage("inbox", paths.inboxDir);
-  if (!nextEntry) {
-    return null;
-  }
+  const lockPath = join(paths.inboxDir, ".gitignore");
 
-  const sourceContent = await readFile(nextEntry.path, "utf8");
-  const targetPath = await getUniqueStagePath(paths.activeDir, nextEntry.relativePath);
-  await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, withStatusTag(sourceContent, "active"), "utf8");
-  await rm(nextEntry.path, { force: true });
+  return withFileLock(lockPath, async () => {
+    const [nextEntry] = await walkStage("inbox", paths.inboxDir);
+    if (!nextEntry) {
+      return null;
+    }
 
-  return {
-    sourceStage: "inbox",
-    stage: "active",
-    name: targetPath.split("/").at(-1) ?? nextEntry.name,
-    relativePath: relative(paths.activeDir, targetPath).replaceAll("\\", "/"),
-    sourcePath: nextEntry.path,
-    path: targetPath,
-    statusTag: "active",
-    content: withStatusTag(sourceContent, "active")
-  };
+    const sourceContent = await readFile(nextEntry.path, "utf8");
+    const targetPath = await getUniqueStagePath(paths.activeDir, nextEntry.relativePath);
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, withStatusTag(sourceContent, "active"), "utf8");
+    await rm(nextEntry.path, { force: true });
+
+    return {
+      sourceStage: "inbox",
+      stage: "active",
+      name: targetPath.split("/").at(-1) ?? nextEntry.name,
+      relativePath: relative(paths.activeDir, targetPath).replaceAll("\\", "/"),
+      sourcePath: nextEntry.path,
+      path: targetPath,
+      statusTag: "active",
+      content: withStatusTag(sourceContent, "active"),
+    };
+  });
 }
 
 export async function moveActiveDocumentToOutbox(

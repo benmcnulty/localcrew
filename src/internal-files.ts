@@ -16,6 +16,23 @@ export interface InternalFileDetail {
   modifiedAt: string;
 }
 
+export interface InternalSearchMatch {
+  /** Absolute path to the file */
+  path: string;
+  /** Path relative to its allowed root */
+  relativePath: string;
+  /** 1-based line number of the match */
+  line: number;
+  /** The full text of the matching line (trimmed) */
+  text: string;
+}
+
+export interface InternalSearchResult {
+  query: string;
+  matches: InternalSearchMatch[];
+  truncated: boolean;
+}
+
 function sortEntries(
   entries: Array<{ name: string; isDirectory(): boolean }>
 ): Array<{ name: string; isDirectory(): boolean }> {
@@ -133,4 +150,94 @@ export async function getInternalFileDetails(
   );
 
   return Object.fromEntries(details);
+}
+
+const MAX_SEARCH_MATCHES = 100;
+const MAX_FILE_SIZE_BYTES = 512 * 1024; // Skip files > 512 KB
+
+async function collectTextFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+
+  async function walk(current: string): Promise<void> {
+    let entries: Awaited<ReturnType<typeof readdir>>;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const child = resolve(current, entry.name);
+      if (entry.isDirectory()) {
+        await walk(child);
+      } else if (entry.isFile()) {
+        files.push(child);
+      }
+    }
+  }
+
+  await walk(dir);
+  return files;
+}
+
+/**
+ * Case-insensitive text search across `.crusty/system/` and `external-memory/`.
+ * Returns up to {@link MAX_SEARCH_MATCHES} matching lines with file paths and line numbers.
+ * Binary files and files larger than 512 KB are skipped.
+ */
+export async function searchInternalFiles(
+  query: string,
+  rootDir = process.cwd(),
+): Promise<InternalSearchResult> {
+  if (!query || query.trim().length === 0) {
+    return { query, matches: [], truncated: false };
+  }
+
+  const systemRoot = resolve(getStoragePaths(rootDir).systemDir);
+  const externalRoot = resolve(getLocalExternalMemoryDir(rootDir));
+  const roots = [
+    { path: systemRoot, label: "system" },
+    { path: externalRoot, label: "external-memory" },
+  ];
+
+  const needle = query.toLowerCase();
+  const matches: InternalSearchMatch[] = [];
+  let truncated = false;
+
+  for (const root of roots) {
+    if (truncated) break;
+    const files = await collectTextFiles(root.path);
+
+    for (const filePath of files) {
+      if (truncated) break;
+      try {
+        const fileStat = await stat(filePath);
+        if (fileStat.size > MAX_FILE_SIZE_BYTES) continue;
+
+        const content = await readFile(filePath, "utf8");
+        // Skip likely-binary files (contains null bytes in first 8 KB)
+        if (content.slice(0, 8192).includes("\0")) continue;
+
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(needle)) {
+            matches.push({
+              path: filePath,
+              relativePath: relative(root.path, filePath),
+              line: i + 1,
+              text: lines[i].trimEnd(),
+            });
+            if (matches.length >= MAX_SEARCH_MATCHES) {
+              truncated = true;
+              break;
+            }
+          }
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  }
+
+  return { query, matches, truncated };
 }
