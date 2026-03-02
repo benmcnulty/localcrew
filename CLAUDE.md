@@ -70,7 +70,7 @@ Key local state files:
 | `commands.ts` | Parse slash-command input → typed `Command` union |
 | `types.ts` | All shared TypeScript types |
 | `config.ts` | Load/save participant config from `.crusty/config.json` |
-| `resources.ts` | Resource CRUD, tier-based routing, capacity summary |
+| `resources.ts` | Resource CRUD, tier-based routing, capacity summary, network topology |
 | `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
 | `messages.ts` | Build prompt message arrays for chat/auto/agent contexts |
 | `ollama.ts` | HTTP calls to inference endpoints (all three provider styles) |

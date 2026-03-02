@@ -76,13 +76,16 @@ import {
   addResource,
   chooseResourceForTask,
   detectTaskPurpose,
+  getEffectiveResourceRole,
   getResourceCapacitySummary,
   getOrchestratorResourceAlias,
   getResourceEndpoint,
   getResourceProfile,
   getResourceProfilesByTier,
+  isOrchestratorCapable,
   listResources,
   removeResource,
+  renderNetworkTopology,
   renderResourceInventory,
   selectModelForEndpoint,
   updateResource
@@ -125,7 +128,8 @@ import type {
   WorkflowRequest,
   ChatMessage,
   OllamaChatResult,
-  ResourceSyncReport
+  ResourceSyncReport,
+  ResourceRole
 } from "./types.ts";
 import { getVoicePreset, VOICE_PRESETS } from "./voices.ts";
 import { searchWikipedia } from "./wikipedia.ts";
@@ -152,12 +156,20 @@ const LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN =
   /^(?:implement|review|compare|evaluate|check|analyze|analysis|fix|optimize|improve|research|plan|draft|refine|update|test|verify|document|write|summarize|summarise|create|build|design|explore|investigate|audit)$/i;
 const INTERNAL_MEMORY_PATH_HINT_PATTERN =
   /(?:^|\/)(?:internal|internal-memory|memory|index|indexes|summary|summaries|heuristics|routing|telemetry|diagnostics|notes|verification|plans)(?:\/|[-_])/i;
-const INTERNAL_WIKIPEDIA_QUERY_PATTERN =
-  /\b(crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\s+is\s+required)?|telemetry|hud|prompt|resource alias|erin|zora|min|pav)\b/i;
-const INTERNAL_REDDIT_QUERY_PATTERN =
-  /\b(crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias|erin|zora|min|pav)\b/i;
-const INTERNAL_SEARCH_QUERY_PATTERN =
-  /\b(crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias|erin|zora|min|pav)\b/i;
+const INTERNAL_WIKIPEDIA_SYSTEM_TERMS =
+  "crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\\s+is\\s+required)?|telemetry|hud|prompt|resource alias";
+const INTERNAL_REDDIT_SYSTEM_TERMS =
+  "crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
+const INTERNAL_SEARCH_SYSTEM_TERMS =
+  "crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
+
+function buildInternalQueryPattern(systemTerms: string, dynamicAliases: string[]): RegExp {
+  const escaped = dynamicAliases
+    .filter((a) => a.length > 0)
+    .map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const aliasPart = escaped.length > 0 ? `|${escaped.join("|")}` : "";
+  return new RegExp(`\\b(${systemTerms}${aliasPart})\\b`, "i");
+}
 const DEFAULT_AUTO_PULSE_INTERVAL_MS = 1500;
 const DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT = 12_000;
 
@@ -746,6 +758,18 @@ export class CrustyApp {
 
   isAutoBusy(): boolean {
     return this.autoCyclePromise !== null;
+  }
+
+  /** Collect all participant + resource aliases for internal-query filtering. */
+  private getNetworkAliases(): string[] {
+    const aliases = new Set<string>();
+    for (const alias of Object.keys(this.config.endpoints)) {
+      aliases.add(alias);
+    }
+    for (const r of listResources(this.rootDir)) {
+      aliases.add(r.alias);
+    }
+    return [...aliases];
   }
 
   shouldAutoPulse(): boolean {
@@ -1809,7 +1833,7 @@ export class CrustyApp {
       `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
       `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
       `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
-      "Commands: /daily [start|finish], /promote <resource>, /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
+      "Commands: /daily [start|finish], /promote <resource>, /topology [assign|delegate|undelegate], /preferences [set <key> <value>], /compact, /reset, /clear, /exit"
     ];
   }
 
@@ -2014,7 +2038,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      INTERNAL_WIKIPEDIA_QUERY_PATTERN.test(parsedToolRequest.query)
+      buildInternalQueryPattern(INTERNAL_WIKIPEDIA_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedToolRequest.query)
     ) {
       return parsedToolRequest.replyText || options.rawReply;
     }
@@ -2119,7 +2143,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      INTERNAL_REDDIT_QUERY_PATTERN.test(parsedToolRequest.query)
+      buildInternalQueryPattern(INTERNAL_REDDIT_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedToolRequest.query)
     ) {
       return parsedToolRequest.replyText || options.rawReply;
     }
@@ -2222,7 +2246,7 @@ export class CrustyApp {
 
     if (
       (options.scope.startsWith("auto.") || options.scope.startsWith("agent.")) &&
-      INTERNAL_SEARCH_QUERY_PATTERN.test(parsedRequest.query)
+      buildInternalQueryPattern(INTERNAL_SEARCH_SYSTEM_TERMS, this.getNetworkAliases()).test(parsedRequest.query)
     ) {
       return parsedRequest.replyText || options.rawReply;
     }
@@ -3852,11 +3876,15 @@ export class CrustyApp {
       draftTasks.length > 0
         ? draftTasks.map((task) => `[${task.priority}] ${task.content}`).join("\n")
         : draftReply.trim();
+    // Prefer an orchestrator-capable resource as reviewer, fall back to any non-primary top-tier
+    const allResources = listResources(this.rootDir);
     const reviewerResource =
-      listResources(this.rootDir).find(
-        (resource) => resource.alias === "zora" && resource.alias !== orchestratorAlias
+      allResources.find(
+        (resource) =>
+          resource.alias !== orchestratorAlias &&
+          getEffectiveResourceRole(resource, orchestratorAlias) === "orchestrator"
       ) ??
-      listResources(this.rootDir).find(
+      allResources.find(
         (resource) => resource.tier === "top" && resource.alias !== orchestratorAlias
       );
 
@@ -4018,11 +4046,15 @@ export class CrustyApp {
     let routingFallbackWarning: string | null = null;
     try {
       selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
-        resourceLoad
+        resourceLoad,
+        primaryOrchestratorAlias: this.resolveOrchestratorAlias()
       });
     } catch (error) {
       const invalidRequestedResource = task.requestedResource;
-      selection = chooseResourceForTask(task.content, "auto", this.rootDir, { resourceLoad });
+      selection = chooseResourceForTask(task.content, "auto", this.rootDir, {
+        resourceLoad,
+        primaryOrchestratorAlias: this.resolveOrchestratorAlias()
+      });
       task.requestedResource = undefined;
       routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${selection.alias}.`;
       await appendAuditEvent(
@@ -4084,6 +4116,30 @@ export class CrustyApp {
     }
 
     const resourceProfile = getResourceProfile(selection.alias, this.rootDir);
+
+    // Add delegation context when task is routed to a sub-orchestrator
+    if (selection.delegateToOrchestrator && selection.availableSubordinates && selection.availableSubordinates.length > 0) {
+      task.delegatedOrchestrator = selection.delegateToOrchestrator;
+      task.subordinateResources = selection.availableSubordinates;
+      const subordinateDetails = selection.availableSubordinates.map((alias) => {
+        try {
+          const sub = getResourceProfile(alias, this.rootDir);
+          return `  - @${alias} (${sub.label}): ${sub.tier} tier, ${sub.maxContextTokens ?? "?"} ctx, model: ${sub.defaultModel}`;
+        } catch {
+          return `  - @${alias}: unknown`;
+        }
+      });
+      extraContextBlocks.push([
+        "## Sub-Orchestrator Delegation",
+        `You are operating as a sub-orchestrator for this task. You have been delegated this complex assignment by the primary orchestrator (@${this.resolveOrchestratorAlias()}).`,
+        `You may coordinate the following subordinate agent resources to help complete this task:`,
+        ...subordinateDetails,
+        "",
+        "Use these subordinates for structured, indexing, and smaller sub-tasks while you handle reasoning, coordination, and synthesis.",
+        "Report your final result clearly. The primary orchestrator will integrate your output."
+      ].join("\n"));
+    }
+
     const outgoingMessages = buildAutoTaskMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -5227,15 +5283,27 @@ export class CrustyApp {
       if (command.type === "promote") {
         try {
           const resource = getResourceProfile(command.alias, this.rootDir);
-          if (resource.tier !== "top") {
+          if (!isOrchestratorCapable(resource)) {
             return {
               lines: [],
               errors: [
-                `Resource @${resource.alias} is tier "${resource.tier}". Only top-tier resources can be promoted to orchestrator.`
+                `Resource @${resource.alias} is tier "${resource.tier}" with ${resource.maxContextTokens ?? 0} context tokens. Only top-tier resources with 16k+ context can be promoted to orchestrator.`
               ],
               shouldExit: false
             };
           }
+          // Mark previous primary as regular orchestrator if different
+          const previousAlias = this.resolveOrchestratorAlias();
+          if (previousAlias !== command.alias) {
+            try {
+              const previous = getResourceProfile(previousAlias, this.rootDir);
+              if (previous.resourceRole === "primary-orchestrator") {
+                await updateResource(previousAlias, { ...previous, resourceRole: "orchestrator" }, this.rootDir);
+              }
+            } catch { /* previous resource may not exist */ }
+          }
+          // Set new primary
+          await updateResource(command.alias, { ...resource, resourceRole: "primary-orchestrator" }, this.rootDir);
           this.config = { ...this.config, orchestratorResourceAlias: resource.alias };
           await this.persistConfig();
           return {
@@ -5244,6 +5312,116 @@ export class CrustyApp {
               `All orchestrator-routed tasks will now use this resource.`,
               `Use /promote with the original alias to revert, or remove orchestratorResourceAlias from config.json.`
             ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "topology") {
+        const topology = renderNetworkTopology(this.resolveOrchestratorAlias(), this.rootDir);
+        return {
+          lines: topology.split("\n"),
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "topology.assign") {
+        try {
+          const resource = getResourceProfile(command.alias, this.rootDir);
+          if (command.role !== "agent" && !isOrchestratorCapable(resource)) {
+            return {
+              lines: [],
+              errors: [
+                `Resource @${resource.alias} does not meet orchestrator requirements (top tier, 16k+ context). Can only assign "agent" role.`
+              ],
+              shouldExit: false
+            };
+          }
+          await updateResource(command.alias, { ...resource, resourceRole: command.role }, this.rootDir);
+          await appendChangelogEntry(`Assigned resource role "${command.role}" to @${command.alias}.`, this.rootDir);
+          return {
+            lines: [`Resource @${command.alias} role set to "${command.role}".`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "topology.delegate") {
+        try {
+          const orchestratorResource = getResourceProfile(command.orchestratorAlias, this.rootDir);
+          const agentResource = getResourceProfile(command.agentAlias, this.rootDir);
+          const role = getEffectiveResourceRole(orchestratorResource, this.resolveOrchestratorAlias());
+          if (role !== "orchestrator" && role !== "primary-orchestrator") {
+            return {
+              lines: [],
+              errors: [`Resource @${command.orchestratorAlias} is not an orchestrator-capable resource (role: ${role}).`],
+              shouldExit: false
+            };
+          }
+          const subordinates = new Set(orchestratorResource.subordinateResources ?? []);
+          subordinates.add(agentResource.alias);
+          await updateResource(command.orchestratorAlias, {
+            ...orchestratorResource,
+            subordinateResources: [...subordinates]
+          }, this.rootDir);
+          await appendChangelogEntry(
+            `Delegated @${command.agentAlias} as subordinate to @${command.orchestratorAlias}.`,
+            this.rootDir
+          );
+          return {
+            lines: [
+              `@${command.agentAlias} is now a subordinate agent of @${command.orchestratorAlias}.`,
+              `@${command.orchestratorAlias} can coordinate @${command.agentAlias} for complex tasks.`
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "topology.undelegate") {
+        try {
+          const orchestratorResource = getResourceProfile(command.orchestratorAlias, this.rootDir);
+          const subordinates = new Set(orchestratorResource.subordinateResources ?? []);
+          if (!subordinates.has(command.agentAlias)) {
+            return {
+              lines: [],
+              errors: [`@${command.agentAlias} is not currently a subordinate of @${command.orchestratorAlias}.`],
+              shouldExit: false
+            };
+          }
+          subordinates.delete(command.agentAlias);
+          await updateResource(command.orchestratorAlias, {
+            ...orchestratorResource,
+            subordinateResources: [...subordinates]
+          }, this.rootDir);
+          await appendChangelogEntry(
+            `Removed @${command.agentAlias} as subordinate of @${command.orchestratorAlias}.`,
+            this.rootDir
+          );
+          return {
+            lines: [`@${command.agentAlias} is no longer a subordinate of @${command.orchestratorAlias}.`],
             errors: [],
             shouldExit: false
           };

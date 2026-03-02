@@ -3,6 +3,15 @@ export type EndpointApiStyle = "ollama" | "openai" | "anthropic";
 export type ModelPolicy = "fixed" | "auto";
 export type ModelPurpose = "default" | "reasoning" | "coding" | "tools";
 
+/**
+ * Resource role within the orchestration network.
+ * - `primary-orchestrator`: the main coordinating resource that owns queue-fill and top-level routing
+ * - `orchestrator`: an orchestrator-capable resource that can handle complex multi-step tasks
+ *   independently, process its own tool calls, and coordinate subordinate agent resources
+ * - `agent`: a standard inference resource that executes assigned tasks
+ */
+export type ResourceRole = "primary-orchestrator" | "orchestrator" | "agent";
+
 export interface ChatMessage {
   role: Role;
   content: string;
@@ -86,6 +95,10 @@ export interface AutoQueueTask {
   errorMessage?: string;
   sourceDocumentRelativePath?: string;
   sourceDocumentName?: string;
+  /** When set, this task is delegated to a sub-orchestrator that handles it independently. */
+  delegatedOrchestrator?: string;
+  /** Resources assigned as subordinates to assist the delegated orchestrator with this task. */
+  subordinateResources?: string[];
 }
 
 export interface DailyWorkSession {
@@ -428,4 +441,8 @@ export type Command =
   | { type: "daily.start" }
   | { type: "daily.finish" }
   | { type: "promote"; alias: string }
+  | { type: "topology" }
+  | { type: "topology.assign"; alias: string; role: ResourceRole }
+  | { type: "topology.delegate"; orchestratorAlias: string; agentAlias: string }
+  | { type: "topology.undelegate"; orchestratorAlias: string; agentAlias: string }
   | { type: "exit" };

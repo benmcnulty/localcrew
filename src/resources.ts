@@ -9,7 +9,7 @@ import {
   loadLocalEnv
 } from "./env.ts";
 import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
-import type { EndpointApiStyle, EndpointConfig, ModelPurpose } from "./types.ts";
+import type { EndpointApiStyle, EndpointConfig, ModelPurpose, ResourceRole } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
 export type ResourceApiStyle = EndpointApiStyle;
@@ -41,6 +41,10 @@ export interface ResourceProfile {
   availableModels?: string[];
   lastRefreshedAt?: string;
   endpointVersion?: string;
+  /** Network orchestration role: primary-orchestrator, orchestrator, or agent. */
+  resourceRole?: ResourceRole;
+  /** Aliases of resources assigned as subordinates to this orchestrator-capable resource. */
+  subordinateResources?: string[];
 }
 
 export interface ResourceCapacitySummary {
@@ -246,6 +250,18 @@ function normalizeResource(alias: string, value: unknown): ResourceProfile {
       : {}),
     ...(typeof candidate.endpointVersion === "string" && candidate.endpointVersion.trim() !== ""
       ? { endpointVersion: candidate.endpointVersion.trim() }
+      : {}),
+    ...(candidate.resourceRole === "primary-orchestrator" ||
+      candidate.resourceRole === "orchestrator" ||
+      candidate.resourceRole === "agent"
+      ? { resourceRole: candidate.resourceRole }
+      : {}),
+    ...(Array.isArray(candidate.subordinateResources)
+      ? {
+          subordinateResources: candidate.subordinateResources.filter(
+            (entry): entry is string => typeof entry === "string" && entry.trim() !== ""
+          )
+        }
       : {})
   };
 }
@@ -609,16 +625,21 @@ export function chooseResourceForTask(
   rootDir = process.cwd(),
   options: {
     resourceLoad?: Record<string, number>;
+    primaryOrchestratorAlias?: string;
   } = {}
 ): {
   alias: string;
   tier: ResourceTier;
   purpose: "default" | "reasoning" | "coding" | "tools";
   rationale: string;
+  /** When set, this task should be delegated to the named sub-orchestrator. */
+  delegateToOrchestrator?: string;
+  /** Resources available as subordinates for the delegated orchestrator. */
+  availableSubordinates?: string[];
 } {
   const resourceLoad = options.resourceLoad ?? {};
   const resources = sortForRouting(listResources(rootDir));
-  const orchestratorAlias = getOrchestratorResourceAlias(rootDir);
+  const orchestratorAlias = options.primaryOrchestratorAlias ?? getOrchestratorResourceAlias(rootDir);
   const orchestrator = resources.find((profile) => profile.alias === orchestratorAlias) ?? resources[0];
   if (!orchestrator) {
     throw new Error("No resources are configured.");
@@ -708,6 +729,32 @@ export function chooseResourceForTask(
     };
   }
 
+  // Detect complex multi-step tasks that benefit from sub-orchestrator delegation
+  if (
+    /\b(multi[- ]?step|coordinate|orchestrate|delegate|complex|pipeline|workflow|end[- ]?to[- ]?end|comprehensive|thorough|parallel)\b/.test(
+      normalizedTask
+    )
+  ) {
+    const subOrchestrators = resources.filter(
+      (profile) =>
+        profile.alias !== orchestrator.alias &&
+        getEffectiveResourceRole(profile, orchestratorAlias) === "orchestrator" &&
+        getResourceLoad(profile.alias, resourceLoad) === 0
+    );
+    if (subOrchestrators.length > 0) {
+      const selected = subOrchestrators[0];
+      const subordinates = selected.subordinateResources ?? [];
+      return {
+        alias: selected.alias,
+        tier: selected.tier,
+        purpose: selected.reasoningModel ? "reasoning" : "default",
+        rationale: `Delegating complex multi-step task to sub-orchestrator @${selected.alias} which can coordinate independently${subordinates.length > 0 ? ` with subordinates: ${subordinates.map((s) => `@${s}`).join(", ")}` : ""}.`,
+        delegateToOrchestrator: selected.alias,
+        availableSubordinates: subordinates
+      };
+    }
+  }
+
   if (
     /\b(sanity check|small context|isolated|extract|format|rename|single|short|tiny|overflow|backup|simple)\b/.test(
       normalizedTask
@@ -762,6 +809,10 @@ export function renderResourceInventory(rootDir = process.cwd()): string {
           ]
         : []),
       `- Role: ${profile.role}`,
+      ...(profile.resourceRole ? [`- Network role: ${profile.resourceRole}`] : []),
+      ...(profile.subordinateResources && profile.subordinateResources.length > 0
+        ? [`- Subordinate agents: ${profile.subordinateResources.map((alias) => `@${alias}`).join(", ")}`]
+        : []),
       `- Default model: ${profile.defaultModel}`,
       ...(profile.reasoningModel ? [`- Reasoning model: ${profile.reasoningModel}`] : []),
       ...(profile.codingModel ? [`- Coding model: ${profile.codingModel}`] : []),
@@ -819,4 +870,109 @@ export function getResourceCapacitySummary(rootDir = process.cwd()): ResourceCap
 
 export function getResourceAliases(rootDir = process.cwd()): string[] {
   return listResources(rootDir).map((profile) => profile.alias);
+}
+
+/**
+ * Minimum context tokens for a resource to qualify as orchestrator-capable.
+ * Resources at or above this threshold with a top tier can independently
+ * coordinate subordinate agents and process multi-step tool workflows.
+ */
+const ORCHESTRATOR_CAPABLE_CONTEXT_THRESHOLD = 16_384;
+
+/**
+ * Determine whether a resource meets the minimum requirements for orchestrator
+ * role: top tier with enough context window to handle complex multi-step tasks.
+ */
+export function isOrchestratorCapable(profile: ResourceProfile): boolean {
+  return profile.tier === "top" && (profile.maxContextTokens ?? 0) >= ORCHESTRATOR_CAPABLE_CONTEXT_THRESHOLD;
+}
+
+/**
+ * Return the effective resource role. If explicitly set on the profile, use that.
+ * Otherwise, infer: the primary orchestrator alias gets `"primary-orchestrator"`,
+ * top-tier resources meeting the context threshold get `"orchestrator"`, and
+ * everything else gets `"agent"`.
+ */
+export function getEffectiveResourceRole(
+  profile: ResourceProfile,
+  primaryOrchestratorAlias: string
+): ResourceRole {
+  if (profile.resourceRole) return profile.resourceRole;
+  if (profile.alias === primaryOrchestratorAlias) return "primary-orchestrator";
+  if (isOrchestratorCapable(profile)) return "orchestrator";
+  return "agent";
+}
+
+export interface NetworkTopologyNode {
+  alias: string;
+  label: string;
+  tier: ResourceTier;
+  role: ResourceRole;
+  maxContextTokens: number;
+  subordinates: string[];
+}
+
+/**
+ * Build a view of the current network topology: primary orchestrator,
+ * sub-orchestrators, and their assigned agents.
+ */
+export function getNetworkTopology(
+  primaryOrchestratorAlias: string,
+  rootDir = process.cwd()
+): NetworkTopologyNode[] {
+  const resources = listResources(rootDir);
+  return resources.map((profile) => ({
+    alias: profile.alias,
+    label: profile.label,
+    tier: profile.tier,
+    role: getEffectiveResourceRole(profile, primaryOrchestratorAlias),
+    maxContextTokens: profile.maxContextTokens ?? 0,
+    subordinates: profile.subordinateResources ?? []
+  }));
+}
+
+/**
+ * Render a text summary of the network topology for display or prompt context.
+ */
+export function renderNetworkTopology(
+  primaryOrchestratorAlias: string,
+  rootDir = process.cwd()
+): string {
+  const nodes = getNetworkTopology(primaryOrchestratorAlias, rootDir);
+  const lines: string[] = ["# Network Topology", ""];
+  const primary = nodes.find((node) => node.role === "primary-orchestrator");
+  const orchestrators = nodes.filter((node) => node.role === "orchestrator");
+  const agents = nodes.filter((node) => node.role === "agent");
+
+  if (primary) {
+    lines.push(`## Primary Orchestrator: @${primary.alias} (${primary.label})`);
+    lines.push(`   Context: ${primary.maxContextTokens || "unknown"} tokens`);
+    if (primary.subordinates.length > 0) {
+      lines.push(`   Direct agents: ${primary.subordinates.map((alias) => `@${alias}`).join(", ")}`);
+    }
+    lines.push("");
+  }
+
+  if (orchestrators.length > 0) {
+    lines.push("## Sub-Orchestrators");
+    for (const node of orchestrators) {
+      lines.push(`- @${node.alias} (${node.label}) — ${node.tier} tier, ${node.maxContextTokens || "?"} ctx`);
+      if (node.subordinates.length > 0) {
+        lines.push(`  Subordinate agents: ${node.subordinates.map((alias) => `@${alias}`).join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (agents.length > 0) {
+    lines.push("## Agent Resources");
+    for (const node of agents) {
+      const assignedTo = nodes.find((parent) => parent.subordinates.includes(node.alias));
+      const parentLabel = assignedTo ? ` → assigned to @${assignedTo.alias}` : "";
+      lines.push(`- @${node.alias} (${node.label}) — ${node.tier} tier, ${node.maxContextTokens || "?"} ctx${parentLabel}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }

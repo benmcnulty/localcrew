@@ -27,8 +27,12 @@ import type { AutoQueueTask, DailyWorkSession } from "../src/types.ts";
 import {
   chooseResourceForTask,
   detectTaskPurpose,
+  getEffectiveResourceRole,
+  getNetworkTopology,
   getResourceCapacitySummary,
   getResourceProfilesByTier,
+  isOrchestratorCapable,
+  renderNetworkTopology,
   saveResources,
   selectModelForEndpoint,
   type ResourceProfile
@@ -903,6 +907,221 @@ describe("daily session state persistence", () => {
       expect(reloaded.auto.dailySession).toBeDefined();
       expect(reloaded.auto.dailySession!.startedAt).toBe(state.auto.dailySession!.startedAt);
       expect(reloaded.auto.dailySession!.tasksCompleted).toBe(0);
+    });
+  });
+});
+
+describe("network topology", () => {
+  test("isOrchestratorCapable requires top tier and >= 16k context", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const tiers = getResourceProfilesByTier(rootDir);
+      const orch = tiers.top.find((p) => p.alias === "orchestrator")!;
+      const workhorse = tiers.top.find((p) => p.alias === "workhorse")!;
+      const helper = tiers.mid[0];
+      const overflow = tiers.low[0];
+
+      expect(isOrchestratorCapable(orch)).toBe(true); // top, 65536
+      expect(isOrchestratorCapable(workhorse)).toBe(true); // top, 131072
+      expect(isOrchestratorCapable(helper)).toBe(false); // mid, 16384 — wrong tier
+      expect(isOrchestratorCapable(overflow)).toBe(false); // low, 8192
+    });
+  });
+
+  test("getEffectiveResourceRole infers roles correctly", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const tiers = getResourceProfilesByTier(rootDir);
+      const orch = tiers.top.find((p) => p.alias === "orchestrator")!;
+      const workhorse = tiers.top.find((p) => p.alias === "workhorse")!;
+      const helper = tiers.mid[0];
+      const overflow = tiers.low[0];
+
+      expect(getEffectiveResourceRole(orch, "orchestrator")).toBe("primary-orchestrator");
+      expect(getEffectiveResourceRole(workhorse, "orchestrator")).toBe("orchestrator"); // top + capable
+      expect(getEffectiveResourceRole(helper, "orchestrator")).toBe("agent"); // mid tier
+      expect(getEffectiveResourceRole(overflow, "orchestrator")).toBe("agent"); // low tier
+    });
+  });
+
+  test("getEffectiveResourceRole respects explicit role", async () => {
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        device1: {
+          alias: "device1",
+          label: "Device 1",
+          tier: "low",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.2:3b",
+          role: "Override test.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 4096,
+          resourceRole: "orchestrator"
+        }
+      };
+      await saveResources(resources, rootDir);
+      const profile = getResourceProfilesByTier(rootDir).low[0];
+      expect(getEffectiveResourceRole(profile, "other")).toBe("orchestrator");
+    });
+  });
+
+  test("getNetworkTopology builds correct node list", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const nodes = getNetworkTopology("orchestrator", rootDir);
+
+      expect(nodes).toHaveLength(4);
+      const primary = nodes.find((n) => n.alias === "orchestrator")!;
+      expect(primary.role).toBe("primary-orchestrator");
+      const workhorse = nodes.find((n) => n.alias === "workhorse")!;
+      expect(workhorse.role).toBe("orchestrator");
+      const helper = nodes.find((n) => n.alias === "helper")!;
+      expect(helper.role).toBe("agent");
+      const overflow = nodes.find((n) => n.alias === "overflow")!;
+      expect(overflow.role).toBe("agent");
+    });
+  });
+
+  test("getNetworkTopology includes subordinate assignments", async () => {
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        primary: {
+          alias: "primary",
+          label: "Primary",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.1:8b",
+          role: "Primary.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 32768,
+          subordinateResources: ["agent1"]
+        },
+        sub: {
+          alias: "sub",
+          label: "Sub Orch",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11435",
+          defaultModel: "llama3.1:8b",
+          role: "Sub orchestrator.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 16384,
+          subordinateResources: ["agent2"]
+        },
+        agent1: {
+          alias: "agent1",
+          label: "Agent 1",
+          tier: "low",
+          baseUrl: "http://127.0.0.1:11436",
+          defaultModel: "llama3.2:3b",
+          role: "Agent.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 8192
+        },
+        agent2: {
+          alias: "agent2",
+          label: "Agent 2",
+          tier: "low",
+          baseUrl: "http://127.0.0.1:11437",
+          defaultModel: "llama3.2:3b",
+          role: "Agent.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 8192
+        }
+      };
+      await saveResources(resources, rootDir);
+      const nodes = getNetworkTopology("primary", rootDir);
+
+      const primary = nodes.find((n) => n.alias === "primary")!;
+      expect(primary.subordinates).toEqual(["agent1"]);
+      const sub = nodes.find((n) => n.alias === "sub")!;
+      expect(sub.role).toBe("orchestrator");
+      expect(sub.subordinates).toEqual(["agent2"]);
+    });
+  });
+
+  test("renderNetworkTopology produces readable output", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const output = renderNetworkTopology("orchestrator", rootDir);
+
+      expect(output).toContain("# Network Topology");
+      expect(output).toContain("Primary Orchestrator: @orchestrator");
+      expect(output).toContain("Sub-Orchestrators");
+      expect(output).toContain("@workhorse");
+      expect(output).toContain("Agent Resources");
+      expect(output).toContain("@helper");
+      expect(output).toContain("@overflow");
+    });
+  });
+
+  test("chooseResourceForTask delegates complex tasks to sub-orchestrators", async () => {
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        primary: {
+          alias: "primary",
+          label: "Primary",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.1:8b",
+          role: "Primary.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 32768
+        },
+        sub: {
+          alias: "sub",
+          label: "Sub",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11435",
+          defaultModel: "llama3.1:8b",
+          reasoningModel: "gpt-oss:20b",
+          role: "Sub orchestrator.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 16384,
+          subordinateResources: ["worker"]
+        },
+        worker: {
+          alias: "worker",
+          label: "Worker",
+          tier: "low",
+          baseUrl: "http://127.0.0.1:11436",
+          defaultModel: "llama3.2:3b",
+          role: "Worker.",
+          capabilities: [],
+          notes: [],
+          maxContextTokens: 8192
+        }
+      };
+      await saveResources(resources, rootDir);
+      const selection = chooseResourceForTask(
+        "Coordinate a comprehensive end-to-end multi-step pipeline workflow.",
+        "auto",
+        rootDir,
+        { primaryOrchestratorAlias: "primary" }
+      );
+
+      expect(selection.delegateToOrchestrator).toBe("sub");
+      expect(selection.availableSubordinates).toEqual(["worker"]);
+    });
+  });
+
+  test("chooseResourceForTask does not delegate simple tasks", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const selection = chooseResourceForTask(
+        "Draft a short summary of recent changes.",
+        "auto",
+        rootDir,
+        { primaryOrchestratorAlias: "orchestrator" }
+      );
+
+      expect(selection.delegateToOrchestrator).toBeUndefined();
     });
   });
 });
