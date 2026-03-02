@@ -706,6 +706,7 @@ export class CrustyApp {
   private readonly warn: WarnFn;
   private readonly platform: NodeJS.Platform;
   private autoCyclePromise: Promise<CommandResult> | null;
+  private apiServerHandle?: { pushDisplayEvent(payload: Record<string, unknown>): void };
 
   private constructor(
     config: AppConfig,
@@ -741,6 +742,33 @@ export class CrustyApp {
     await app.sanitizeAutoQueueState();
     await app.syncSystemFiles();
     return app;
+  }
+
+  setApiServerHandle(handle: { pushDisplayEvent(payload: Record<string, unknown>): void }): void {
+    this.apiServerHandle = handle;
+  }
+
+  private pushDisplayState(): void {
+    if (!this.apiServerHandle) {
+      return;
+    }
+    const auto = this.systemState.auto;
+    const prefs = this.config.preferences;
+    this.apiServerHandle.pushDisplayEvent({
+      type: "state",
+      orchestratorName: this.config.orchestratorName,
+      mode: this.runtime.mode,
+      auto: {
+        enabled: auto.enabled,
+        pendingCount: auto.pending.length,
+        completedCount: auto.completed.length,
+        busy: this.autoCyclePromise !== null,
+        nextTask: auto.pending[0]?.content ?? null,
+        lastCompleted: auto.completed[auto.completed.length - 1]?.content ?? null,
+        dailySession: auto.dailySession ?? null
+      },
+      preferences: prefs ?? {}
+    });
   }
 
   getPrompt(): string {
@@ -4294,6 +4322,7 @@ export class CrustyApp {
     if (/^DAILY_COMPLETE\s*$/m.test(rawReply)) {
       dailyDigestLine = await this.finishDailyWork();
     }
+    this.pushDisplayState();
 
     return {
       lines: [
@@ -4700,10 +4729,22 @@ export class CrustyApp {
           mode: "auto",
           currentAgent: undefined
         };
+        // Auto-start a daily work session if none is active.
+        const existingSession = this.systemState.auto.dailySession;
+        const dailyStarted = !existingSession || Boolean(existingSession.completedAt);
+        if (dailyStarted) {
+          this.systemState = {
+            ...this.systemState,
+            auto: { ...this.systemState.auto, dailySession: startDailySession() }
+          };
+          await this.persistSystemState();
+        }
+        this.pushDisplayState();
         return {
           lines: [
             `Entered auto mode. Plain messages are queued at ${this.systemState.auto.defaultPriority} priority.`,
-            `The background pulse will keep ${this.getOrchestratorName()} moving until /stop.`
+            `The background pulse will keep ${this.getOrchestratorName()} moving until /stop.`,
+            ...(dailyStarted ? ["Daily work session started automatically."] : [])
           ],
           errors: [],
           shouldExit: false

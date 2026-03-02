@@ -385,6 +385,9 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     rootDir,
     warn: (message) => writeLine(stderr, message)
   });
+  if (apiServer) {
+    app.setApiServerHandle(apiServer);
+  }
 
   const readline = createInterface({
     input: stdin,

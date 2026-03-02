@@ -287,12 +287,27 @@ function normalizePreferences(raw: unknown): UserPreferences | undefined {
     result.dailyDigestDirective = candidate.dailyDigestDirective.trim();
     hasField = true;
   }
+  if (candidate.jobSearchEnabled !== undefined) {
+    if (typeof candidate.jobSearchEnabled === "boolean") {
+      result.jobSearchEnabled = candidate.jobSearchEnabled;
+      hasField = true;
+    } else if (typeof candidate.jobSearchEnabled === "string") {
+      const v = (candidate.jobSearchEnabled as string).toLowerCase().trim();
+      if (v === "true" || v === "yes" || v === "1" || v === "y") {
+        result.jobSearchEnabled = true;
+        hasField = true;
+      } else if (v === "false" || v === "no" || v === "0" || v === "n") {
+        result.jobSearchEnabled = false;
+        hasField = true;
+      }
+    }
+  }
 
   return hasField ? result : undefined;
 }
 
 export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
-  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective"];
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled"];
   if (!validKeys.includes(key as keyof UserPreferences)) {
     throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
   }
@@ -307,6 +322,16 @@ export function setPreference(config: AppConfig, key: string, value: string): Ap
     return {
       ...config,
       ...(hasFields ? { preferences: updated } : {}),
+    };
+  }
+
+  // jobSearchEnabled is a boolean preference — coerce string values.
+  if (key === "jobSearchEnabled") {
+    const v = trimmed.toLowerCase();
+    const boolValue = v === "true" || v === "yes" || v === "1" || v === "y";
+    return {
+      ...config,
+      preferences: { ...existing, jobSearchEnabled: boolValue }
     };
   }
 

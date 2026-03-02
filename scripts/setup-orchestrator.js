@@ -10,6 +10,36 @@ function trimTrailingSlash(value) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
+// Best-effort zip code approximation from system timezone — no external deps.
+function guessZipFromTimezone() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const map = {
+      "America/New_York": "10001",
+      "America/Detroit": "48201",
+      "America/Indiana/Indianapolis": "46201",
+      "America/Chicago": "60601",
+      "America/Menominee": "49858",
+      "America/Denver": "80201",
+      "America/Boise": "83701",
+      "America/Phoenix": "85001",
+      "America/Los_Angeles": "90001",
+      "America/Anchorage": "99501",
+      "Pacific/Honolulu": "96801",
+      "America/Toronto": "M5H",
+      "America/Vancouver": "V5K",
+      "Europe/London": "EC1A",
+      "Europe/Berlin": "10115",
+      "Europe/Paris": "75001",
+      "Australia/Sydney": "2000",
+      "Asia/Tokyo": "100-0001"
+    };
+    return map[tz] ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function detectLocalIpAddress() {
   const interfaces = networkInterfaces();
   for (const entries of Object.values(interfaces)) {
@@ -369,6 +399,59 @@ function promptWithPrefill(promptText, initialValue = "") {
   });
 }
 
+async function loadExistingPreferences(rootDir) {
+  const paths = getStoragePaths(rootDir);
+  if (!existsSync(paths.configPath)) {
+    return {};
+  }
+  try {
+    const raw = await readFile(paths.configPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed.preferences === "object" && parsed.preferences) ? parsed.preferences : {};
+  } catch {
+    return {};
+  }
+}
+
+async function savePreferencesToConfig(rootDir, preferences) {
+  const paths = getStoragePaths(rootDir);
+  if (!existsSync(paths.configPath)) {
+    return; // Config does not exist yet; it will be created on first start.
+  }
+  try {
+    const raw = await readFile(paths.configPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+    const next = {
+      ...parsed,
+      preferences: {
+        ...(typeof parsed.preferences === "object" ? parsed.preferences : {}),
+        ...preferences
+      }
+    };
+    // Remove undefined values.
+    for (const key of Object.keys(next.preferences)) {
+      if (next.preferences[key] === undefined) {
+        delete next.preferences[key];
+      }
+    }
+    await writeFile(paths.configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  } catch {
+    // Leave config untouched if it cannot be parsed.
+  }
+}
+
+async function promptYesNo(promptText, defaultYes = true) {
+  const label = defaultYes ? "[Y/n]" : "[y/N]";
+  const answer = await promptWithPrefill(`${promptText} ${label}: `, defaultYes ? "Y" : "N");
+  if (answer === "") {
+    return defaultYes;
+  }
+  return answer.toLowerCase().startsWith("y");
+}
+
 async function resolveSetupOptions(setup) {
   const machine = detectLocalMachineProfile();
   const existingResource = await loadExistingPrimaryResource(setup.rootDir, machine);
@@ -399,7 +482,8 @@ async function resolveSetupOptions(setup) {
   if (!input.isTTY || !output.isTTY) {
     return {
       ...nextSetup,
-      name: initialName
+      name: initialName,
+      preferences: {}
     };
   }
 
@@ -408,15 +492,37 @@ async function resolveSetupOptions(setup) {
   );
   const promptedName = await promptWithPrefill("Agent orchestrator name: ", initialName);
 
+  // --- Preferences prompts ---
+  const existingPrefs = await loadExistingPreferences(nextSetup.rootDir);
+
+  console.log("");
+  console.log("Weather & location (used for the WEATHER tool in autonomous mode).");
+  const existingZip = existingPrefs.zipCode ?? existingPrefs.city ?? "";
+  const zipDefault = existingZip || guessZipFromTimezone();
+  const zipHint = zipDefault ? "" : " (optional, press Enter to skip)";
+  const zipAnswer = await promptWithPrefill(`Zip code or city${zipHint}: `, zipDefault);
+
+  console.log("");
+  console.log("Job opportunity surfacing — the autonomous network will search for aligned roles each session.");
+  const jobDefault = existingPrefs.jobSearchEnabled !== undefined
+    ? existingPrefs.jobSearchEnabled
+    : true;
+  const jobSearchEnabled = await promptYesNo("Include job search in daily autonomous sessions?", jobDefault);
+
   return {
     ...nextSetup,
-    name: promptedName || initialName
+    name: promptedName || initialName,
+    preferences: {
+      ...(zipAnswer.trim() ? { zipCode: zipAnswer.trim() } : {}),
+      jobSearchEnabled
+    }
   };
 }
 
 function buildManagedEnvBlock({ setup, machine, discovered }) {
   const localUiHost =
     setup.publicHost && setup.publicHost.trim() !== "" ? setup.publicHost.trim() : "127.0.0.1";
+  const prefs = setup.preferences ?? {};
 
   return [
     "# >>> crusty orchestrator setup >>>",
@@ -462,6 +568,10 @@ function buildManagedEnvBlock({ setup, machine, discovered }) {
     `CRUSTY_ENDPOINT_PAV_RESOURCE=${setup.alias}`,
     "CRUSTY_ENDPOINT_PAV_NICKNAME=Pav",
     ...(discovered.defaultModel ? [`CRUSTY_ENDPOINT_PAV_MODEL=${discovered.defaultModel}`] : []),
+    ...(prefs.zipCode ? [`CRUSTY_PREFERENCES_ZIP_CODE=${prefs.zipCode}`] : []),
+    ...(prefs.jobSearchEnabled !== undefined
+      ? [`CRUSTY_JOB_SEARCH_ENABLED=${prefs.jobSearchEnabled ? "true" : "false"}`]
+      : []),
     "# <<< crusty orchestrator setup <<<"
   ].join("\n");
 }
@@ -625,11 +735,21 @@ async function main() {
   });
   await syncExistingConfigName(setup.rootDir, setup.name);
 
+  // Write prompted preferences to config.json if it already exists.
+  if (setup.preferences && Object.keys(setup.preferences).length > 0) {
+    await savePreferencesToConfig(setup.rootDir, setup.preferences);
+  }
+
   const localUiUrl = `http://127.0.0.1:${setup.apiPort}/ui`;
+  const localDisplayUrl = `http://127.0.0.1:${setup.apiPort}/display`;
   const lanUiUrl =
     setup.publicHost && setup.publicHost !== "127.0.0.1"
       ? `http://${setup.publicHost}:${setup.apiPort}/ui`
       : localUiUrl;
+  const lanDisplayUrl =
+    setup.publicHost && setup.publicHost !== "127.0.0.1"
+      ? `http://${setup.publicHost}:${setup.apiPort}/display`
+      : localDisplayUrl;
 
   console.log("Crusty setup complete.");
   console.log(`Repo root: ${setup.rootDir}`);
@@ -653,22 +773,32 @@ async function main() {
     }`
   );
   console.log(`Selected default model: ${discovered.defaultModel ?? "(none)"}`);
+  if (setup.preferences) {
+    if (setup.preferences.zipCode) {
+      console.log(`Weather location: ${setup.preferences.zipCode}`);
+    }
+    if (setup.preferences.jobSearchEnabled !== undefined) {
+      console.log(`Job search in auto sessions: ${setup.preferences.jobSearchEnabled ? "enabled" : "disabled"}`);
+    }
+  }
   console.log(`API health (after start): http://127.0.0.1:${setup.apiPort}/api/health`);
   console.log(`API status (after start): http://127.0.0.1:${setup.apiPort}/api/status`);
   console.log(`Local UI (after start): ${localUiUrl}`);
+  console.log(`Billboard display (after start): ${localDisplayUrl}`);
   if (lanUiUrl !== localUiUrl) {
     console.log(`LAN health (after start): http://${setup.publicHost}:${setup.apiPort}/api/health`);
     console.log(`LAN status (after start): http://${setup.publicHost}:${setup.apiPort}/api/status`);
     console.log(`LAN UI (after start): ${lanUiUrl}`);
+    console.log(`LAN billboard display (after start): ${lanDisplayUrl}`);
   }
   console.log("");
   console.log("Next steps:");
   if (setup.noStart) {
     console.log("1. Start Crusty with: npm run start");
-    console.log("2. Open the Local UI link above after startup.");
+    console.log("2. Open the Local UI or Billboard display links above after startup.");
   } else {
     console.log("1. Crusty will start now in this terminal.");
-    console.log("2. Open the Local UI link above after startup.");
+    console.log("2. Open the Local UI or Billboard display links above after startup.");
   }
   console.log("3. Remember this orchestrator address for agent setup:");
   console.log(`   ${setup.publicHost ?? machine.localIp ?? "the LAN IP shown above"}`);
