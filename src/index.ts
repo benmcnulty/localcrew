@@ -9,6 +9,17 @@ import {
   formatDirectedMessageInput,
   parseCommand
 } from "./commands.ts";
+import {
+  buildCompleter,
+  buildStyledPrompt,
+  clickableUrl,
+  dim,
+  errorText,
+  heading,
+  renderBanner,
+  renderStatusBar,
+  successText,
+} from "./terminal.ts";
 
 function writeLine(stream: { write(chunk: string): boolean }, line: string): void {
   stream.write(`${line}\n`);
@@ -16,7 +27,7 @@ function writeLine(stream: { write(chunk: string): boolean }, line: string): voi
 
 function renderBackgroundResult(
   readline: ReturnType<typeof createInterface>,
-  app: CrustyApp,
+  getPromptString: () => string,
   result: CommandResult
 ): void {
   if (result.lines.length === 0 && result.errors.length === 0) {
@@ -26,8 +37,9 @@ function renderBackgroundResult(
   const bufferedLine = (readline as unknown as { line?: string }).line ?? "";
   stdout.write("\r\u001b[2K");
   result.lines.forEach((line) => writeLine(stdout, line));
-  result.errors.forEach((line) => writeLine(stderr, line));
-  stdout.write(`${app.getPrompt()}${bufferedLine}`);
+  result.errors.forEach((line) => writeLine(stderr, errorText(line)));
+  // Redraw prompt without status bar for inline background updates
+  stdout.write(`${getPromptString()}${bufferedLine}`);
 }
 
 function clearScreen(): void {
@@ -389,13 +401,27 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     app.setApiServerHandle(apiServer);
   }
 
+  const completer = buildCompleter();
   const readline = createInterface({
     input: stdin,
     output: stdout,
-    terminal: true
+    terminal: true,
+    completer,
   });
   let pulseShutdown = false;
   let viewerActive = false;
+
+  /** Print the persistent status bar and return the styled prompt string. */
+  function getStyledPrompt(): string {
+    const statusBar = renderStatusBar(app.getStatusBarState());
+    stdout.write(`${statusBar}\n`);
+    return buildStyledPrompt(app.getPromptState());
+  }
+
+  /** Return prompt string only (no status bar), for inline background redraws. */
+  function getPromptOnly(): string {
+    return buildStyledPrompt(app.getPromptState());
+  }
 
   const pulse = async (): Promise<void> => {
     if (pulseShutdown || viewerActive || !app.shouldAutoPulse()) {
@@ -404,9 +430,9 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
 
     try {
       const result = await app.runIdleCycle();
-      renderBackgroundResult(readline, app, result);
+      renderBackgroundResult(readline, getPromptOnly, result);
     } catch (error) {
-      renderBackgroundResult(readline, app, {
+      renderBackgroundResult(readline, getPromptOnly, {
         lines: [],
         errors: [`Pulse recovered from an unexpected failure: ${(error as Error).message}`],
         shouldExit: false
@@ -419,36 +445,40 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
   }, app.getAutoPulseIntervalMs());
 
   try {
-    if (apiServer) {
-      writeLine(stdout, `HTTP API: ${apiServer.url}/api/status`);
-      writeLine(stdout, `Local UI: ${apiServer.url}/ui`);
-      if (apiServer.publicUrl && apiServer.publicUrl !== apiServer.url) {
-        writeLine(stdout, `LAN UI: ${apiServer.publicUrl}/ui`);
+    // ── Startup banner ──────────────────────────────────────────────────
+    const resources = await app.getResourcesSnapshot();
+    const bannerLines = renderBanner({
+      orchestratorName: app.getStatusBarState().orchestratorName,
+      mode: "command",
+      resourceCount: resources.length,
+      apiUrl: apiServer?.url,
+      publicUrl: apiServer?.publicUrl,
+      uiUrl: apiServer ? `${apiServer.url}/ui` : undefined,
+      publicUiUrl: apiServer?.publicUrl ? `${apiServer.publicUrl}/ui` : undefined,
+      displayUrl: apiServer ? `${apiServer.url}/display` : undefined,
+      publicDisplayUrl: apiServer?.publicUrl ? `${apiServer.publicUrl}/display` : undefined,
+    });
+    bannerLines.forEach((line) => writeLine(stdout, line));
+
+    // Show resource inventory on startup
+    if (resources.length > 0) {
+      writeLine(stdout, `  ${heading("Resources")}`);
+      for (const r of resources) {
+        const tier = r.tier === "top" ? "top" : r.tier === "mid" ? "mid" : "low";
+        const roleSuffix = r.resourceRole && r.resourceRole !== "agent"
+          ? ` (${r.resourceRole})`
+          : "";
+        writeLine(stdout, `  ${successText(`@${r.alias}`)} ${dim(tier + roleSuffix)} ${dim(r.baseUrl)}`);
       }
       writeLine(stdout, "");
-      writeLine(stdout, "Open next:");
-      writeLine(stdout, `- ${apiServer.url}/api/health`);
-      writeLine(stdout, `- ${apiServer.url}/api/status`);
-      writeLine(stdout, `- ${apiServer.url}/ui`);
-      if (apiServer.publicUrl && apiServer.publicUrl !== apiServer.url) {
-        writeLine(stdout, `- ${apiServer.publicUrl}/api/health`);
-        writeLine(stdout, `- ${apiServer.publicUrl}/api/status`);
-        writeLine(stdout, `- ${apiServer.publicUrl}/ui`);
-      }
-    }
-    const resources = await app.getResourcesSnapshot();
-    if (resources.length <= 1) {
-      writeLine(
-        stdout,
-        'Onboarding: this install has one resource. Run `node scripts/setup-agent.js` on the next agent device. It will prefill the first three IP numbers from the local network, you confirm or enter the final number of the orchestrator IP, then it will prompt for a device nickname and sync it here automatically.'
-      );
     }
 
+    // ── Main REPL loop ──────────────────────────────────────────────────
     while (true) {
       let inputLine: string;
 
       try {
-        inputLine = await readline.question(app.getPrompt());
+        inputLine = await readline.question(getStyledPrompt());
       } catch {
         break;
       }
@@ -471,7 +501,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       } catch (error) {
         const message =
           error instanceof CommandParseError ? error.message : (error as Error).message;
-        writeLine(stderr, message);
+        writeLine(stderr, errorText(message));
         continue;
       }
 
@@ -481,7 +511,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       } catch (error) {
         const message =
           error instanceof CommandParseError ? error.message : (error as Error).message;
-        writeLine(stderr, message);
+        writeLine(stderr, errorText(message));
         continue;
       }
 
@@ -519,7 +549,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       result = await resolveWorkflowPrompt(app, readline, result);
 
       result.lines.forEach((line) => writeLine(stdout, line));
-      result.errors.forEach((line) => writeLine(stderr, line));
+      result.errors.forEach((line) => writeLine(stderr, errorText(line)));
 
       if (result.viewerRequest) {
         viewerActive = true;
@@ -533,7 +563,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       if (result.followUpRequest && !result.shouldExit) {
         result = await resolveFollowUpPrompt(app, readline, result);
         result.lines.forEach((line) => writeLine(stdout, line));
-        result.errors.forEach((line) => writeLine(stderr, line));
+        result.errors.forEach((line) => writeLine(stderr, errorText(line)));
       }
 
       if (result.shouldExit) {

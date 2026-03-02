@@ -780,6 +780,54 @@ export class CrustyApp {
     });
   }
 
+  /**
+   * Return structured prompt state for styled rendering by the terminal layer.
+   */
+  getPromptState(): {
+    mode: string;
+    currentEndpoint: string;
+    defaultEndpoint: string;
+    currentAgent?: string;
+    queueDepth: number;
+    priority: string;
+    autoBusy: boolean;
+    resourceCount: number;
+  } {
+    return {
+      mode: this.runtime.mode,
+      currentEndpoint: this.runtime.currentEndpoint,
+      defaultEndpoint: this.config.defaultEndpoint,
+      currentAgent: this.runtime.currentAgent,
+      queueDepth: this.systemState.auto.pending.length,
+      priority: this.systemState.auto.defaultPriority,
+      autoBusy: this.isAutoBusy(),
+      resourceCount: listResources(this.rootDir).length,
+    };
+  }
+
+  /**
+   * Return structured state for the persistent status bar above the prompt.
+   */
+  getStatusBarState(): {
+    mode: string;
+    resourceCount: number;
+    queuePending: number;
+    queueCompleted: number;
+    autoBusy: boolean;
+    autoEnabled: boolean;
+    orchestratorName: string;
+  } {
+    return {
+      mode: this.runtime.mode,
+      resourceCount: listResources(this.rootDir).length,
+      queuePending: this.systemState.auto.pending.length,
+      queueCompleted: this.systemState.auto.completed.length,
+      autoBusy: this.isAutoBusy(),
+      autoEnabled: this.systemState.auto.enabled,
+      orchestratorName: this.getOrchestratorName(),
+    };
+  }
+
   isAutoMode(): boolean {
     return this.runtime.mode === "auto" && this.systemState.auto.enabled;
   }

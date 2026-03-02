@@ -49,6 +49,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `speech.ts` | macOS `say` voice playback |
 | `voices.ts` | Voice preset definitions and defaults |
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
+| `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion, status bar |
 
 Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored local runtime state. Never commit `.crusty/`, `.env`, or `.env.local`.
 
