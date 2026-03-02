@@ -42,6 +42,8 @@ Provider foundation is built around:
 
 Once the orchestrator is up, the fast validation path is:
 
+- run `npm run validate` before release/demo installs (strict typecheck + full tests)
+
 - use `/participant list`, `/nickname`, `/bind`, `/model`, and `/models` to shape the chat roster
 - use `/chat`, `/group`, and `/direct <resource> "message" [model]` to confirm each node is reachable and behaving as expected
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet

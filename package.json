@@ -29,6 +29,8 @@
     "start": "node src/index.ts",
     "start:bun": "bun run src/index.ts",
     "start:node": "node src/index.ts",
-    "test": "bun test"
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "validate": "npm run typecheck && npm test"
   }
 }
