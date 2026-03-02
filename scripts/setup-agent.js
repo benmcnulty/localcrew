@@ -881,6 +881,14 @@ async function runAgentMonitor(context) {
   let localServerProcess;
   let lastSyncSignature = "";
   let lastSyncAt = 0;
+  let lastHealthCheckAt = 0;
+  let lastKnownHealthy = false;
+  let previousHealthy = false;
+  let lastModelDiscoveryAt = 0;
+  let cachedDiscoveredModels;
+  const healthCheckIntervalMs = apiStyle === "ollama" ? 30000 : 45000;
+  const modelDiscoveryIntervalMs = apiStyle === "ollama" ? 5 * 60 * 1000 : 3 * 60 * 1000;
+  const monitorLoopIntervalMs = 15000;
   const gateway = await startAgentGateway({
     rootDir,
     localEndpoint,
@@ -899,7 +907,14 @@ async function runAgentMonitor(context) {
   );
 
   while (true) {
-    const healthy = await isEndpointHealthy(localEndpoint, apiStyle, apiKeyEnv);
+    const now = Date.now();
+    let healthy = lastKnownHealthy;
+    if (now - lastHealthCheckAt >= healthCheckIntervalMs || !lastKnownHealthy) {
+      healthy = await isEndpointHealthy(localEndpoint, apiStyle, apiKeyEnv);
+      lastKnownHealthy = healthy;
+      lastHealthCheckAt = now;
+    }
+
     const nextState = {
       updatedAt: new Date().toISOString(),
       apiStyle,
@@ -928,7 +943,17 @@ async function runAgentMonitor(context) {
 
     if (healthy && orchestratorUrl) {
       try {
-        const discovered = await probeResourceModels(localEndpoint, apiStyle, apiKeyEnv);
+        const shouldRefreshDiscoveredModels =
+          !cachedDiscoveredModels ||
+          !previousHealthy ||
+          now - lastModelDiscoveryAt >= modelDiscoveryIntervalMs;
+
+        if (shouldRefreshDiscoveredModels) {
+          cachedDiscoveredModels = await probeResourceModels(localEndpoint, apiStyle, apiKeyEnv);
+          lastModelDiscoveryAt = now;
+        }
+
+        const discovered = cachedDiscoveredModels;
         const report = await buildReport(discovered);
         const signature = JSON.stringify({
           alias: report.alias,
@@ -946,8 +971,10 @@ async function runAgentMonitor(context) {
       }
     }
 
+    previousHealthy = healthy;
+
     await writeMonitorState(rootDir, nextState);
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 15000));
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, monitorLoopIntervalMs));
   }
 }
 
