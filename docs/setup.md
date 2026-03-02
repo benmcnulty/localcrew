@@ -144,6 +144,20 @@ Use the script output to decide the device tier:
 - `/topology undelegate <orchestrator> <agent>`
 - `/clear`
 
+## Billboard Display Lifecycle
+
+The browser billboard (`/display`) is optimized for agent-device efficiency by default:
+
+- default mode is **Auto Pause** — when the tab is hidden or loses focus, live network activity is suspended
+- when the tab regains focus, the dashboard performs a fast refresh and resumes live updates
+- use **Monitor On** in the display header to keep live updates active continuously on dedicated observer screens
+- you can also force always-active mode at launch with `http://<host>:4310/display?active=1`
+
+Recommended usage pattern:
+
+- keep orchestrator/agent devices in default auto-pause mode unless actively viewed
+- use a non-orchestrator networked tablet/TV/phone as your persistent always-active display when needed
+
 ## Hierarchical Topology
 
 After adding multiple devices, you can build a hierarchy:
