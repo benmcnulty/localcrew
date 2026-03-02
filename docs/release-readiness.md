@@ -4,6 +4,10 @@ This runbook defines the minimum release gate for Crusty and the operational che
 
 ## Release Gate (Must Pass)
 
+Fast path command:
+
+- `npm run validate`
+
 1. Type safety
    - `bunx tsc --noEmit`
 2. Regression suite

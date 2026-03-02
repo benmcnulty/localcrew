@@ -12,6 +12,8 @@
 
 ## Checklist
 
-- [ ] `npm test` passes
+- [ ] `npm run validate` passes
+- [ ] Release checklist reviewed in `docs/release-readiness.md`
+- [ ] Known limitations updated if behavior/scope changed
 - [ ] No secrets or personal data committed
 - [ ] Conventional commit messages used

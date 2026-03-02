@@ -30,8 +30,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
-
-      - name: Run tests
-        run: npm test
+      - name: Validate (typecheck + tests)
+        run: npm run validate
