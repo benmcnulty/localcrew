@@ -216,6 +216,88 @@ async function probeResourceModels(baseUrl, apiStyle, apiKeyEnv) {
   };
 }
 
+async function probeResourceModelsWithRetry(baseUrl, apiStyle, apiKeyEnv, options = {}) {
+  const {
+    attempts = 15,
+    delayMs = 1000
+  } = options;
+
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await probeResourceModels(baseUrl, apiStyle, apiKeyEnv);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      }
+    }
+  }
+
+  throw new Error(
+    `Local endpoint probe failed after ${attempts} attempts over approximately ${Math.round(
+      (attempts * delayMs) / 1000
+    )}s. ${lastError?.message ?? "Unknown probe error."}`
+  );
+}
+
+function buildLocalEndpointCandidates(baseUrl, apiStyle) {
+  const trimmedBase = trimTrailingSlash(baseUrl);
+  const candidates = [trimmedBase];
+
+  if (apiStyle !== "ollama") {
+    return candidates;
+  }
+
+  try {
+    const parsed = new URL(trimmedBase);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      if (parsed.hostname === "127.0.0.1") {
+        candidates.push(`${parsed.protocol}//localhost${parsed.port ? `:${parsed.port}` : ""}`);
+      } else if (parsed.hostname === "localhost") {
+        candidates.push(`${parsed.protocol}//127.0.0.1${parsed.port ? `:${parsed.port}` : ""}`);
+      } else if (parsed.hostname === "0.0.0.0") {
+        candidates.push(`${parsed.protocol}//127.0.0.1${parsed.port ? `:${parsed.port}` : ""}`);
+        candidates.push(`${parsed.protocol}//localhost${parsed.port ? `:${parsed.port}` : ""}`);
+      }
+    }
+  } catch {
+    // Keep the original base URL as the only candidate.
+  }
+
+  const envOllamaHost = process.env.OLLAMA_HOST?.trim();
+  if (envOllamaHost) {
+    const normalizedEnvHost = envOllamaHost.startsWith("http") ? envOllamaHost : `http://${envOllamaHost}`;
+    candidates.push(trimTrailingSlash(normalizedEnvHost));
+  }
+
+  return [...new Set(candidates)];
+}
+
+async function discoverModelsFromReachableEndpoint(baseUrl, apiStyle, apiKeyEnv) {
+  const candidates = buildLocalEndpointCandidates(baseUrl, apiStyle);
+  let lastError;
+
+  for (const candidate of candidates) {
+    try {
+      const discovered = await probeResourceModelsWithRetry(candidate, apiStyle, apiKeyEnv, {
+        attempts: apiStyle === "ollama" ? 12 : 6,
+        delayMs: 1000
+      });
+      return {
+        endpointUrl: candidate,
+        discovered
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(
+    `Could not probe local models from any candidate endpoint (${candidates.join(", ")}). ${lastError?.message ?? "Unknown probe error."}`
+  );
+}
+
 function autoTier(profile) {
   if (profile.ramGb >= 24 || profile.cpuLogicalCores >= 16) {
     return "top";
@@ -879,14 +961,21 @@ async function main() {
     existingReport
   );
   const prompted = await promptForSetup(options, machine, existingReport);
-  const localEndpoint = trimTrailingSlash(options.endpointUrl);
+  let localEndpoint = trimTrailingSlash(options.endpointUrl);
   const gatewayPort = getGatewayPort(options, existingReport);
-  const advertisedBaseUrl = getAdvertisedBaseUrl(machine, gatewayPort, localEndpoint);
-  const discovered = await probeResourceModels(
+  const discovery = await discoverModelsFromReachableEndpoint(
     localEndpoint,
     options.apiStyle,
     options.apiKeyEnv
   );
+  if (discovery.endpointUrl !== localEndpoint) {
+    console.log(
+      `Detected reachable local endpoint ${discovery.endpointUrl} (requested ${localEndpoint}). Using reachable endpoint for setup.`
+    );
+    localEndpoint = discovery.endpointUrl;
+  }
+  const advertisedBaseUrl = getAdvertisedBaseUrl(machine, gatewayPort, localEndpoint);
+  const discovered = discovery.discovered;
   const nickname = prompted.nickname || titleCase(machine.hostName);
   const alias =
     options.alias ??
