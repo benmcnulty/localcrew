@@ -26,6 +26,8 @@ Provider foundation is built around:
 - Local orchestrator state under `.crusty/`
 - Internal file explorer plus status and HUD views in the terminal
 - Cross-platform Ollama benchmark scripts for macOS, Windows 11, and Linux
+- Hierarchical network topology: any capable device can serve as a sub-orchestrator with its own subordinate agents
+- Dynamic resource role management with `/topology` commands for assigning roles, delegating agents, and viewing the network hierarchy
 
 ## Quick Start
 
@@ -60,9 +62,41 @@ Additional CLI commands:
 - `/instructions [@alias] ["text"]` — view or set custom instructions for a participant
 - `/sound [on|off]` — toggle voice playback (macOS only)
 - `/voice [@alias] [preset|list]` — set or list available voice presets
+- `/promote <alias>` — reassign the primary orchestrator role to a different device
+- `/topology` — view the current network hierarchy
+- `/topology assign <alias> <role>` — assign a resource role (`primary-orchestrator`, `orchestrator`, or `agent`)
+- `/topology delegate <orchestrator> <agent>` — assign an agent as a subordinate of a sub-orchestrator
+- `/topology undelegate <orchestrator> <agent>` — remove an agent from a sub-orchestrator's subordinates
 - `/clear` — reset the app back to its env-backed first-run state
 - `/end` — end the current chat or group session
 - `/exit` — exit Crusty
+
+## Hierarchical Orchestration
+
+Crusty supports hierarchical device topologies where multiple devices can serve as orchestrators, each coordinating their own subordinate agents.
+
+**Resource roles:**
+- `primary-orchestrator` — the main device running the REPL and managing the overall network
+- `orchestrator` — a sub-orchestrator capable of independently coordinating complex tasks with its own agents
+- `agent` — a worker device that executes tasks assigned by an orchestrator
+
+**Orchestrator eligibility:** Only top-tier devices with ≥16k context tokens qualify as orchestrators (set via `ORCHESTRATOR_CAPABLE_CONTEXT_THRESHOLD`).
+
+**How delegation works:**
+1. Use `/topology assign workhorse orchestrator` to mark a device as a sub-orchestrator
+2. Use `/topology delegate workhorse helper` to assign an agent under that sub-orchestrator
+3. In `/auto` mode, complex multi-step tasks are automatically routed to idle sub-orchestrators, which coordinate with their subordinate agents
+4. Sub-orchestrators operate autonomously — they can continue processing even if the primary is offline
+
+**Example topology:**
+```
+Primary: @erin (32k ctx)
+  └─ agent: @min (8k ctx)
+Sub-Orchestrator: @zora (16k ctx)
+  └─ agent: @pav (8k ctx)
+```
+
+Use `/topology` to view the live hierarchy at any time.
 
 ## Local State
 

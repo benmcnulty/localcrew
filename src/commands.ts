@@ -77,6 +77,8 @@ function usage(command: string): string {
       return "Usage: /daily | /daily start | /daily finish";
     case "/promote":
       return "Usage: /promote <resourceAlias>";
+    case "/topology":
+      return "Usage: /topology | /topology assign <alias> <role> | /topology delegate <orchestrator> <agent> | /topology undelegate <orchestrator> <agent>";
     case "/exit":
       return "Usage: /exit";
     default:
@@ -727,6 +729,24 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/promote"));
       }
       return { type: "promote", alias: normalizeAlias(rest[0]) };
+    case "/topology":
+      if (rest.length === 0) {
+        return { type: "topology" };
+      }
+      if (rest[0].toLowerCase() === "assign" && rest.length === 3) {
+        const role = rest[2].toLowerCase();
+        if (role !== "primary-orchestrator" && role !== "orchestrator" && role !== "agent") {
+          throw new CommandParseError('Role must be "primary-orchestrator", "orchestrator", or "agent".');
+        }
+        return { type: "topology.assign", alias: normalizeAlias(rest[1]), role };
+      }
+      if (rest[0].toLowerCase() === "delegate" && rest.length === 3) {
+        return { type: "topology.delegate", orchestratorAlias: normalizeAlias(rest[1]), agentAlias: normalizeAlias(rest[2]) };
+      }
+      if (rest[0].toLowerCase() === "undelegate" && rest.length === 3) {
+        return { type: "topology.undelegate", orchestratorAlias: normalizeAlias(rest[1]), agentAlias: normalizeAlias(rest[2]) };
+      }
+      throw new CommandParseError(usage("/topology"));
     default:
       throw new CommandParseError(`Unknown command "${name}".`);
   }

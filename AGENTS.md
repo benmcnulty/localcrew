@@ -57,7 +57,9 @@ Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored
 
 **Concurrency** — use `withFileLock(filePath, fn)` from `src/storage.ts` when a flow reads, mutates, then writes the same file (e.g., load→update→save on telemetry or resources).
 
-**Provider model** — endpoint API style is `"ollama" | "openai" | "anthropic"` (`EndpointApiStyle`). Resource tiers are `"top" | "mid" | "low"`. Auth is stored as an env var name (`apiKeyEnv`), never the key value.
+**Provider model** — endpoint API style is `"ollama" | "openai" | "anthropic"` (`EndpointApiStyle`). Resource tiers are `"top" | "mid" | "low"`. Resource roles are `"primary-orchestrator" | "orchestrator" | "agent"` (`ResourceRole`). Auth is stored as an env var name (`apiKeyEnv`), never the key value.
+
+**Network topology** — resources can be assigned roles and subordinate agents via `/topology` commands. Only top-tier resources with ≥16k context are orchestrator-capable (`isOrchestratorCapable()` in `resources.ts`). Complex tasks in `/auto` are automatically delegated to idle sub-orchestrators.
 
 ## Testing
 

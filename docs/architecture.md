@@ -66,6 +66,24 @@ The longer-term routing policy also needs:
 
 The current implementation now carries optional per-resource hardware/context metadata and exposes aggregate capacity in status/API snapshots so this information can flow into later portal profiles and routing policy.
 
+## Network Topology
+
+Resources can be assigned one of three roles:
+
+- `primary-orchestrator` — the device running the REPL and managing the overall network
+- `orchestrator` — a sub-orchestrator that independently coordinates complex tasks with its own subordinate agents
+- `agent` — a worker device that executes tasks assigned by an orchestrator
+
+Any top-tier resource with at least 16k context tokens is considered orchestrator-capable and can be assigned the `orchestrator` role. This threshold is defined by `ORCHESTRATOR_CAPABLE_CONTEXT_THRESHOLD` in `resources.ts`.
+
+The `/topology` command family manages the hierarchy:
+- `/topology` — view the current network hierarchy
+- `/topology assign <alias> <role>` — assign a resource role
+- `/topology delegate <orchestrator> <agent>` — assign a subordinate agent
+- `/topology undelegate <orchestrator> <agent>` — remove a subordinate
+
+In `/auto` mode, the routing logic detects complex multi-step tasks and automatically delegates them to idle sub-orchestrators. The sub-orchestrator receives detailed context about its subordinate resources and coordinates independently. Sub-orchestrators continue operating when the primary orchestrator is offline.
+
 ## Observability
 
 Current observability surfaces:

@@ -137,4 +137,20 @@ Use the script output to decide the device tier:
 - `/status`
 - `/hud`
 - `/explore`
+- `/promote <alias>`
+- `/topology`
+- `/topology assign <alias> <role>`
+- `/topology delegate <orchestrator> <agent>`
+- `/topology undelegate <orchestrator> <agent>`
 - `/clear`
+
+## Hierarchical Topology
+
+After adding multiple devices, you can build a hierarchy:
+
+1. `/topology` — view the current network roles
+2. `/topology assign workhorse orchestrator` — promote a capable device to sub-orchestrator
+3. `/topology delegate workhorse helper` — assign `helper` as a subordinate of `workhorse`
+4. In `/auto`, complex multi-step tasks will be automatically delegated to idle sub-orchestrators
+
+Only top-tier devices with ≥16k context qualify for the orchestrator role.

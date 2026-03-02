@@ -377,3 +377,81 @@ describe("parseCommand — /promote", () => {
     expect(() => parseCommand("/promote")).toThrow(CommandParseError);
   });
 });
+
+describe("parseCommand — /topology", () => {
+  test("parses bare /topology as topology", () => {
+    expect(parseCommand("/topology")).toEqual({ type: "topology" });
+  });
+
+  test("parses /topology assign with alias and role", () => {
+    expect(parseCommand("/topology assign workhorse orchestrator")).toEqual({
+      type: "topology.assign",
+      alias: "workhorse",
+      role: "orchestrator",
+    });
+  });
+
+  test("parses /topology assign primary-orchestrator role", () => {
+    expect(parseCommand("/topology assign workhorse primary-orchestrator")).toEqual({
+      type: "topology.assign",
+      alias: "workhorse",
+      role: "primary-orchestrator",
+    });
+  });
+
+  test("parses /topology assign agent role", () => {
+    expect(parseCommand("/topology assign helper agent")).toEqual({
+      type: "topology.assign",
+      alias: "helper",
+      role: "agent",
+    });
+  });
+
+  test("normalizes alias in /topology assign", () => {
+    expect(parseCommand("/topology assign @WorkHorse orchestrator")).toEqual({
+      type: "topology.assign",
+      alias: "workhorse",
+      role: "orchestrator",
+    });
+  });
+
+  test("throws on unknown role in /topology assign", () => {
+    expect(() => parseCommand("/topology assign workhorse leader")).toThrow(CommandParseError);
+  });
+
+  test("throws when alias is missing in /topology assign", () => {
+    expect(() => parseCommand("/topology assign")).toThrow(CommandParseError);
+  });
+
+  test("parses /topology delegate", () => {
+    expect(parseCommand("/topology delegate workhorse helper")).toEqual({
+      type: "topology.delegate",
+      orchestratorAlias: "workhorse",
+      agentAlias: "helper",
+    });
+  });
+
+  test("normalizes aliases in /topology delegate", () => {
+    expect(parseCommand("/topology delegate @WorkHorse @Helper")).toEqual({
+      type: "topology.delegate",
+      orchestratorAlias: "workhorse",
+      agentAlias: "helper",
+    });
+  });
+
+  test("throws when agent is missing in /topology delegate", () => {
+    expect(() => parseCommand("/topology delegate workhorse")).toThrow(CommandParseError);
+  });
+
+  test("parses /topology undelegate", () => {
+    expect(parseCommand("/topology undelegate workhorse helper")).toEqual({
+      type: "topology.undelegate",
+      orchestratorAlias: "workhorse",
+      agentAlias: "helper",
+    });
+  });
+
+  test("throws on unknown /topology subcommand", () => {
+    expect(() => parseCommand("/topology foo")).toThrow(CommandParseError);
+  });
+});
