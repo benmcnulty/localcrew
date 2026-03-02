@@ -196,6 +196,40 @@ describe("parseCommand", () => {
     });
   });
 
+  test("parses model policy and purpose subcommands", () => {
+    expect(parseCommand("/model zora policy auto")).toEqual({
+      type: "model.policy",
+      alias: "zora",
+      policy: "auto"
+    });
+    expect(parseCommand("/model zora policy fixed")).toEqual({
+      type: "model.policy",
+      alias: "zora",
+      policy: "fixed"
+    });
+    expect(parseCommand("/model zora coding qwen2.5-coder:7b")).toEqual({
+      type: "model.purpose",
+      alias: "zora",
+      purpose: "coding",
+      model: "qwen2.5-coder:7b"
+    });
+    expect(parseCommand("/model zora reasoning deepseek-r1:14b")).toEqual({
+      type: "model.purpose",
+      alias: "zora",
+      purpose: "reasoning",
+      model: "deepseek-r1:14b"
+    });
+    expect(parseCommand("/model zora tools llama3.1:8b")).toEqual({
+      type: "model.purpose",
+      alias: "zora",
+      purpose: "tools",
+      model: "llama3.1:8b"
+    });
+    expect(() => parseCommand("/model zora policy")).toThrow();
+    expect(() => parseCommand("/model zora policy invalid")).toThrow();
+    expect(() => parseCommand("/model zora coding")).toThrow();
+  });
+
   test("parses nickname, bind, and orchestrator commands", () => {
     expect(parseCommand('/nickname @reviewer "Reviewer Prime"')).toEqual({
       type: "nickname.set",
@@ -242,5 +276,55 @@ describe("directed message helpers", () => {
         message: 'Please go "next".'
       })
     ).toBe('@erin to @zora: "Please go \\"next\\"."');
+  });
+});
+
+describe("parseCommand — /preferences", () => {
+  test("parses /preferences as preferences.get", () => {
+    expect(parseCommand("/preferences")).toEqual({ type: "preferences.get" });
+  });
+
+  test("parses /preferences set city value", () => {
+    expect(parseCommand("/preferences set city Portland")).toEqual({
+      type: "preferences.set",
+      key: "city",
+      value: "Portland",
+    });
+  });
+
+  test("parses /preferences set zipCode value", () => {
+    expect(parseCommand("/preferences set zipCode 97201")).toEqual({
+      type: "preferences.set",
+      key: "zipCode",
+      value: "97201",
+    });
+  });
+
+  test("parses /preferences set personalWebsiteUrl value", () => {
+    expect(
+      parseCommand("/preferences set personalWebsiteUrl https://example.com")
+    ).toEqual({
+      type: "preferences.set",
+      key: "personalWebsiteUrl",
+      value: "https://example.com",
+    });
+  });
+
+  test("key is case-insensitive", () => {
+    expect(parseCommand("/preferences set CITY Denver")).toEqual({
+      type: "preferences.set",
+      key: "city",
+      value: "Denver",
+    });
+  });
+
+  test("throws on invalid key", () => {
+    expect(() => parseCommand("/preferences set invalid value")).toThrow(
+      CommandParseError
+    );
+  });
+
+  test("throws on missing value", () => {
+    expect(() => parseCommand("/preferences set city")).toThrow(CommandParseError);
   });
 });

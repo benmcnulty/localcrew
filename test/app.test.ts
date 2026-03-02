@@ -1471,7 +1471,7 @@ describe("CrustyApp", () => {
 
       expect(invalidResult.errors).toEqual(['Unknown endpoint alias "nope".']);
       expect(validResult.lines[0]).toContain(
-        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b."
+        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b [policy=fixed]."
       );
       expect(validResult.lines[0]).toContain("Plain messages still go to @erin.");
     });
