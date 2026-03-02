@@ -12,7 +12,7 @@ import {
   getOptionalEnvString,
   loadLocalEnv
 } from "./env.ts";
-import { getGuiHtml, getGuiScript, getGuiStyles } from "./gui.ts";
+import { getDisplayHtml, getGuiHtml, getGuiScript, getGuiStyles } from "./gui.ts";
 
 export interface ApiServerHandle {
   url: string;
@@ -163,7 +163,7 @@ async function buildApiResponse(
   const requiredToken = getApiToken();
   if (requiredToken) {
     // Skip auth for static UI assets and health check
-    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health"];
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display"];
     if (!publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
@@ -173,6 +173,10 @@ async function buildApiResponse(
 
   if (request.method === "GET" && (request.url.pathname === "/" || request.url.pathname === "/ui")) {
     return textResponse(200, getGuiHtml(), "text/html; charset=utf-8");
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/display") {
+    return textResponse(200, getDisplayHtml(), "text/html; charset=utf-8");
   }
 
   if (request.method === "GET" && request.url.pathname === "/ui/app.js") {
