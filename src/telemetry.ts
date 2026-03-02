@@ -39,6 +39,12 @@ export function getDefaultTelemetrySummary(): TelemetrySummary {
       totalDurationMs: 0,
       recentQueries: []
     },
+    reddit: {
+      calls: 0,
+      errors: 0,
+      totalDurationMs: 0,
+      recentQueries: []
+    },
     recent: []
   };
 }
@@ -140,6 +146,19 @@ export async function appendAuditEvent(
     const query = typeof nextEvent.metadata?.query === "string" ? nextEvent.metadata.query : undefined;
     if (query) {
       summary.wikipedia.recentQueries = [query, ...summary.wikipedia.recentQueries.filter((value) => value !== query)].slice(0, 10);
+    }
+  }
+
+  if (nextEvent.kind === "reddit.search") {
+    summary.reddit ??= { calls: 0, errors: 0, totalDurationMs: 0, recentQueries: [] };
+    summary.reddit.calls += 1;
+    if (!nextEvent.success) {
+      summary.reddit.errors += 1;
+    }
+    summary.reddit.totalDurationMs += nextEvent.durationMs ?? 0;
+    const query = typeof nextEvent.metadata?.query === "string" ? nextEvent.metadata.query : undefined;
+    if (query) {
+      summary.reddit.recentQueries = [query, ...summary.reddit.recentQueries.filter((value) => value !== query)].slice(0, 10);
     }
   }
 

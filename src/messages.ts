@@ -48,10 +48,11 @@ export function buildChatMessages(options: {
       "Transcript lines are labeled with their @alias and may include directed participant-to-participant lines in the form @from to @to: message.",
       `Answer only as @${options.alias}, from your own perspective.`,
       'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query',
+      'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions.',
       "If you want to suggest one directed follow-up for the user to approve, end your response with a final line exactly in this format: NEXT: @alias: message",
       "Only suggest a valid participant other than yourself, keep the NEXT message short, and omit the NEXT line when no follow-up suggestion is needed.",
       "The NEXT line is only a user-editable suggestion and is not executed automatically.",
-      "Do not emit more than one WIKIPEDIA line."
+      "Do not emit more than one WIKIPEDIA line and do not emit more than one REDDIT line."
     ].join(" ")
   });
 
@@ -105,6 +106,7 @@ export function buildAgentChatMessages(options: {
         `Your preferred inference resource is ${options.preferredResource}.`,
         "Stay aligned with your specification and maintain continuity with your private memory.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, or model-configuration decisions.',
+        'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line.',
         "If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or add an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task.",
         "Use only the exact installed resource aliases provided by Crusty for any QUEUE line. If you are unsure which resource to target, omit the alias and let Crusty route it automatically.",
         "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line.",
@@ -239,6 +241,7 @@ export function buildAutoTaskMessages(options: {
         "Stay inside internal process improvement unless the user explicitly asks for external system changes.",
         "Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions.',
+        'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line.',
         "If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or include an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task.",
         "When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit.",
         "Use only the exact installed resource aliases provided by Crusty for any QUEUE line. If you are unsure which resource to target, omit the alias and let Crusty route it automatically.",
@@ -344,6 +347,7 @@ export function buildQueueFillMessages(options: {
         "Each task must be self-contained and explicit enough to execute without guessing. Reject placeholder verbs with no object or outcome.",
         "This draft will be critiqued by the standing secondary reviewer before any tasks are finalized.",
         "If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Crusty diagnostics.",
+        "If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line.",
         "Output only task lines in the exact format [medium] task or [low] task.",
         "Prefer 2-3 tasks total with at least one medium and one low.",
         "Do not output any explanation before or after the task lines."
@@ -419,6 +423,7 @@ export function buildQueueFillReviewMessages(options: {
         "Do not propose external deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
         "Reject external application, API, UI, script, or source-code implementation work in the autonomous queue and push that work toward outbox feature request tickets instead.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Crusty diagnostics.',
+        'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line.',
         "Respond with a short critique followed by one final verdict line exactly in the form VERDICT: approve or VERDICT: revise."
       ].join(" ")
     }
@@ -497,6 +502,7 @@ export function buildQueueFillFinalizeMessages(options: {
         "Do not finalize external application, API, UI, script, or source-code implementation work into the autonomous queue; that belongs in outbox feature request tickets instead.",
         "Only finalize self-contained tasks with a clear object and expected outcome; do not finalize placeholder verb tasks.",
         'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Crusty diagnostics.',
+        'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Crusty decisions. Do not emit more than one REDDIT line.',
         "Output only approved task lines in the exact format [medium] task or [low] task.",
         "Prefer 1-3 tasks total with at least one medium task when meaningful.",
         "Do not output any explanation before or after the task lines."
