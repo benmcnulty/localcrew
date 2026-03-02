@@ -341,7 +341,7 @@ describe("API server", () => {
         expect(dropbox.inbox.map((entry: { relativePath: string }) => entry.relativePath)).toContain("remote.md");
         expect(tree.lines.some((line: string) => line.includes("external-memory"))).toBe(true);
         expect(file.content).toContain("Crusty-Status: inbox");
-        expect(uiHtml).toContain("Local prototype UI");
+        expect(uiHtml).toContain("section-dashboard");
       } finally {
         await api!.close();
       }
