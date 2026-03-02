@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { getLocalExternalMemoryDir } from "./external-memory.ts";
-import { withFileLock } from "./storage.ts";
+import { atomicWriteFile, withFileLock } from "./storage.ts";
 
 export type DropboxStage = "inbox" | "active" | "outbox";
 
@@ -227,7 +227,7 @@ export async function writeInboxDocument(
   const paths = await ensureDropboxLayout(rootDir);
   const targetPath = await getUniqueStagePath(paths.inboxDir, filename);
   await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, withStatusTag(content, "inbox"), "utf8");
+  await atomicWriteFile(targetPath, withStatusTag(content, "inbox"));
   const fileStat = await stat(targetPath);
 
   return {
@@ -256,7 +256,7 @@ export async function ingestNextInboxDocument(
     const sourceContent = await readFile(nextEntry.path, "utf8");
     const targetPath = await getUniqueStagePath(paths.activeDir, nextEntry.relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, withStatusTag(sourceContent, "active"), "utf8");
+    await atomicWriteFile(targetPath, withStatusTag(sourceContent, "active"));
     await rm(nextEntry.path, { force: true });
 
     return {
@@ -282,7 +282,7 @@ export async function moveActiveDocumentToOutbox(
   const targetPath = await getUniqueStagePath(paths.outboxDir, safeRelativePath);
   const content = await readFile(sourcePath, "utf8");
   await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, withStatusTag(content, "outbox"), "utf8");
+  await atomicWriteFile(targetPath, withStatusTag(content, "outbox"));
   await rm(sourcePath, { force: true });
   const fileStat = await stat(targetPath);
 
@@ -322,7 +322,7 @@ export async function writeGeneratedDropboxDocument(
   const targetRoot = stageDir(paths, stage);
   const targetPath = await getUniqueStagePath(targetRoot, filename);
   await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, withStatusTag(content, stage), "utf8");
+  await atomicWriteFile(targetPath, withStatusTag(content, stage));
   const fileStat = await stat(targetPath);
   return {
     stage,
@@ -347,7 +347,7 @@ export async function moveInboxDocumentToStage(
   const targetPath = await getUniqueStagePath(targetRoot, safeRelativePath);
   await mkdir(dirname(targetPath), { recursive: true });
   const content = await readFile(sourcePath, "utf8");
-  await writeFile(targetPath, withStatusTag(content, stage), "utf8");
+  await atomicWriteFile(targetPath, withStatusTag(content, stage));
   await rm(sourcePath, { force: true });
   const fileStat = await stat(targetPath);
   return {

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { rename, writeFile } from "node:fs/promises";
-import { writeFileSync, renameSync } from "node:fs";
+import { rename, rm, writeFile } from "node:fs/promises";
+import { unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export interface StoragePaths {
@@ -80,8 +80,13 @@ export async function atomicWriteFile(
 ): Promise<void> {
   const dir = dirname(filePath);
   const tmpPath = join(dir, `.tmp-${randomBytes(8).toString("hex")}`);
-  await writeFile(tmpPath, content, encoding);
-  await rename(tmpPath, filePath);
+  try {
+    await writeFile(tmpPath, content, encoding);
+    await rename(tmpPath, filePath);
+  } catch (error) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -94,8 +99,13 @@ export function atomicWriteFileSync(
 ): void {
   const dir = dirname(filePath);
   const tmpPath = join(dir, `.tmp-${randomBytes(8).toString("hex")}`);
-  writeFileSync(tmpPath, content, encoding);
-  renameSync(tmpPath, filePath);
+  try {
+    writeFileSync(tmpPath, content, encoding);
+    renameSync(tmpPath, filePath);
+  } catch (error) {
+    try { unlinkSync(tmpPath); } catch { /* already gone */ }
+    throw error;
+  }
 }
 
 /**

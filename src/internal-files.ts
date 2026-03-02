@@ -23,7 +23,7 @@ export interface InternalSearchMatch {
   relativePath: string;
   /** 1-based line number of the match */
   line: number;
-  /** The full text of the matching line (trimmed) */
+  /** The full text of the matching line (trailing whitespace stripped) */
   text: string;
 }
 
@@ -200,21 +200,27 @@ export async function searchInternalFiles(
     { path: externalRoot, label: "external-memory" },
   ];
 
+  // Collect files from both roots in parallel
+  const rootFiles = await Promise.all(
+    roots.map(async (root) => ({
+      root,
+      files: await collectTextFiles(root.path),
+    })),
+  );
+
   const needle = query.toLowerCase();
   const matches: InternalSearchMatch[] = [];
   let truncated = false;
 
-  for (const root of roots) {
+  for (const { root, files } of rootFiles) {
     if (truncated) break;
-    const files = await collectTextFiles(root.path);
 
     for (const filePath of files) {
       if (truncated) break;
       try {
-        const fileStat = await stat(filePath);
-        if (fileStat.size > MAX_FILE_SIZE_BYTES) continue;
-
         const content = await readFile(filePath, "utf8");
+        // Skip files over the size limit
+        if (content.length > MAX_FILE_SIZE_BYTES) continue;
         // Skip likely-binary files (contains null bytes in first 8 KB)
         if (content.slice(0, 8192).includes("\0")) continue;
 
