@@ -77,6 +77,7 @@ const originalApiPort = process.env.CRUSTY_API_PORT;
 const originalApiHost = process.env.CRUSTY_API_HOST;
 const originalApiBindHost = process.env.CRUSTY_API_BIND_HOST;
 const originalApiPublicHost = process.env.CRUSTY_API_PUBLIC_HOST;
+const originalApiToken = process.env.CRUSTY_API_TOKEN;
 
 afterEach(() => {
   if (originalApiPort === undefined) {
@@ -101,6 +102,12 @@ afterEach(() => {
     delete process.env.CRUSTY_API_PUBLIC_HOST;
   } else {
     process.env.CRUSTY_API_PUBLIC_HOST = originalApiPublicHost;
+  }
+
+  if (originalApiToken === undefined) {
+    delete process.env.CRUSTY_API_TOKEN;
+  } else {
+    process.env.CRUSTY_API_TOKEN = originalApiToken;
   }
 });
 
@@ -349,4 +356,41 @@ describe("API server", () => {
     },
     15000
   );
+
+  test("protects SSE events with token auth when configured", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.CRUSTY_API_HOST = "127.0.0.1";
+      process.env.CRUSTY_API_PORT = "0";
+      process.env.CRUSTY_API_BIND_HOST = "127.0.0.1";
+      process.env.CRUSTY_API_TOKEN = "test-token";
+
+      await seedResourceInventory(rootDir);
+
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        speakFn: () => {}
+      });
+
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        const unauthorized = await fetch(`${api!.url}/api/events`);
+        expect(unauthorized.status).toBe(401);
+
+        const authorized = await fetch(`${api!.url}/api/events`, {
+          headers: {
+            authorization: "Bearer test-token"
+          }
+        });
+        expect(authorized.status).toBe(200);
+        expect(authorized.headers.get("content-type") ?? "").toContain("text/event-stream");
+
+        await authorized.body?.cancel();
+      } finally {
+        await api?.close();
+      }
+    });
+  });
 });

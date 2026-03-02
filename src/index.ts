@@ -516,6 +516,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       }
 
       if (result.editRequest) {
+        const { kind } = result.editRequest;
         try {
           const updatedText = await promptWithPrefill(
             readline,
@@ -533,11 +534,11 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
           result = {
             lines: [],
             errors: [
-              result.editRequest.kind === "instructions"
+              kind === "instructions"
                 ? "Instruction edit cancelled."
-                : result.editRequest.kind === "resource"
+                : kind === "resource"
                   ? "Resource edit cancelled."
-                  : result.editRequest.kind === "participant"
+                  : kind === "participant"
                     ? "Participant edit cancelled."
                 : "Agent spec edit cancelled."
             ],

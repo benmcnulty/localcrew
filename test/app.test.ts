@@ -1520,7 +1520,7 @@ describe("speakText", () => {
       spawnFn: () => ({
         on(event, listener) {
           if (event === "exit") {
-            listener(1);
+            (listener as (code: number | null) => void)(1);
           }
         },
         unref() {}

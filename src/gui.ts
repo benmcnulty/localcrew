@@ -1932,6 +1932,29 @@ export function getDisplayHtml(): string {
     #dmode.m-agent  { color:var(--n-amber); border-color:rgba(255,204,0,0.5); background:rgba(255,204,0,0.07); text-shadow:0 0 8px var(--n-amber); }
     #dmode.m-command { color:var(--muted2); }
     .dtop-right { display:flex;align-items:center;gap:0.8em;white-space:nowrap;flex-shrink:0; }
+    .dactivity {
+      font-size: var(--fs-xs);
+      color: var(--muted2);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .dactive-btn {
+      border: 1px solid rgba(0,212,255,0.3);
+      background: rgba(0,212,255,0.08);
+      color: var(--n-blue);
+      border-radius: 4px;
+      padding: 0.22em 0.6em;
+      font-size: var(--fs-xs);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+    .dactive-btn.on {
+      border-color: rgba(0,255,127,0.45);
+      background: rgba(0,255,127,0.12);
+      color: #00ff7f;
+      text-shadow: 0 0 6px rgba(0,255,127,0.5);
+    }
     #dclock {
       font-size: var(--fs-md); font-variant-numeric: tabular-nums; letter-spacing: 0.06em;
       color: var(--n-amber); font-family: "SF Mono","Fira Code",ui-monospace,monospace;
@@ -2197,6 +2220,8 @@ export function getDisplayHtml(): string {
       <span id="dbusy" class="ddot" style="display:none"></span>
     </div>
     <div class="dtop-right">
+      <span id="dactivity" class="dactivity">Auto Pause</span>
+      <button id="dactive-toggle" class="dactive-btn" type="button" aria-label="Toggle always-active display mode">Monitor Off</button>
       <span id="dhealthdot" class="ddot"></span>
       <span id="dclock">&mdash;</span>
     </div>
@@ -2491,52 +2516,134 @@ export function getDisplayHtml(): string {
     }
   }
 
-  // Initial load (one fetch to populate UI before SSE kicks in)
+  // Initial load (one fetch to populate UI before stream lifecycle kicks in)
   async function pollFull(){await checkHealth();await Promise.all([loadStatus(),loadQueue(),loadAudit()]);}
-  pollFull();loadResources();
 
-  // SSE — real-time push from the orchestrator; no repeated polling needed.
-  var sseActive=false,fallbackTimer=null;
+  // Display activity lifecycle:
+  // - default: pause network work when unfocused/hidden
+  // - optional: always-active monitor mode (for dedicated billboard screens)
+  var DISPLAY_ACTIVITY_KEY='crustyDisplayAlwaysActive';
+  var query=new URLSearchParams(window.location.search);
+  var alwaysActive=query.get('active')==='1'||window.localStorage.getItem(DISPLAY_ACTIVITY_KEY)==='1';
+  var sseActive=false;
+  var sseConnection=null;
+  var fallbackTimer=null;
+  var reconnectTimer=null;
+  var fullPollTimer=null;
+  var resourcePollTimer=null;
+
+  function shouldStayActive(){
+    if(alwaysActive)return true;
+    return document.visibilityState==='visible'&&document.hasFocus();
+  }
+
+  function clearTimer(name){
+    if(name){clearInterval(name);clearTimeout(name);} 
+  }
+
+  function updateActivityControls(){
+    var statusEl=el('dactivity');
+    var btn=el('dactive-toggle');
+    if(statusEl){
+      statusEl.textContent=alwaysActive?'Always Active':'Auto Pause';
+    }
+    if(btn){
+      btn.textContent=alwaysActive?'Monitor On':'Monitor Off';
+      btn.className='dactive-btn'+(alwaysActive?' on':'');
+    }
+  }
+
+  function stopPolling(){
+    clearTimer(fullPollTimer);fullPollTimer=null;
+    clearTimer(resourcePollTimer);resourcePollTimer=null;
+    clearTimer(fallbackTimer);fallbackTimer=null;
+  }
+
+  function startPolling(){
+    if(!fullPollTimer)fullPollTimer=setInterval(pollFull,30000);
+    if(!resourcePollTimer)resourcePollTimer=setInterval(loadResources,60000);
+  }
+
+  function closeSSE(){
+    if(sseConnection){
+      try{sseConnection.close();}catch(e){}
+      sseConnection=null;
+    }
+    sseActive=false;
+    clearTimer(reconnectTimer);reconnectTimer=null;
+  }
+
   function startSSE(){
+    if(!shouldStayActive()||sseConnection)return;
     var es=new EventSource('/api/events');
+    sseConnection=es;
     es.onopen=function(){
       sseActive=true;
-      if(fallbackTimer){clearInterval(fallbackTimer);fallbackTimer=null;}
+      clearTimer(fallbackTimer);fallbackTimer=null;
     };
     es.onmessage=function(ev){
       var msg;try{msg=JSON.parse(ev.data);}catch(e){return;}
       if(msg.type==='connected'){pollFull();return;}
       if(msg.type==='state'){
-        // Lightweight direct render from pushed data (no extra fetch)
         var d=msg;
         if(d.orchestratorName)el('dorch').textContent=d.orchestratorName;
         if(d.mode){var modeEl=el('dmode');modeEl.textContent=d.mode.toUpperCase();modeEl.className='m-'+d.mode;}
         var busyEl=el('dbusy');
         if(d.auto&&d.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
         else if(busyEl){busyEl.style.display='none';}
-        // Refresh full data on next idle cycle
-        if(document.visibilityState!=='hidden'){
-          requestIdleCallback?requestIdleCallback(function(){loadStatus();loadQueue();}):setTimeout(function(){loadStatus();loadQueue();},50);
+        if(document.visibilityState!=='hidden'||alwaysActive){
+          if(typeof window.requestIdleCallback==='function'){
+            window.requestIdleCallback(function(){loadStatus();loadQueue();});
+          } else {
+            setTimeout(function(){loadStatus();loadQueue();},50);
+          }
         }
       }
     };
     es.onerror=function(){
       sseActive=false;
-      es.close();
-      // Fall back to slow polling if SSE drops; retry SSE after 30s
+      try{es.close();}catch(e){}
+      if(sseConnection===es)sseConnection=null;
+      if(!shouldStayActive()){
+        clearTimer(fallbackTimer);fallbackTimer=null;
+        return;
+      }
       if(!fallbackTimer){fallbackTimer=setInterval(pollFull,15000);}
-      setTimeout(startSSE,30000);
+      clearTimer(reconnectTimer);
+      reconnectTimer=setTimeout(function(){startSSE();},30000);
     };
   }
-  startSSE();
 
-  // Slow safety-net poll (30s) catches anything SSE misses
-  setInterval(pollFull,30000);setInterval(loadResources,60000);
+  function syncActivityState(){
+    if(shouldStayActive()){
+      startPolling();
+      pollFull();
+      loadResources();
+      startSSE();
+      return;
+    }
+    closeSSE();
+    stopPolling();
+  }
 
-  // Pause/resume polls when tab is hidden (saves bandwidth on background displays)
-  document.addEventListener('visibilitychange',function(){
-    if(document.visibilityState==='visible')pollFull();
-  });
+  var toggleBtn=el('dactive-toggle');
+  if(toggleBtn){
+    toggleBtn.addEventListener('click',function(){
+      alwaysActive=!alwaysActive;
+      window.localStorage.setItem(DISPLAY_ACTIVITY_KEY,alwaysActive?'1':'0');
+      updateActivityControls();
+      syncActivityState();
+    });
+  }
+
+  document.addEventListener('visibilitychange',syncActivityState);
+  window.addEventListener('focus',syncActivityState);
+  window.addEventListener('blur',syncActivityState);
+  window.addEventListener('pageshow',syncActivityState);
+  window.addEventListener('pagehide',syncActivityState);
+
+  updateActivityControls();
+  syncActivityState();
 </script>
 </body>
 </html>`;

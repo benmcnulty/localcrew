@@ -13,16 +13,16 @@ function formatConversationLine(message: ConversationMessage): string {
   return `@${message.endpoint}: ${message.content}`;
 }
 
-export function formatConversationTranscript(messages: ConversationMessage[]): string {
+export function formatConversationTranscript(messages: ReadonlyArray<ConversationMessage>): string {
   return messages.map(formatConversationLine).join("\n\n");
 }
 
 export function buildChatMessages(options: {
   alias: string;
-  participants: Array<{ alias: string; nickname: string }>;
+  participants: ReadonlyArray<{ alias: string; nickname: string }>;
   instructions: string;
   summary: string;
-  recentMessages: ConversationMessage[];
+  recentMessages: ReadonlyArray<ConversationMessage>;
   taskPrompt: string;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [];
@@ -93,7 +93,7 @@ export function buildAgentChatMessages(options: {
   orchestratorName: string;
   spec: string;
   summary: string;
-  recentMessages: ConversationMessage[];
+  recentMessages: ReadonlyArray<ConversationMessage>;
   taskPrompt: string;
   resourceRoster?: string;
   extraContextBlocks?: string[];
@@ -221,7 +221,7 @@ export function buildAutoTaskMessages(options: {
   focusTodo: string;
   changelog: string;
   orchestratorSummary: string;
-  agents: string[];
+  agents: ReadonlyArray<string>;
   task: string;
   priority: string;
   createdBy: string;
@@ -386,7 +386,7 @@ export function buildQueueFillMessages(options: {
   changelog: string;
   orchestratorSummary: string;
   orchestratorName: string;
-  agents: string[];
+  agents: ReadonlyArray<string>;
   resourceRoster?: string;
   currentDateTime?: string;
 }): ChatMessage[] {
@@ -547,7 +547,7 @@ export function buildQueueFillFinalizeMessages(options: {
   changelog: string;
   orchestratorSummary: string;
   orchestratorName: string;
-  agents: string[];
+  agents: ReadonlyArray<string>;
   draftTasks: string;
   reviewFeedback: string;
   resourceRoster?: string;

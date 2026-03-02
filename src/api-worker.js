@@ -6,6 +6,16 @@ let nextRequestId = 0;
 const pendingResponses = new Map();
 const sseConnections = new Set();
 
+function getApiToken() {
+  return process.env.CRUSTY_API_TOKEN?.trim() || "";
+}
+
+function getRequestApiToken(request, reqUrl) {
+  const authHeader = request.headers.authorization || request.headers.Authorization || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  return bearerToken || (reqUrl.searchParams.get("token") || "");
+}
+
 function writeJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -23,6 +33,12 @@ const server = createServer((request, response) => {
   // SSE connections are handled locally — no IPC round-trip needed.
   const reqUrl = new URL(request.url ?? "/", "http://localhost");
   if (reqUrl.pathname === "/api/events") {
+    const requiredToken = getApiToken();
+    if (requiredToken && getRequestApiToken(request, reqUrl) !== requiredToken) {
+      writeJson(response, 401, { error: "Unauthorized. Provide a valid Bearer token." });
+      return;
+    }
+
     response.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
