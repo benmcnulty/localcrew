@@ -1,8 +1,8 @@
 # Crusty
 
-Crusty is a local-first orchestration CLI for multi-device inference networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, transactional telemetry, a local browser-facing API, a crude browser GUI prototype, and observability tools such as `/status`, `/hud`, and `/explore`.
+Crusty is a local-first orchestration CLI for multi-device inference networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, web grounding tools, transactional telemetry, a local browser dashboard, and observability tools such as `/status`, `/hud`, and `/explore`.
 
-The repo is being prepared for public release. Local node addresses, model assignments, and hardware-specific notes are now loaded from ignored env files instead of being committed into source.
+Local node addresses, model assignments, and hardware-specific notes are loaded from ignored env files — nothing machine-specific is committed to source.
 
 Provider foundation is built around:
 - `ollama` for local Ollama endpoints
@@ -12,16 +12,21 @@ Provider foundation is built around:
 ## Current Features
 
 - Shared chat, group chat, and autonomous orchestrator modes
-- Dynamic participant bindings, nicknames, and per-participant model selection for chat and group prototypes
-- Participant voices through macOS `say` only
+- Dynamic participant bindings, nicknames, and per-participant model selection
+- Participant voices through macOS `say`
 - Shared queue with priorities and background auto pulse
 - Load-aware, hardware-aware resource routing with optional CPU/RAM/GPU/context metadata
 - Agent identity creation, editing, and private memory
 - Built-in `data-analyst` agent seeded from committed external system memory
 - Transactional audit logging and per-model telemetry summaries
-- Wikipedia search tool workflow for grounded factual retrieval in orchestrator and agent tasks
-- Local HTTP API for status, HUD, queue, telemetry, audit, agent, explorer, and command/edit workflows
-- Local `/ui` browser prototype served from the same API surface
+- Wikipedia and Reddit search for factual grounding in orchestrator and agent tasks
+- DuckDuckGo web search (topic-gated: news, jobs, software-engineering, ai-engineering)
+- Weather forecasts via Open-Meteo (no API key required, preferences-aware location)
+- Ben Live skill — built-in access to benlive.tv with llms.txt discovery
+- Personal website tool — configurable via `/preferences website <url>`
+- User preferences (`/preferences`) for weather location, website URL, and daily digest directive
+- Daily work sessions (`/daily start | finish | status`) with task tracking and digest generation
+- Local HTTP API and browser dashboard served from the same surface
 - External dropbox flow through `external-memory/inbox`, `external-memory/active`, and `external-memory/outbox`
 - Local orchestrator state under `.crusty/`
 - Internal file explorer plus status and HUD views in the terminal
@@ -67,6 +72,14 @@ Additional CLI commands:
 - `/topology assign <alias> <role>` — assign a resource role (`primary-orchestrator`, `orchestrator`, or `agent`)
 - `/topology delegate <orchestrator> <agent>` — assign an agent as a subordinate of a sub-orchestrator
 - `/topology undelegate <orchestrator> <agent>` — remove an agent from a sub-orchestrator's subordinates
+- `/preferences` — view configured preferences
+- `/preferences set city "San Francisco"` — set default weather city
+- `/preferences set zipCode 94102` — set default weather zip code
+- `/preferences set website https://example.com` — set personal website URL
+- `/preferences set directive "..."` — set daily digest directive
+- `/daily status` — show current daily work session state
+- `/daily start` — begin a tracked daily work session
+- `/daily finish` — complete the session and generate a digest
 - `/clear` — reset the app back to its env-backed first-run state
 - `/end` — end the current chat or group session
 - `/exit` — exit Crusty
@@ -97,6 +110,21 @@ Sub-Orchestrator: @zora (16k ctx)
 ```
 
 Use `/topology` to view the live hierarchy at any time.
+
+## Web Tools & Grounding
+
+Crusty exposes six external data tools to orchestrators and agents. Models emit a special marker line in their response; the app resolves the tool and re-prompts with the results.
+
+| Marker | Example | Tool |
+|--------|---------|------|
+| `WIKIPEDIA: query` | `WIKIPEDIA: transformer architecture` | Wikipedia search |
+| `REDDIT: query` | `REDDIT: best rust async runtime` | Reddit (tech subreddits only) |
+| `SEARCH[topic]: query` | `SEARCH[software-engineering]: typescript generics` | DuckDuckGo web search |
+| `WEATHER: location` | `WEATHER: San Francisco` | Open-Meteo weather forecast |
+| `BENLIVE: path` | `BENLIVE: /blog` | benlive.tv content |
+| `WEBSITE: path` | `WEBSITE: /about` | Personal website (requires `/preferences website`) |
+
+Web search is topic-gated to: `news`, `jobs`, `software-engineering`, `ai-engineering`. This prevents internal orchestration decisions from leaking to external search and keeps queries focused on current real-world information.
 
 ## Local State
 
