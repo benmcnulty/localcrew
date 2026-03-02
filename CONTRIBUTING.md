@@ -65,14 +65,14 @@ Run `/code-review` in Claude Code, or ask Claude to review your staged changes. 
 
 ## Zero External Dependencies
 
-Crusty has a deliberate minimal dependency policy. The only approved external runtime dependency is `duck-duck-scrape` (for DuckDuckGo search). Everything else uses:
+Crusty has a deliberate zero-dependency policy. Runtime code must use built-in platform APIs only:
 
 - Native `fetch` for HTTP
 - `node:fs/promises` for file I/O
 - `node:child_process` for process management
 - Standard Web APIs available in Bun/Node
 
-**Rationale:** minimal attack surface, maximum portability, easy auditability. Do not add new runtime dependencies without explicit maintainer approval.
+**Rationale:** minimal attack surface, maximum portability, easy auditability. Do not add runtime dependencies without explicit maintainer approval and a documented exception.
 
 ## Web Tools & Grounding
 
@@ -145,7 +145,7 @@ Open a GitHub issue with:
 | `src/wikipedia.ts` | Wikipedia search + chunking |
 | `src/reddit.ts` | Reddit search (technical subreddit allowlist) |
 | `src/page-fetcher.ts` | Shared HTML-to-text stripping and chunking utility |
-| `src/web-search.ts` | Topic-gated DuckDuckGo search via duck-duck-scrape |
+| `src/web-search.ts` | Topic-gated DuckDuckGo HTML search scraping + normalization |
 | `src/weather.ts` | Open-Meteo geocoding and forecast fetch |
 | `src/benlive.ts` | benlive.tv content fetcher with llms.txt discovery |
 | `src/website.ts` | Configurable personal website content fetcher |

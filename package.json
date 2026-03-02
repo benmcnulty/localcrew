@@ -30,8 +30,5 @@
     "start:bun": "bun run src/index.ts",
     "start:node": "node src/index.ts",
     "test": "bun test"
-  },
-  "dependencies": {
-    "duck-duck-scrape": "^2.2.7"
   }
 }

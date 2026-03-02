@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { rename, rm, writeFile } from "node:fs/promises";
 import { unlinkSync, writeFileSync, renameSync } from "node:fs";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export interface StoragePaths {

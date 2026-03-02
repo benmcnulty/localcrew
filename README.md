@@ -57,6 +57,12 @@ Notable views:
 - Browser UI at the printed `Local UI` link (e.g. `http://localhost:4310/ui`) for the prototype GUI backed by the same local API
 - `/resource list` and `/resource edit <alias>` for dynamic device inventory management
 
+Billboard display behavior:
+
+- `/display` defaults to **Auto Pause**: when the tab is hidden or unfocused, it suspends live network updates to reduce device resource usage
+- returning focus triggers a fast refresh and live updates resume automatically
+- for dedicated wallboard/monitor use, enable **Monitor On** in the display header, or open `http://<host>:4310/display?active=1`
+
 Additional CLI commands:
 
 - `/priority [high|medium|low]` — set default priority for queued tasks
@@ -187,6 +193,7 @@ Each script benchmarks a local Ollama endpoint, recommends a context length and 
 - Architecture and storage model: `docs/architecture.md`
 - Product and orchestration roadmap: `docs/roadmap.md`
 - Remote portal and auth planning: `docs/remote-portal.md`
+- Release readiness runbook + known limitations: `docs/release-readiness.md`
 
 ## Near-Term Direction
 
