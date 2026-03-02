@@ -154,3 +154,48 @@ After adding multiple devices, you can build a hierarchy:
 4. In `/auto`, complex multi-step tasks will be automatically delegated to idle sub-orchestrators
 
 Only top-tier devices with ≥16k context qualify for the orchestrator role.
+
+## Promoting a Device to Sub-Orchestrator
+
+A sub-orchestrator is a device that independently coordinates a group of subordinate agents, receiving complex delegated tasks from the primary orchestrator in `/auto` mode. Sub-orchestrators continue processing even if the primary goes offline.
+
+**Requirements:**
+- Must be registered as a resource (via `setup-agent.js` or `/resource add`)
+- Must be a `top` tier device (set during sync or via `/resource edit`)
+- Must have ≥16k context tokens (set `maxContextTokens` via `/resource edit`)
+
+**Promotion steps:**
+
+1. Sync the device if not already registered:
+   ```
+   node scripts/setup-agent.js   # run on the agent device
+   ```
+   Then on the primary, confirm the device appears in `/resource list`.
+
+2. Assign the orchestrator role:
+   ```
+   /topology assign <alias> orchestrator
+   ```
+   Replace `<alias>` with the resource alias reported by `/resource list`.
+
+3. Delegate agents under the sub-orchestrator:
+   ```
+   /topology delegate <orchestrator-alias> <agent-alias>
+   ```
+   Repeat for each agent device that should be subordinate to this sub-orchestrator.
+
+4. Verify the live hierarchy:
+   ```
+   /topology
+   ```
+   You should see the sub-orchestrator listed with its subordinate agents indented beneath it.
+
+**Example output:**
+```
+Primary: @erin (32k ctx)
+  └─ agent: @min (8k ctx)
+Sub-Orchestrator: @zora (16k ctx)
+  └─ agent: @pav (8k ctx)
+```
+
+Once promoted, the primary will automatically route complex multi-step tasks to idle sub-orchestrators during `/auto` mode. Use `/topology undelegate <orchestrator> <agent>` to remove an agent from a sub-orchestrator's subordinates, and `/topology assign <alias> agent` to demote a sub-orchestrator back to agent role.
