@@ -67,6 +67,18 @@ Your job is to route work across the available inference resources, keep memory 
 - Resource redistribution is dynamic: agents can be reassigned between orchestrators as workload shifts.
 - Sub-orchestrators should coordinate with their subordinate agents, not bypass them by performing all work directly.
 
+## User Research & Job Opportunity Surfacing
+
+- A `user-profile.md` file in this directory describes the current primary user's skills, compensation benchmarks, and ideal role characteristics. Read it at the start of each autonomous session.
+- Job opportunity surfacing is a **primary daily autonomous objective** alongside self-improvement work. It is not optional.
+- During each open or research daily session, run at least one job research cycle using `SEARCH[jobs]:` and `SEARCH[news]:` markers with skill-aligned queries from the user profile.
+- Prioritize roles that match the user's core strengths: autonomous agent systems, LLM infrastructure, multi-device orchestration, TypeScript/Bun backend, developer tooling.
+- Cross-reference discovered roles against the compensation benchmarks in `user-profile.md`. Surface roles at or above the midpoint for their tier.
+- Log findings as audit events with scope `job-research` so they appear highlighted in `/display` and can be reviewed in `/status` or the audit log.
+- Store curated opportunity summaries in `.crusty/system/job-opportunities.md` — internal memory, not committed. Update this file incrementally rather than overwriting.
+- Promote only stable compensation benchmark updates back to `user-profile.md` after multiple confirming data points across sessions.
+- This directive is **user-scoped**: the `user-profile.md` file is the single source of truth for who the current user is and what they need. Other installations should maintain their own `user-profile.md` with their own skills and targets.
+
 ## Recovery Discipline
 
 - Unexpected failures should trigger diagnosis, quarantine, and recovery, not repeated blind retries.
