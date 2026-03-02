@@ -197,6 +197,10 @@ async function buildApiResponse(
     return jsonResponse(200, { ok: true });
   }
 
+  if (request.method === "GET" && request.url.pathname === "/api/events") {
+    return textResponse(200, 'data: {"type":"connected"}\n\n', "text/event-stream; charset=utf-8");
+  }
+
   if (request.method === "GET" && request.url.pathname === "/api/status") {
     return jsonResponse(200, await app.getStatusSnapshot());
   }
@@ -836,11 +840,11 @@ export async function startApiServer(
   });
 
   let listeningServer: Server | null = null;
-  let lastError: Error | null = null;
+  let lastErrorMessage = "Unknown error.";
 
   listeningServer = await new Promise<Server | null>((resolve) => {
     const handleError = (error: Error): void => {
-      lastError = error;
+      lastErrorMessage = error.message;
       server.off("listening", handleListening);
       resolve(null);
     };
@@ -855,9 +859,7 @@ export async function startApiServer(
   });
 
   if (!listeningServer) {
-    warn(
-      `HTTP API failed to start on ${bindHost}:${requestedPort}: ${lastError?.message ?? "Unknown error."}`
-    );
+    warn(`HTTP API failed to start on ${bindHost}:${requestedPort}: ${lastErrorMessage}`);
     return null;
   }
 

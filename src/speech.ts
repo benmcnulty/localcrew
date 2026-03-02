@@ -4,8 +4,10 @@ import type { SpawnOptions } from "node:child_process";
 export type WarnFn = (message: string) => void;
 
 export interface ChildProcessLike {
-  on?(event: "error", listener: (error: Error) => void): void;
-  on?(event: "exit", listener: (code: number | null) => void): void;
+  on?<TEvent extends "error" | "exit">(
+    event: TEvent,
+    listener: TEvent extends "error" ? (error: Error) => void : (code: number | null) => void
+  ): void;
   unref?(): void;
 }
 
@@ -45,10 +47,10 @@ export function speakText(
       stdio: "ignore"
     });
 
-    child.on?.("error", (error) => {
+    child.on?.("error", (error: Error) => {
       warn(`Speech failed: ${error.message}`);
     });
-    child.on?.("exit", (code) => {
+    child.on?.("exit", (code: number | null) => {
       if (code && code !== 0) {
         warn(
           options.voice

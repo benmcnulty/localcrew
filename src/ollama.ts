@@ -121,7 +121,10 @@ export async function chatWithOllamaDetailed(
     };
     const content = Array.isArray(body.content)
       ? body.content
-          .filter((item) => item?.type === "text" && typeof item.text === "string")
+          .filter(
+            (item): item is { type: "text"; text: string } =>
+              item?.type === "text" && typeof item.text === "string"
+          )
           .map((item) => item.text.trim())
           .filter((text) => text !== "")
           .join("\n")
