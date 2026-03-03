@@ -1,5 +1,5 @@
 {
-  "name": "crusty",
+  "name": "localcrew",
   "version": "0.1.0",
   "description": "Local-first multi-device LLM inference orchestrator with REPL CLI and browser UI",
   "private": false,
@@ -8,7 +8,7 @@
   "author": "Ben",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ben/crusty"
+    "url": "https://github.com/ben/localcrew"
   },
   "keywords": [
     "llm",
@@ -24,7 +24,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "setup:crusty": "node scripts/setup-orchestrator.js",
+    "setup:crew": "node scripts/setup-orchestrator.js",
     "setup:agent": "node scripts/setup-agent.js",
     "start": "node src/index.ts",
     "start:bun": "bun run src/index.ts",
