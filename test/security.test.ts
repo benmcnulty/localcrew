@@ -28,7 +28,7 @@ import { atomicWriteFile, getStoragePaths } from "../src/storage.ts";
 import type { AutoQueueTask } from "../src/types.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
-  const rootDir = await mkdtemp(join(tmpdir(), "crusty-sec-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-sec-"));
   try {
     await run(rootDir);
   } finally {
@@ -356,7 +356,7 @@ describe("getInternalFileTree", () => {
       const tree = await getInternalFileTree(rootDir);
       expect(tree.lines.length).toBeGreaterThan(0);
       // Should reference the system dir
-      expect(tree.rootPath).toContain(".crusty");
+      expect(tree.rootPath).toContain(".localcrew");
     });
   });
 });

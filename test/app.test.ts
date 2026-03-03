@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
-import { CrustyApp } from "../src/app.ts";
+import { LocalCrewApp } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { getDefaultInstruction, loadConfig } from "../src/config.ts";
 import { saveResources, type ResourceProfile } from "../src/resources.ts";
@@ -25,7 +25,7 @@ import { loadTelemetrySummary, readRecentAuditEvents } from "../src/telemetry.ts
 import type { ChatMessage } from "../src/types.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
-  const rootDir = await mkdtemp(join(tmpdir(), "crusty-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
 
   try {
     await run(rootDir);
@@ -113,11 +113,11 @@ function makeChatResponse(
   );
 }
 
-describe("CrustyApp", () => {
+describe("LocalCrewApp", () => {
   test("routes command-mode plain messages to the default endpoint", async () => {
     await withTempDir(async (rootDir) => {
       const seenBodies: Array<{ messages?: ChatMessage[] }> = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
@@ -138,7 +138,7 @@ describe("CrustyApp", () => {
 
   test("routes @alias messages to the addressed participant", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Reply from Zora"),
         speakFn: () => {}
@@ -153,7 +153,7 @@ describe("CrustyApp", () => {
   test("routes chat-mode plain messages to the default endpoint", async () => {
     await withTempDir(async (rootDir) => {
       const seenBodies: Array<{ messages?: ChatMessage[] }> = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
@@ -176,7 +176,7 @@ describe("CrustyApp", () => {
 
   test("stores a follow-up suggestion instead of auto-submitting it", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse('Erin reply\nNEXT: @zora: "I have introduced myself, please go next."'),
@@ -209,7 +209,7 @@ describe("CrustyApp", () => {
 
   test("submits participant crosstalk and routes the reply to the target participant", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Zora reply"),
         speakFn: () => {}
@@ -240,7 +240,7 @@ describe("CrustyApp", () => {
       const seenBodies: Array<{ messages?: ChatMessage[] }> = [];
       let callIndex = 0;
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
@@ -264,7 +264,7 @@ describe("CrustyApp", () => {
 
   test("returns context-aware help output", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir });
+      const app = await LocalCrewApp.create({ rootDir });
       const beforeMode = await app.execute(parseCommand("/help"));
 
       await app.execute(parseCommand("/chat"));
@@ -283,7 +283,7 @@ describe("CrustyApp", () => {
 
   test("returns an edit request for interactive instruction editing", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir });
+      const app = await LocalCrewApp.create({ rootDir });
       const result = await app.execute(parseCommand("/instructions"));
 
       expect(result.editRequest).toEqual({
@@ -298,7 +298,7 @@ describe("CrustyApp", () => {
   test("returns a status viewer request and exposes orchestration status lines", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
 
       await app.execute(parseCommand("/auto"));
       const result = await app.execute(parseCommand("/status"));
@@ -316,7 +316,7 @@ describe("CrustyApp", () => {
 
   test("returns a hud viewer request and exposes telemetry-aware hud lines", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Hello from Erin"),
         speakFn: () => {}
@@ -338,10 +338,10 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       await writeFile(
         join(rootDir, ".env.local"),
-        "CRUSTY_AUTO_PULSE_INTERVAL_MS=4321\nCRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT=3456\n"
+        "LOCALCREW_AUTO_PULSE_INTERVAL_MS=4321\nLOCALCREW_AUTO_SOURCE_DOC_CHAR_LIMIT=3456\n"
       );
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("ok"),
         speakFn: () => {}
@@ -354,7 +354,7 @@ describe("CrustyApp", () => {
 
   test("returns an explore viewer request and reads internal files safely", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
       const result = await app.execute(parseCommand("/explore"));
       const tree = await app.getExploreTree();
       const file = await app.readExploreFile(getStoragePaths(rootDir).focusTodoPath);
@@ -370,9 +370,9 @@ describe("CrustyApp", () => {
   test("enters auto mode, queues a task, and processes it through the configured orchestrator identity", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
-      process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
-      const app = await CrustyApp.create({
+      const previousName = process.env.LOCALCREW_ORCHESTRATOR_NAME;
+      process.env.LOCALCREW_ORCHESTRATOR_NAME = "Aster";
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -408,9 +408,9 @@ describe("CrustyApp", () => {
         ]);
       } finally {
         if (previousName === undefined) {
-          delete process.env.CRUSTY_ORCHESTRATOR_NAME;
+          delete process.env.LOCALCREW_ORCHESTRATOR_NAME;
         } else {
-          process.env.CRUSTY_ORCHESTRATOR_NAME = previousName;
+          process.env.LOCALCREW_ORCHESTRATOR_NAME = previousName;
         }
       }
     });
@@ -420,7 +420,7 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       const pushedEvents: Array<Record<string, unknown>> = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -462,7 +462,7 @@ describe("CrustyApp", () => {
 
   test("stops auto mode without clearing the queue state", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
 
       await app.execute(parseCommand("/auto"));
       const stop = await app.execute(parseCommand("/stop"));
@@ -471,7 +471,7 @@ describe("CrustyApp", () => {
       expect(stop.lines).toEqual(["Auto mode stopped."]);
       expect(app.isAutoMode()).toBe(false);
       expect(app.shouldAutoPulse()).toBe(false);
-      expect(app.getPrompt()).toBe("crusty> ");
+      expect(app.getPrompt()).toBe("crew> ");
       expect(state.auto.enabled).toBe(false);
     });
   });
@@ -479,11 +479,11 @@ describe("CrustyApp", () => {
   test("fills the auto queue on an idle cycle when it is empty", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const previousName = process.env.CRUSTY_ORCHESTRATOR_NAME;
-      process.env.CRUSTY_ORCHESTRATOR_NAME = "Aster";
+      const previousName = process.env.LOCALCREW_ORCHESTRATOR_NAME;
+      process.env.LOCALCREW_ORCHESTRATOR_NAME = "Aster";
       let callCount = 0;
       const seenModels: string[] = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as { model?: string };
@@ -522,9 +522,9 @@ describe("CrustyApp", () => {
         expect(seenModels).toEqual(["gpt-oss:20b", "llama3.1:8b", "gpt-oss:20b"]);
       } finally {
         if (previousName === undefined) {
-          delete process.env.CRUSTY_ORCHESTRATOR_NAME;
+          delete process.env.LOCALCREW_ORCHESTRATOR_NAME;
         } else {
-          process.env.CRUSTY_ORCHESTRATOR_NAME = previousName;
+          process.env.LOCALCREW_ORCHESTRATOR_NAME = previousName;
         }
       }
     });
@@ -533,7 +533,7 @@ describe("CrustyApp", () => {
   test("ingests inbox documents, writes draft/final files, and moves the source document through the dropbox", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -575,16 +575,16 @@ describe("CrustyApp", () => {
       expect(dropbox.outbox.map((entry) => entry.relativePath)).toEqual(
         expect.arrayContaining(["request.md", "finals/result.md"])
       );
-      expect(sourceOutbox).toContain("Crusty-Status: outbox");
-      expect(finalOutbox).toContain("Crusty-Status: outbox");
-      expect(activeDraft).toContain("Crusty-Status: active");
+      expect(sourceOutbox).toContain("LocalCrew-Status: outbox");
+      expect(finalOutbox).toContain("LocalCrew-Status: outbox");
+      expect(activeDraft).toContain("LocalCrew-Status: active");
     });
   });
 
   test("returns a workflow request for agent creation and persists a generated agent", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -616,7 +616,7 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       let callIndex = 0;
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => {
           callIndex += 1;
@@ -663,7 +663,7 @@ describe("CrustyApp", () => {
 
   test("persists instructions, default endpoint, sound, and voice changes", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir, platform: "darwin" });
+      const app = await LocalCrewApp.create({ rootDir, platform: "darwin" });
 
       await app.execute(parseCommand('/instructions @zora "Reply in one sentence."'));
       await app.execute(parseCommand("/default zora"));
@@ -681,7 +681,7 @@ describe("CrustyApp", () => {
 
   test("reports voice and sound controls as macOS-only on other platforms", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir, platform: "linux" });
+      const app = await LocalCrewApp.create({ rootDir, platform: "linux" });
 
       const soundResult = await app.execute(parseCommand("/sound off"));
       const voiceResult = await app.execute(parseCommand("/voice list"));
@@ -698,7 +698,7 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       const seenDirectModels: string[] = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (input, init) => {
           const url = String(input);
@@ -771,7 +771,7 @@ describe("CrustyApp", () => {
   test("replaces an existing synced resource when the same device registers again", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const app = await CrustyApp.create({ rootDir, speakFn: () => {} });
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
 
       const first = await app.syncResourceReport({
         alias: "studio-a",
@@ -814,7 +814,7 @@ describe("CrustyApp", () => {
 
   test("renames an endpoint across config, runtime target, and stored conversation", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Hello from Erin"),
         speakFn: () => {}
@@ -842,7 +842,7 @@ describe("CrustyApp", () => {
 
   test("resets the shared conversation and keeps the current mode", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Hello from Erin"),
         speakFn: () => {}
@@ -863,7 +863,7 @@ describe("CrustyApp", () => {
 
   test("clears config, sessions, and runtime state back to the initial defaults", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -896,7 +896,7 @@ describe("CrustyApp", () => {
       const focusTodo = await readFile(getStoragePaths(rootDir).focusTodoPath, "utf8");
 
       expect(result.lines).toEqual(["Application state cleared."]);
-      expect(app.getPrompt()).toBe("crusty> ");
+      expect(app.getPrompt()).toBe("crew> ");
       expect(config.defaultEndpoint).toBe("erin");
       expect(config.soundEnabled).toBe(true);
       expect(config.endpoints.zora.instructions).toBe(getDefaultInstruction("zora"));
@@ -914,7 +914,7 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       let callIndex = 0;
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => {
           callIndex += 1;
@@ -940,7 +940,7 @@ describe("CrustyApp", () => {
 
   test("records telemetry for chat transactions", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse("Hello from Erin", {
@@ -967,7 +967,7 @@ describe("CrustyApp", () => {
     await withTempDir(async (rootDir) => {
       let ollamaCallCount = 0;
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (input) => {
           const url = String(input);
@@ -1042,7 +1042,7 @@ describe("CrustyApp", () => {
 
       const requestedModels: string[] = [];
       let callCount = 0;
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as { model?: string };
@@ -1128,7 +1128,7 @@ describe("CrustyApp", () => {
         )}\n`
       );
 
-      await CrustyApp.create({
+      await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("ok"),
         speakFn: () => {}
@@ -1183,7 +1183,7 @@ describe("CrustyApp", () => {
           2
         )}\n`
       );
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -1247,7 +1247,7 @@ describe("CrustyApp", () => {
           2
         )}\n`
       );
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -1267,7 +1267,7 @@ describe("CrustyApp", () => {
       const result = await app.runIdleCycle();
       const dropbox = await app.getDropboxSnapshot();
       const internalFile = await readFile(
-        join(rootDir, ".crusty", "system", "secure", "orchestrator", "generated", "memory", "failure-summary.md"),
+        join(rootDir, ".localcrew", "system", "secure", "orchestrator", "generated", "memory", "failure-summary.md"),
         "utf8"
       );
 
@@ -1309,7 +1309,7 @@ describe("CrustyApp", () => {
           2
         )}\n`
       );
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(["Queued follow-up.", "QUEUE[medium]: implement"].join("\n")),
@@ -1356,7 +1356,7 @@ describe("CrustyApp", () => {
           2
         )}\n`
       );
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => {
           throw new Error("HTTP 500: upstream unavailable");
@@ -1426,7 +1426,7 @@ describe("CrustyApp", () => {
       await saveResources(resources, rootDir);
 
       const requestedModels: string[] = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as { model?: string };
@@ -1448,7 +1448,7 @@ describe("CrustyApp", () => {
   test("rejects loopback base URLs for synced non-orchestrator resources", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("ok"),
         speakFn: () => {}
@@ -1480,7 +1480,7 @@ describe("CrustyApp", () => {
         rootDir
       );
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
           makeChatResponse(
@@ -1508,7 +1508,7 @@ describe("CrustyApp", () => {
 
   test("returns a recoverable error for unknown endpoint aliases", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir });
+      const app = await LocalCrewApp.create({ rootDir });
 
       const invalidResult = await app.execute(parseCommand("/model nope"));
       const validResult = await app.execute(parseCommand("/model"));
@@ -1523,7 +1523,7 @@ describe("CrustyApp", () => {
 
   test("sets and reports model profile mode", async () => {
     await withTempDir(async (rootDir) => {
-      const app = await CrustyApp.create({ rootDir });
+      const app = await LocalCrewApp.create({ rootDir });
 
       const setResult = await app.execute(parseCommand("/model profile all-llamas"));
       const getResult = await app.execute(parseCommand("/model profile"));
@@ -1599,7 +1599,7 @@ describe("AutoQueueTask timing", () => {
       await seedResourceInventory(rootDir);
       // Each call returns the same mock response regardless of whether it is a
       // preflight or the main execution call.
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Task done."),
         speakFn: () => {}
@@ -1626,7 +1626,7 @@ describe("AutoQueueTask timing", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       let callCount = 0;
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => {
           callCount++;
@@ -1663,7 +1663,7 @@ describe("pre-flight task reasoning", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       const calls: Array<{ url: string; body: unknown }> = [];
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (url, init) => {
           calls.push({ url: String(url), body: JSON.parse((init?.body as string) ?? "{}") });
@@ -1686,7 +1686,7 @@ describe("pre-flight task reasoning", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       let callCount = 0;
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => {
           callCount++;

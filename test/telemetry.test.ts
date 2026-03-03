@@ -8,7 +8,7 @@ import { readRecentAuditEvents } from "../src/telemetry.ts";
 import { getStoragePaths } from "../src/storage.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
-  const rootDir = await mkdtemp(join(tmpdir(), "crusty-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
 
   try {
     await run(rootDir);
