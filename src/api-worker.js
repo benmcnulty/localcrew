@@ -34,12 +34,7 @@ const server = createServer((request, response) => {
   // SSE connections are handled locally — no IPC round-trip needed.
   const reqUrl = new URL(request.url ?? "/", "http://localhost");
   if (reqUrl.pathname === "/api/events") {
-    const requiredToken = getApiToken();
-    if (requiredToken && getRequestApiToken(request, reqUrl) !== requiredToken) {
-      writeJson(response, 401, { error: "Unauthorized. Provide a valid Bearer token." });
-      return;
-    }
-
+    // No auth check — SSE events are public for unauthenticated billboard access.
     response.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",

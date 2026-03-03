@@ -90,7 +90,7 @@ Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Ever
 
 - No hardcoded secrets, node addresses, or machine-specific values in source — use ignored env files
 - API authentication uses `LOCALCREW_API_TOKEN` (Bearer token); CORS origin is `LOCALCREW_API_CORS_ORIGIN`
-- All mutating API endpoints require Bearer token authentication when `LOCALCREW_API_TOKEN` is set; read-only display paths (`/display`, `/api/events`, `/api/status`, `/api/health`, `/api/daily-work`) and static UI assets are public to support unauthenticated billboard access
+- All mutating API endpoints require Bearer token authentication when `LOCALCREW_API_TOKEN` is set; read-only display paths (`/display`, `/api/events`, `/api/status`, `/api/health`, `/api/daily-work`, `/api/queue`, `/api/resources`, `/api/audit`) and static UI assets are public to support unauthenticated billboard access
 - Audit log writes use `withFileLock` to prevent corruption on concurrent appends
 - Changelog appends are serialized with `withFileLock` and written atomically
 - Dropbox inbox ingestion uses `withFileLock` to prevent double-processing under concurrent auto-pulse

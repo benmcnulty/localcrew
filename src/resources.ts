@@ -640,11 +640,14 @@ export function buildResourceTelemetry(
 }
 
 const SCORE_WEIGHTS = {
-  availability: 0.3,
-  memoryHeadroom: 0.15,
-  capabilityMatch: 0.3,
-  reliability: 0.15,
-  throughput: 0.1
+  availability: 0.30,
+  // memoryHeadroom is currently inert (ramUsagePct is always 0 — we have no
+  // live RAM data). Its weight is redistributed to reliability and throughput
+  // until a real memory metric is available.
+  memoryHeadroom: 0.0,
+  capabilityMatch: 0.30,
+  reliability: 0.25,
+  throughput: 0.15
 };
 
 const MAX_QUEUE_DEPTH = 5;
