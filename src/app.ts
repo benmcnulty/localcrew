@@ -91,6 +91,7 @@ import {
   renderResourceInventory,
   setModelProfile,
   selectModelForEndpoint,
+  type ResourceTelemetry,
   updateResource
 } from "./resources.ts";
 import {
@@ -855,6 +856,7 @@ export class CrustyApp {
   private readonly platform: NodeJS.Platform;
   private autoCyclePromise: Promise<CommandResult> | null;
   private apiServerHandle?: { pushDisplayEvent(payload: Record<string, unknown>): void };
+  private readonly resourceTelemetry = new Map<string, ResourceTelemetry>();
 
   private constructor(
     config: AppConfig,
@@ -897,13 +899,127 @@ export class CrustyApp {
     this.apiServerHandle = handle;
   }
 
-  private pushDisplayState(): void {
+  private pushDisplayEvent(payload: Record<string, unknown>): void {
     if (!this.apiServerHandle) {
       return;
     }
+    this.apiServerHandle.pushDisplayEvent(payload);
+  }
+
+  private getDefaultResourceTelemetry(alias: string): ResourceTelemetry {
+    const queueDepth = this.systemState.auto.pending.filter(
+      (task) => task.requestedResource === alias || task.assignedResource === alias
+    ).length;
+    return {
+      queueDepth,
+      ramUsagePct: 0,
+      tokensPerSecond: 0,
+      activeModel: null,
+      avgQueueWaitMs: 0,
+      successRate: 1,
+      failureCount: 0
+    };
+  }
+
+  private updateResourceTelemetry(alias: string, result: OllamaChatResult, durationMs: number): void {
+    const previous = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
+    const tokensPerSecond =
+      typeof result.evalCount === "number" && typeof result.evalDuration === "number" && result.evalDuration > 0
+        ? (result.evalCount * 1_000_000_000) / result.evalDuration
+        : previous.tokensPerSecond;
+    const queueDepth = this.systemState.auto.pending.filter(
+      (task) => task.requestedResource === alias || task.assignedResource === alias
+    ).length;
+    const sampleCount = Math.max(1, Math.min(20, previous.avgQueueWaitMs > 0 ? 2 : 1));
+    const avgQueueWaitMs =
+      sampleCount === 1 ? durationMs : Math.round((previous.avgQueueWaitMs + durationMs) / 2);
+
+    this.resourceTelemetry.set(alias, {
+      ...previous,
+      queueDepth,
+      tokensPerSecond: Number.isFinite(tokensPerSecond) ? tokensPerSecond : previous.tokensPerSecond,
+      activeModel: result.text ? previous.activeModel : previous.activeModel,
+      avgQueueWaitMs
+    });
+  }
+
+  private updateResourceOutcome(alias: string, model: string, success: boolean): void {
+    const previous = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
+    const nextFailureCount = success ? previous.failureCount : previous.failureCount + 1;
+    const nextSuccessRate = success
+      ? Math.min(1, previous.successRate + 0.05)
+      : Math.max(0, previous.successRate - 0.1);
+    this.resourceTelemetry.set(alias, {
+      ...previous,
+      activeModel: model,
+      failureCount: nextFailureCount,
+      successRate: nextSuccessRate,
+      queueDepth: this.systemState.auto.pending.filter(
+        (task) => task.requestedResource === alias || task.assignedResource === alias
+      ).length
+    });
+  }
+
+  private getSystemTps(): number {
+    let total = 0;
+    for (const telemetry of this.resourceTelemetry.values()) {
+      total += telemetry.tokensPerSecond;
+    }
+    return Math.round(total);
+  }
+
+  private getActiveResourceSummaries(): Array<{
+    alias: string;
+    activeModel: string | null;
+    tokensPerSecond: number;
+    queueDepth: number;
+    successRate: number;
+  }> {
+    const aliases = listResources(this.rootDir).map((resource) => resource.alias);
+    return aliases.map((alias) => {
+      const telemetry = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
+      return {
+        alias,
+        activeModel: telemetry.activeModel,
+        tokensPerSecond: Math.round(telemetry.tokensPerSecond),
+        queueDepth: telemetry.queueDepth,
+        successRate: Number(telemetry.successRate.toFixed(2))
+      };
+    });
+  }
+
+  private getLastCompletedSummary(): {
+    id: number;
+    content: string;
+    status: "queued" | "completed" | "failed";
+    resourceAlias: string | null;
+    model: string | null;
+    qualityVerification: AutoQueueTask["qualityVerification"] | null;
+    durationMs: number | null;
+  } | null {
+    const last = this.systemState.auto.completed[this.systemState.auto.completed.length - 1];
+    if (!last) {
+      return null;
+    }
+    return {
+      id: last.id,
+      content: last.content,
+      status: last.status,
+      resourceAlias: last.assignedResource ?? null,
+      model: last.assignedModel ?? null,
+      qualityVerification: last.qualityVerification ?? null,
+      durationMs: last.durationMs ?? null
+    };
+  }
+
+  private emitTaskEvent(payload: Record<string, unknown>): void {
+    this.pushDisplayEvent(payload);
+  }
+
+  private pushDisplayState(): void {
     const auto = this.systemState.auto;
     const prefs = this.config.preferences;
-    this.apiServerHandle.pushDisplayEvent({
+    this.pushDisplayEvent({
       type: "state",
       orchestratorName: this.config.orchestratorName,
       mode: this.runtime.mode,
@@ -911,11 +1027,22 @@ export class CrustyApp {
         enabled: auto.enabled,
         pendingCount: auto.pending.length,
         completedCount: auto.completed.length,
+        failedCount: auto.completed.filter((task) => task.status === "failed").length,
         busy: this.autoCyclePromise !== null,
-        nextTask: auto.pending[0]?.content ?? null,
-        lastCompleted: auto.completed[auto.completed.length - 1]?.content ?? null,
+        nextTask: auto.pending[0]
+          ? {
+              id: auto.pending[0].id,
+              content: auto.pending[0].content,
+              assignedResource: auto.pending[0].assignedResource ?? null
+            }
+          : null,
+        lastCompleted: this.getLastCompletedSummary(),
         dailySession: auto.dailySession ?? null
       },
+      resourceTelemetry: Object.fromEntries(this.resourceTelemetry),
+      systemTps: this.getSystemTps(),
+      modelProfile: getModelProfile(),
+      activeResources: this.getActiveResourceSummaries(),
       preferences: prefs ?? {}
     });
   }
@@ -1114,6 +1241,7 @@ export class CrustyApp {
       defaultPriority: TaskPriority;
       pendingCount: number;
       completedCount: number;
+      failedCount: number;
     };
     nextTask?: AutoQueueTask;
     lastCompleted?: AutoQueueTask;
@@ -1123,6 +1251,10 @@ export class CrustyApp {
     docs: Awaited<ReturnType<typeof getInternalFileDetails>>;
     telemetry: TelemetrySummary;
     dropbox: Awaited<ReturnType<typeof getDropboxSnapshot>>;
+    resourceTelemetry: Record<string, ResourceTelemetry>;
+    systemTps: number;
+    modelProfile: ReturnType<typeof getModelProfile>;
+    activeResources: ReturnType<CrustyApp["getActiveResourceSummaries"]>;
   }> {
     const [agents, docs, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
@@ -1143,7 +1275,8 @@ export class CrustyApp {
         intervalMs: this.getAutoPulseIntervalMs(),
         defaultPriority: this.systemState.auto.defaultPriority,
         pendingCount: this.systemState.auto.pending.length,
-        completedCount: this.systemState.auto.completed.length
+        completedCount: this.systemState.auto.completed.length,
+        failedCount: this.systemState.auto.completed.filter((task) => task.status === "failed").length
       },
       nextTask: this.sortPendingTasks(this.systemState.auto.pending)[0],
       lastCompleted: this.systemState.auto.completed.at(-1),
@@ -1152,7 +1285,11 @@ export class CrustyApp {
       agents,
       docs,
       telemetry,
-      dropbox
+      dropbox,
+      resourceTelemetry: Object.fromEntries(this.resourceTelemetry),
+      systemTps: this.getSystemTps(),
+      modelProfile: getModelProfile(),
+      activeResources: this.getActiveResourceSummaries()
     };
   }
 
@@ -2009,6 +2146,11 @@ export class CrustyApp {
       `Daily work session completed. Digest written to ${entry.path}. ${session.tasksCompleted} tasks completed, ${session.tasksErrored} errored.`,
       this.rootDir
     );
+    this.emitTaskEvent({
+      type: "daily-complete",
+      sessionId: new Date(session.startedAt).toISOString().slice(0, 10),
+      summary: `${session.tasksCompleted} completed, ${session.tasksErrored} errored. Digest: ${entry.path}`
+    });
     return `Daily Digest written to ${entry.path}. Session completed: ${session.tasksCompleted} tasks completed, ${session.tasksErrored} errored.`;
   }
 
@@ -2325,6 +2467,9 @@ export class CrustyApp {
           ? Math.round(result.totalDuration / 1_000_000)
           : Date.now() - started;
 
+      this.updateResourceTelemetry(options.resourceAlias, result, durationMs);
+      this.updateResourceOutcome(options.resourceAlias, options.endpoint.model, true);
+
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -2350,6 +2495,7 @@ export class CrustyApp {
 
       return result;
     } catch (error) {
+      this.updateResourceOutcome(options.resourceAlias, options.endpoint.model, false);
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -3801,8 +3947,20 @@ export class CrustyApp {
       taskId?: number;
       sourceDocumentRelativePath?: string;
     } = {}
-  ): Promise<string[]> {
+  ): Promise<{
+    lines: string[];
+    writes: Array<{
+      stage: "active" | "outbox" | "internal";
+      path: string;
+      verified: boolean;
+    }>;
+  }> {
     const writtenLines: string[] = [];
+    const writes: Array<{
+      stage: "active" | "outbox" | "internal";
+      path: string;
+      verified: boolean;
+    }> = [];
 
     for (const fileWrite of fileWrites) {
       if (!fileWrite.filename.trim()) {
@@ -3834,6 +3992,11 @@ export class CrustyApp {
             "Autonomous file writes are limited to internal text artifacts. Executable scripts, source files, and app-level implementation requests are redirected into outbox feature tickets."
         });
         writtenLines.push(`Redirected external file request to outbox ticket: ${ticketPath}`);
+        writes.push({
+          stage: "outbox",
+          path: ticketPath,
+          verified: true
+        });
         continue;
       }
 
@@ -3864,6 +4027,11 @@ export class CrustyApp {
             this.rootDir
           );
           writtenLines.push(`Updated memory: ${canonicalEntry.relativePath}`);
+          writes.push({
+            stage: "internal",
+            path: canonicalEntry.relativePath,
+            verified: true
+          });
           continue;
         }
 
@@ -3884,6 +4052,11 @@ export class CrustyApp {
           this.rootDir
         );
         writtenLines.push(`Wrote internal file: ${entry.path}`);
+        writes.push({
+          stage: "internal",
+          path: entry.relativePath,
+          verified: true
+        });
         continue;
       }
 
@@ -3910,9 +4083,17 @@ export class CrustyApp {
         this.rootDir
       );
       writtenLines.push(`Wrote ${fileWrite.stage} file: ${entry.path}`);
+      writes.push({
+        stage: fileWrite.stage,
+        path: entry.relativePath,
+        verified: true
+      });
     }
 
-    return writtenLines;
+    return {
+      lines: writtenLines,
+      writes
+    };
   }
 
   private async getAutoTaskExtraContext(task: AutoQueueTask): Promise<string[]> {
@@ -4180,9 +4361,10 @@ export class CrustyApp {
     let writtenFiles: string[] = [];
     const postProcessErrors: string[] = [];
     try {
-      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites, {
+      const writeResult = await this.handleGeneratedFileWrites(parsed.fileWrites, {
         createdBy: `agent:${agent.slug}`
       });
+      writtenFiles = writeResult.lines;
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
@@ -4278,6 +4460,11 @@ export class CrustyApp {
     }
 
     const draftTasks = parseQueueFillOutput(draftReply);
+    this.emitTaskEvent({
+      type: "queue-fill",
+      phase: "draft",
+      taskCount: draftTasks.length
+    });
     const draftTaskText =
       draftTasks.length > 0
         ? draftTasks.map((task) => `[${task.priority}] ${task.content}`).join("\n")
@@ -4336,6 +4523,12 @@ export class CrustyApp {
     }
 
     const reviewVerdict = parseQueueReviewVerdict(reviewFeedback);
+    this.emitTaskEvent({
+      type: "queue-fill",
+      phase: "review",
+      verdict: reviewVerdict,
+      taskCount: draftTasks.length
+    });
     if (reviewVerdict === "reject") {
       await appendChangelogEntry(
         reviewerResource
@@ -4411,6 +4604,12 @@ export class CrustyApp {
     }
 
     const parsedTasks = parseQueueFillOutput(finalReply);
+    this.emitTaskEvent({
+      type: "queue-fill",
+      phase: "finalize",
+      verdict: reviewVerdict,
+      taskCount: parsedTasks.length
+    });
     const tasks =
       parsedTasks.length > 0
         ? parsedTasks
@@ -4591,10 +4790,18 @@ export class CrustyApp {
       dailySessionContext: this.getDailySessionContext()
     });
 
+    this.emitTaskEvent({
+      type: "task-start",
+      taskId: task.id,
+      resourceAlias: selection.alias,
+      model: endpoint.model,
+      taskContent: task.content
+    });
+
     let rawReply: string;
+    let modelEvalCount = 0;
     try {
-      rawReply = (
-        await this.callModel({
+      const modelResult = await this.callModel({
           scope: "auto.task",
           actor: "orchestrator",
           endpoint,
@@ -4602,8 +4809,9 @@ export class CrustyApp {
           target: `task:${task.id}`,
           messages: outgoingMessages,
           summary: `Processing auto task #${task.id}.`
-        })
-      ).text;
+        });
+      rawReply = modelResult.text;
+      modelEvalCount = modelResult.evalCount ?? 0;
       rawReply = await this.resolveExternalTools({
         scope: "auto.task",
         actor: "orchestrator",
@@ -4640,12 +4848,15 @@ export class CrustyApp {
     const replyText = parsed.replyText || "(No direct result text.)";
     const postProcessErrors: string[] = [];
     let writtenFiles: string[] = [];
+    let writeDetails: Array<{ stage: "active" | "outbox" | "internal"; path: string; verified: boolean }> = [];
     try {
-      writtenFiles = await this.handleGeneratedFileWrites(parsed.fileWrites, {
+      const writeResult = await this.handleGeneratedFileWrites(parsed.fileWrites, {
         createdBy: task.createdBy,
         taskId: task.id,
         sourceDocumentRelativePath: task.sourceDocumentRelativePath
       });
+      writtenFiles = writeResult.lines;
+      writeDetails = writeResult.writes;
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
@@ -4712,6 +4923,15 @@ export class CrustyApp {
           ]
         };
     const queued = queuedResult.tasks;
+    for (const write of writeDetails) {
+      this.emitTaskEvent({
+        type: "task-write",
+        taskId: task.id,
+        stage: write.stage,
+        path: write.path,
+        verified: write.verified
+      });
+    }
     let movedSourceLine: string | null = null;
     if (task.sourceDocumentRelativePath) {
       try {
@@ -4747,6 +4967,15 @@ export class CrustyApp {
     if (/^DAILY_COMPLETE\s*$/m.test(rawReply)) {
       dailyDigestLine = await this.finishDailyWork();
     }
+    this.emitTaskEvent({
+      type: "task-complete",
+      taskId: completedTask.id,
+      resourceAlias: selection.alias,
+      status: completedTask.status === "failed" ? "failed" : "completed",
+      qualitySignals: completedTask.qualityVerification?.signals ?? null,
+      durationMs: completedTask.durationMs ?? 0,
+      tokenCount: modelEvalCount
+    });
     this.pushDisplayState();
 
     return {

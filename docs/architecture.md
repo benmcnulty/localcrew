@@ -94,6 +94,8 @@ Current observability surfaces:
 - local HTTP API for browser-based status, queue, telemetry, audit, explorer, search, command, and edit flows
 - local HTTP API for browser-based participant/resource config, direct chat, and orchestrator profile editing
 - browser UI served at `/ui` from the same local API
+- SSE stream at `/api/events` with enriched orchestrator state (`failedCount`, next/last task summaries, model profile, per-resource telemetry, system T/s)
+- granular task events over SSE (`task-start`, `task-complete`, `task-write`, `queue-fill`, `daily-complete`) for real-time display and CLI watchers
 - terminal background output in `/auto`
 - append-only audit logging for all inference and tool transactions (chat, Wikipedia, Reddit, web search, weather, website)
 

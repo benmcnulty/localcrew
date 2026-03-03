@@ -1845,6 +1845,9 @@ export function getDisplayHtml(): string {
         --fs-lg:1.3rem;--fs-xl:2.3rem;--fs-metric:3.2rem;--fs-task:1.2rem;
       }
     }
+    @media (min-width: 2560px) {
+      html { font-size: 20px; }
+    }
     /* HD Billboard */
     @media (min-width: 1920px) {
       :root {
@@ -1857,6 +1860,7 @@ export function getDisplayHtml(): string {
     }
     /* 4K Billboard */
     @media (min-width: 3840px) {
+      html { font-size: 24px; }
       :root {
         --topbar-h:128px;--logbar-h:240px;--gap:44px;--pad:52px;--radius:18px;
         --fs-xs:1.8rem;--fs-sm:2.2rem;--fs-base:2.6rem;--fs-md:3.2rem;
@@ -2157,6 +2161,14 @@ export function getDisplayHtml(): string {
       transition: width 1s ease;
     }
 
+    .paused #dqfill,
+    .paused .dbar-fill,
+    .paused .ddot,
+    .paused .flash {
+      animation: none !important;
+      transition: none !important;
+    }
+
     /* ── Log strip ────────────────────────────────────────────────────────── */
     #dlog-strip {
       display: flex; flex-direction: column; gap: 5px;
@@ -2280,7 +2292,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <script>
-  var ST={resources:[],audit:[],lastId:-1,tokenWin:[],tpmHist:[]};
+  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[]};
   var clockEl=document.getElementById('dclock');
   function tickClock(){
     clockEl.textContent=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -2440,6 +2452,73 @@ export function getDisplayHtml(): string {
     feed.innerHTML=html;
   }
 
+  function pushDisplayLog(kind,summary,success){
+    var nowIso=new Date().toISOString();
+    var entry={
+      id:ST.lastSyntheticId,
+      timestamp:nowIso,
+      kind:kind,
+      scope:'display.event',
+      summary:summary,
+      success:success!==false
+    };
+    ST.lastSyntheticId-=1;
+    ST.audit.unshift(entry);
+    if(ST.audit.length>30)ST.audit=ST.audit.slice(0,30);
+    renderLog();
+  }
+
+  function applyStatePayload(d){
+    if(d.orchestratorName)el('dorch').textContent=d.orchestratorName;
+    if(d.mode){
+      var modeEl=el('dmode');
+      modeEl.textContent=String(d.mode).toUpperCase();
+      modeEl.className='m-'+d.mode;
+    }
+
+    var busyEl=el('dbusy');
+    if(d.auto&&d.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
+    else if(busyEl){busyEl.style.display='none';}
+
+    var auto=d.auto||{};
+    var nextTask=auto.nextTask||null;
+    var lastCompleted=auto.lastCompleted||null;
+    var taskEl=el('dtask');
+    if(nextTask&&nextTask.content){
+      taskEl.textContent=nextTask.content;
+      taskEl.style.color='';
+    } else if(lastCompleted&&lastCompleted.content){
+      var statusPrefix=lastCompleted.status==='failed'?'✗ ':'✓ ';
+      taskEl.textContent=statusPrefix+lastCompleted.content;
+      taskEl.style.color=lastCompleted.status==='failed'?'#ff6666':'var(--muted2)';
+    } else if(d.mode==='auto'){
+      taskEl.textContent='Auto mode — scanning queue…';
+      taskEl.style.color='var(--muted2)';
+    } else {
+      taskEl.textContent='Idle — '+(d.mode||'command')+' mode';
+      taskEl.style.color='var(--muted)';
+    }
+
+    var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),total=pending+completed;
+    el('dqfrac').textContent=completed+' / '+total;
+    el('dqfill').style.width=(total>0?(completed/total*100):0)+'%';
+    setVal('dpending',fmt(pending));
+    setVal('ddone',fmt(completed));
+    setVal('dtasksdone',fmt(completed));
+
+    if(Array.isArray(d.activeResources)){
+      setVal('drescnt',String(d.activeResources.length));
+    }
+
+    if(typeof d.systemTps==='number'){
+      var tpm=Math.max(0,Math.round(d.systemTps*60));
+      ST.tpmHist.push(tpm);if(ST.tpmHist.length>80)ST.tpmHist.shift();
+      setVal('dtpmlbl',fmt(tpm)+' tok/min');
+      setVal('dtpmbig',fmt(tpm));
+      drawSpark();
+    }
+  }
+
   // Model bars
   function renderModelBars(models){
     var container=el('dmodelbars');if(!models)return;
@@ -2586,11 +2665,7 @@ export function getDisplayHtml(): string {
       if(msg.type==='connected'){pollFull();return;}
       if(msg.type==='state'){
         var d=msg;
-        if(d.orchestratorName)el('dorch').textContent=d.orchestratorName;
-        if(d.mode){var modeEl=el('dmode');modeEl.textContent=d.mode.toUpperCase();modeEl.className='m-'+d.mode;}
-        var busyEl=el('dbusy');
-        if(d.auto&&d.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
-        else if(busyEl){busyEl.style.display='none';}
+        applyStatePayload(d);
         if(document.visibilityState!=='hidden'||alwaysActive){
           if(typeof window.requestIdleCallback==='function'){
             window.requestIdleCallback(function(){loadStatus();loadQueue();});
@@ -2598,6 +2673,27 @@ export function getDisplayHtml(): string {
             setTimeout(function(){loadStatus();loadQueue();},50);
           }
         }
+        return;
+      }
+      if(msg.type==='task-start'){
+        pushDisplayLog('system','Task #'+msg.taskId+' started on @'+msg.resourceAlias+': '+(msg.taskContent||''),true);
+        return;
+      }
+      if(msg.type==='task-complete'){
+        var ok=msg.status==='completed';
+        pushDisplayLog('system','Task #'+msg.taskId+' '+(ok?'completed':'failed')+' on @'+msg.resourceAlias+' ('+Math.round((msg.durationMs||0)/1000)+'s, '+fmt(msg.tokenCount||0)+' tok)',ok);
+        return;
+      }
+      if(msg.type==='task-write'){
+        pushDisplayLog('system','Task #'+msg.taskId+' WRITE['+msg.stage+']['+msg.path+'] '+(msg.verified?'✓':'✗'),msg.verified!==false);
+        return;
+      }
+      if(msg.type==='queue-fill'){
+        pushDisplayLog('system','Queue-fill '+msg.phase+(msg.verdict?(' verdict: '+msg.verdict):'')+' ('+fmt(msg.taskCount||0)+' tasks)',true);
+        return;
+      }
+      if(msg.type==='daily-complete'){
+        pushDisplayLog('system','DAILY_COMPLETE '+(msg.sessionId?('('+msg.sessionId+') '):'')+(msg.summary||''),true);
       }
     };
     es.onerror=function(){
@@ -2615,6 +2711,7 @@ export function getDisplayHtml(): string {
   }
 
   function syncActivityState(){
+    document.body.classList.toggle('paused',!shouldStayActive());
     if(shouldStayActive()){
       startPolling();
       pollFull();
