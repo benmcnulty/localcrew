@@ -149,3 +149,23 @@ export function formatCurrentDateTime(date = new Date()): string {
 
   return `${datePart} (${dayName}) ${timePart} UTC (${offsetLabel})`;
 }
+
+/**
+ * Detect whether an error message indicates a network-level failure
+ * (connection refused, timeout, DNS, etc.) as opposed to an HTTP or model error.
+ */
+export function isNetworkError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("fetch failed") ||
+    normalized.includes("econnrefused") ||
+    normalized.includes("econnreset") ||
+    normalized.includes("etimedout") ||
+    normalized.includes("enetunreach") ||
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("abort") ||
+    normalized.includes("dns") ||
+    normalized.includes("ehostunreach")
+  );
+}

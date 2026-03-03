@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+// @ts-expect-error — Bun types omit spawnSync but it works at runtime
+import { spawnSync } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { getDisplayHtml, getGuiScript } from "../src/gui.ts";
 
@@ -42,5 +47,35 @@ describe("Display activity lifecycle", () => {
     expect(html).toContain("document.body.classList.toggle('paused',!shouldStayActive())");
     expect(html).toContain(".paused #dqfill");
     expect(html).toContain(".paused .dbar-fill");
+  });
+});
+
+describe("Served scripts are syntactically valid JavaScript", () => {
+  function checkSyntax(code: string, label: string): string | null {
+    const tmp = join(tmpdir(), `localcrew-${label}-${Date.now()}.js`);
+    try {
+      writeFileSync(tmp, code);
+      const result = spawnSync("node", ["--check", tmp], { encoding: "utf8" });
+      if (result.status !== 0) {
+        return result.stderr.trim();
+      }
+      return null;
+    } finally {
+      try { unlinkSync(tmp); } catch {}
+    }
+  }
+
+  test("display billboard script has no syntax errors", () => {
+    const html = getDisplayHtml();
+    const match = html.match(/<script>([\s\S]*)<\/script>/);
+    expect(match).not.toBeNull();
+    const error = checkSyntax(match![1], "display");
+    expect(error).toBeNull();
+  });
+
+  test("GUI app script has no syntax errors", () => {
+    const script = getGuiScript();
+    const error = checkSyntax(script, "gui");
+    expect(error).toBeNull();
   });
 });

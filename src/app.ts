@@ -153,7 +153,7 @@ import {
 } from "./daily-work.ts";
 import { fetchBenLive } from "./benlive.ts";
 import { fetchWebsite } from "./website.ts";
-import { formatCurrentDateTime, titleCase } from "./utils.ts";
+import { formatCurrentDateTime, isNetworkError, titleCase } from "./utils.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
@@ -867,6 +867,10 @@ export class LocalCrewApp {
   private autoCyclePromise: Promise<CommandResult> | null;
   private apiServerHandle?: { pushDisplayEvent(payload: Record<string, unknown>): void };
   private readonly resourceTelemetry = new Map<string, ResourceTelemetry>();
+  /** Tracks when each resource last had a network-level failure (e.g. "fetch failed"). */
+  private readonly networkFailureTimes = new Map<string, number>();
+  /** Cooldown period (ms) during which a network-failed resource gets a routing penalty. */
+  private static readonly NETWORK_FAILURE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
   private constructor(
     config: AppConfig,
@@ -953,7 +957,7 @@ export class LocalCrewApp {
     });
   }
 
-  private updateResourceOutcome(alias: string, model: string, success: boolean): void {
+  private updateResourceOutcome(alias: string, model: string, success: boolean, errorMessage?: string): void {
     const previous = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
     const nextFailureCount = success ? previous.failureCount : previous.failureCount + 1;
     const nextSuccessRate = success
@@ -968,6 +972,29 @@ export class LocalCrewApp {
         (task) => task.requestedResource === alias || task.assignedResource === alias
       ).length
     });
+
+    // Track network-level failures for routing cooldown.
+    if (!success && errorMessage && isNetworkError(errorMessage)) {
+      this.networkFailureTimes.set(alias, Date.now());
+    }
+  }
+
+  /**
+   * Build a synthetic resourceLoad penalty map that adds a heavy load value
+   * for any resource currently within its network-failure cooldown window.
+   * The penalty decays linearly from 10 → 0 over the cooldown period.
+   */
+  private getNetworkFailurePenalties(): Record<string, number> {
+    const penalties: Record<string, number> = {};
+    const now = Date.now();
+    for (const [alias, failedAt] of this.networkFailureTimes) {
+      const elapsed = now - failedAt;
+      if (elapsed < LocalCrewApp.NETWORK_FAILURE_COOLDOWN_MS) {
+        const fraction = 1 - elapsed / LocalCrewApp.NETWORK_FAILURE_COOLDOWN_MS;
+        penalties[alias] = Math.round(10 * fraction);
+      }
+    }
+    return penalties;
   }
 
   private getSystemTps(): number {
@@ -2516,7 +2543,8 @@ export class LocalCrewApp {
 
       return result;
     } catch (error) {
-      this.updateResourceOutcome(options.resourceAlias, options.endpoint.model, false);
+      const errorMsg = (error as Error).message;
+      this.updateResourceOutcome(options.resourceAlias, options.endpoint.model, false, errorMsg);
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -4738,6 +4766,14 @@ export class LocalCrewApp {
       },
       {}
     );
+
+    // Merge in network-failure cooldown penalties so recently-failed resources
+    // are deprioritized even for tasks beyond the immediate retry.
+    const networkPenalties = this.getNetworkFailurePenalties();
+    for (const [alias, penalty] of Object.entries(networkPenalties)) {
+      resourceLoad[alias] = (resourceLoad[alias] ?? 0) + penalty;
+    }
+
     let selection;
     let routingFallbackWarning: string | null = null;
 
