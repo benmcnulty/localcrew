@@ -357,7 +357,7 @@ describe("API server", () => {
     15000
   );
 
-  test("protects SSE events with token auth when configured", async () => {
+  test("allows SSE events without token for display billboard access", async () => {
     await withTempDir(async (rootDir) => {
       process.env.LOCALCREW_API_HOST = "127.0.0.1";
       process.env.LOCALCREW_API_PORT = "0";
@@ -376,18 +376,12 @@ describe("API server", () => {
       expect(api).not.toBeNull();
 
       try {
-        const unauthorized = await fetch(`${api!.url}/api/events`);
-        expect(unauthorized.status).toBe(401);
+        // /api/events is public so the /display billboard can connect without auth
+        const unauthenticated = await fetch(`${api!.url}/api/events`);
+        expect(unauthenticated.status).toBe(200);
+        expect(unauthenticated.headers.get("content-type") ?? "").toContain("text/event-stream");
 
-        const authorized = await fetch(`${api!.url}/api/events`, {
-          headers: {
-            authorization: "Bearer test-token"
-          }
-        });
-        expect(authorized.status).toBe(200);
-        expect(authorized.headers.get("content-type") ?? "").toContain("text/event-stream");
-
-        await authorized.body?.cancel();
+        await unauthenticated.body?.cancel();
       } finally {
         await api?.close();
       }

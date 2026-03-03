@@ -168,8 +168,8 @@ async function buildApiResponse(
   // Authenticate if LOCALCREW_API_TOKEN is configured
   const requiredToken = getApiToken();
   if (requiredToken) {
-    // Skip auth for static UI assets and health check
-    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work"];
+    // Skip auth for static UI assets, health check, and read-only display data
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work", "/api/events", "/api/status"];
     if (!publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
