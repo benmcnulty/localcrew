@@ -4,14 +4,14 @@ export function getGuiHtml(): string {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Crusty</title>
+    <title>Local Crew</title>
     <link rel="stylesheet" href="/ui/styles.css">
   </head>
   <body>
     <div id="app">
       <header id="topbar">
         <div class="topbar-left">
-          <span class="logo">&#x2B21; Crusty</span>
+          <span class="logo">&#x2B21; Local Crew</span>
           <span class="badge badge-dim">v0.1</span>
         </div>
         <div class="topbar-center">
@@ -286,7 +286,7 @@ export function getGuiHtml(): string {
             </div>
             <div class="card">
               <div class="card-title">User Preferences</div>
-              <p class="section-note">Stored in your local .crusty configuration. Used by weather, website, and daily digest tools.</p>
+              <p class="section-note">Stored in your local .localcrew configuration. Used by weather, website, and daily digest tools.</p>
               <form id="preferences-form">
                 <div class="form-grid">
                   <div class="field-group">
@@ -365,7 +365,7 @@ export function getGuiHtml(): string {
             <div class="card">
               <div class="card-title">Getting Started</div>
               <div class="guide-content">
-                <p>Crusty is a local-first multi-device inference orchestrator. Use the sidebar to navigate between sections.</p>
+                <p>Local Crew is a local-first multi-device inference orchestrator. Use the sidebar to navigate between sections.</p>
                 <ol>
                   <li><strong>Dashboard</strong> &mdash; run commands, view live status, and control modes (chat, group, auto)</li>
                   <li><strong>Resources</strong> &mdash; add and manage inference endpoints (Ollama, OpenAI-compatible, Anthropic)</li>
@@ -1033,11 +1033,11 @@ function selectSection(name) {
 function initializeApiToken() {
   const url = new URL(window.location.href);
   const queryToken = url.searchParams.get("token") || "";
-  const storedToken = window.sessionStorage.getItem("crustyApiToken") || "";
+  const storedToken = window.sessionStorage.getItem("localCrewApiToken") || "";
   const token = queryToken || storedToken;
 
   if (queryToken) {
-    window.sessionStorage.setItem("crustyApiToken", queryToken);
+    window.sessionStorage.setItem("localCrewApiToken", queryToken);
     url.searchParams.delete("token");
     window.history.replaceState({}, document.title, url.toString());
   }
@@ -1794,7 +1794,7 @@ export function getDisplayHtml(): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <title>Crusty &middot; Display</title>
+  <title>Local Crew &middot; Billboard</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2225,7 +2225,7 @@ export function getDisplayHtml(): string {
 <div id="dapp">
 
   <header id="dtop">
-    <div class="dlogo">&#x2B21; Crusty</div>
+    <div class="dlogo">&#x2B21; Local Crew</div>
     <div class="dtop-center">
       <span id="dorch">&mdash;</span>
       <span id="dmode">&mdash;</span>
@@ -2601,7 +2601,7 @@ export function getDisplayHtml(): string {
   // Display activity lifecycle:
   // - default: pause network work when unfocused/hidden
   // - optional: always-active monitor mode (for dedicated billboard screens)
-  var DISPLAY_ACTIVITY_KEY='crustyDisplayAlwaysActive';
+  var DISPLAY_ACTIVITY_KEY='localCrewDisplayAlwaysActive';
   var query=new URLSearchParams(window.location.search);
   var alwaysActive=query.get('active')==='1'||window.localStorage.getItem(DISPLAY_ACTIVITY_KEY)==='1';
   var sseActive=false;

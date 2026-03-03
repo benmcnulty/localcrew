@@ -181,7 +181,7 @@ async function collectTextFiles(dir: string): Promise<string[]> {
 }
 
 /**
- * Case-insensitive text search across `.crusty/system/` and `external-memory/`.
+ * Case-insensitive text search across `.localcrew/system/` and `external-memory/`.
  * Returns up to {@link MAX_SEARCH_MATCHES} matching lines with file paths and line numbers.
  * Binary files and files larger than 512 KB are skipped.
  */

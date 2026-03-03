@@ -74,7 +74,7 @@ export async function searchWikipedia(
 
   const searchResponse = await fetchFn(searchUrl.toString(), {
     headers: {
-      "user-agent": "crusty-local-orchestrator"
+      "user-agent": "localcrew-local-orchestrator"
     }
   });
 
@@ -110,7 +110,7 @@ export async function searchWikipedia(
 
   const detailResponse = await fetchFn(detailUrl.toString(), {
     headers: {
-      "user-agent": "crusty-local-orchestrator"
+      "user-agent": "localcrew-local-orchestrator"
     }
   });
 

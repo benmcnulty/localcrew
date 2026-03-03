@@ -2,7 +2,7 @@ import type { FetchFn } from "./ollama.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_CHAR_LIMIT = 8_000;
-const USER_AGENT = "crusty-local-orchestrator";
+const USER_AGENT = "localcrew-local-orchestrator";
 
 /**
  * Strip HTML to plain text: remove script/style/noscript blocks, then all tags,

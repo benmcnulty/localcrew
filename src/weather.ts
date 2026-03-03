@@ -27,7 +27,7 @@ export async function fetchWeather(
     const encoded = encodeURIComponent(trimmed);
     const url = `${WTTR_BASE}/${encoded}?format=j1`;
     const response = await fetchFn(url, {
-      headers: { "user-agent": "crusty-local-orchestrator" },
+      headers: { "user-agent": "localcrew-local-orchestrator" },
       signal: controller.signal,
     });
 

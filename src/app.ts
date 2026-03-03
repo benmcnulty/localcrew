@@ -161,11 +161,11 @@ const LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN =
 const INTERNAL_MEMORY_PATH_HINT_PATTERN =
   /(?:^|\/)(?:internal|internal-memory|memory|index|indexes|summary|summaries|heuristics|routing|telemetry|diagnostics|notes|verification|plans)(?:\/|[-_])/i;
 const INTERNAL_WIKIPEDIA_SYSTEM_TERMS =
-  "crusty|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\\s+is\\s+required)?|telemetry|hud|prompt|resource alias";
+  "localcrew|crew|ollama|orchestrator|safe mode|safe-mode|queue|routing|model(?:\\s+is\\s+required)?|telemetry|hud|prompt|resource alias";
 const INTERNAL_REDDIT_SYSTEM_TERMS =
-  "crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
+  "localcrew|crew|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
 const INTERNAL_SEARCH_SYSTEM_TERMS =
-  "crusty|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
+  "localcrew|crew|orchestrator|safe mode|safe-mode|queue|routing|telemetry|hud|resource alias";
 
 function buildInternalQueryPattern(systemTerms: string, dynamicAliases: string[]): RegExp {
   const escaped = dynamicAliases
@@ -679,7 +679,7 @@ function buildPrompt(
     case "agent":
       return `agent[@${options.currentAgent ?? "unknown"}]> `;
     default:
-      return "crusty> ";
+      return "crew> ";
   }
 }
 
@@ -689,7 +689,7 @@ function truncateForPrompt(content: string, limit: number): { text: string; trun
   }
 
   return {
-    text: `${content.slice(0, limit)}\n\n[truncated by Crusty after ${limit} characters]`,
+    text: `${content.slice(0, limit)}\n\n[truncated by Local Crew after ${limit} characters]`,
     truncated: true
   };
 }
@@ -844,7 +844,7 @@ function defaultSpeakFn(
   speakText(text, options);
 }
 
-export class CrustyApp {
+export class LocalCrewApp {
   private config: AppConfig;
   private sessions: SessionsFile;
   private systemState: SystemState;
@@ -880,7 +880,7 @@ export class CrustyApp {
     };
   }
 
-  static async create(options: ExecuteOptions = {}): Promise<CrustyApp> {
+  static async create(options: ExecuteOptions = {}): Promise<LocalCrewApp> {
     const rootDir = options.rootDir ?? process.cwd();
     const [config, sessions, systemState] = await Promise.all([
       loadConfig(rootDir),
@@ -888,7 +888,7 @@ export class CrustyApp {
       loadSystemState(rootDir)
     ]);
 
-    const app = new CrustyApp(config, sessions, systemState, { ...options, rootDir });
+    const app = new LocalCrewApp(config, sessions, systemState, { ...options, rootDir });
     await ensureDropboxLayout(rootDir);
     await app.sanitizeAutoQueueState();
     await app.syncSystemFiles();
@@ -1143,12 +1143,12 @@ export class CrustyApp {
   }
 
   getAutoPulseIntervalMs(): number {
-    return getEnvNumber("CRUSTY_AUTO_PULSE_INTERVAL_MS", DEFAULT_AUTO_PULSE_INTERVAL_MS);
+    return getEnvNumber("LOCALCREW_AUTO_PULSE_INTERVAL_MS", DEFAULT_AUTO_PULSE_INTERVAL_MS);
   }
 
   getAutoSourceDocumentCharLimit(): number {
     return getEnvNumber(
-      "CRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT",
+      "LOCALCREW_AUTO_SOURCE_DOC_CHAR_LIMIT",
       DEFAULT_AUTO_SOURCE_DOCUMENT_CHAR_LIMIT
     );
   }
@@ -1172,7 +1172,7 @@ export class CrustyApp {
     const lastAudit = telemetry.recent[0];
 
     return [
-      "Crusty Status",
+      "Local Crew Status",
       "",
       `Orchestrator profile: ${this.config.orchestratorName}`,
       `Mode: /${this.runtime.mode}`,
@@ -1254,7 +1254,7 @@ export class CrustyApp {
     resourceTelemetry: Record<string, ResourceTelemetry>;
     systemTps: number;
     modelProfile: ReturnType<typeof getModelProfile>;
-    activeResources: ReturnType<CrustyApp["getActiveResourceSummaries"]>;
+    activeResources: ReturnType<LocalCrewApp["getActiveResourceSummaries"]>;
   }> {
     const [agents, docs, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
@@ -2060,7 +2060,7 @@ export class CrustyApp {
         "",
         ...tree.lines,
         "",
-        "Type a full path from .crusty/system or external-memory and press Enter to open it. Press Esc to return."
+        "Type a full path from .localcrew/system or external-memory and press Enter to open it. Press Esc to return."
       ]
     };
   }
@@ -2345,7 +2345,7 @@ export class CrustyApp {
         "  /preferences set website <url>      Set personal website URL",
         "  /preferences set directive \"text\"    Set daily digest directive",
         "",
-        "Preferences are stored locally in .crusty/config.json and used by",
+        "Preferences are stored locally in .localcrew/config.json and used by",
         "the weather tool, personal website tool, and daily digest generation.",
         "",
         "Full key names also accepted: zipCode, personalWebsiteUrl, dailyDigestDirective.",
@@ -3592,7 +3592,7 @@ export class CrustyApp {
         `# Feature Request: ${options.title.trim() || "Untitled request"}`,
         "",
         `- Requested by: ${options.createdBy}`,
-        `- Reason redirected by Crusty: ${options.reason}`,
+        `- Reason redirected by Local Crew: ${options.reason}`,
         ...(options.taskId ? [`- Source task ID: ${options.taskId}`] : []),
         ...(options.requestedResource ? [`- Suggested resource: @${options.requestedResource}`] : []),
         ...(options.requestedModel ? [`- Suggested model: ${options.requestedModel}`] : []),
@@ -4119,7 +4119,7 @@ export class CrustyApp {
         "- The highest-value self-improvement work is better configuration, context budgeting, delegation, and task decomposition for this specific local network.",
         "- Prefer queueing precise subtasks for currently lighter resources when a stronger node is better reserved for a later reasoning or drafting step.",
         "- For collaborative work, decompose into multiple QUEUE lines with resource aliases and optional role tags so different nodes can contribute complementary outputs.",
-        `- Canonical resource roster: ${canonicalRoster}. Use only these exact aliases. If unsure, omit the alias and let Crusty route the task automatically.`,
+        `- Canonical resource roster: ${canonicalRoster}. Use only these exact aliases. If unsure, omit the alias and let Local Crew route the task automatically.`,
         "- Contributor chat participants are a separate concept from connected inference resources. Never infer a resource alias from a participant nickname.",
         `- Known cluster capacity: ${capacity.resourceCount} resource(s), ${capacity.knownCpuLogicalCores || "(unknown)"} CPU threads, ${capacity.knownRamGb || "(unknown)"} GB RAM, ${capacity.knownGpuCount || "(unknown)"} GPU(s), ${capacity.knownTotalVramGb || "(unknown)"} GB VRAM, max context ${capacity.highestKnownContextTokens || "(unknown)"}.`,
         "- Current explicit queue pressure by resource:",
@@ -4152,7 +4152,7 @@ export class CrustyApp {
       blocks.push(
         [
           "Safe mode recovery context:",
-          "- This task exists because Crusty observed an unexpected failure or derailment during autonomous work.",
+          "- This task exists because Local Crew observed an unexpected failure or derailment during autonomous work.",
           "- First diagnose the contained internal cause from the recent audit context and failed task summary.",
           "- Then realign only internal memory, prompt guidance, queue hygiene, routing assumptions, or documentation.",
           "- If any durable improvement would require external application or source-code work, write an outbox feature request ticket instead of queueing executable implementation work.",
@@ -5345,8 +5345,8 @@ export class CrustyApp {
       if (command.type === "login") {
         return {
           lines: [
-            "Remote login is not implemented in local Crusty yet.",
-            "See the remote portal docs and local handoff spec for the planned benlive.tv/crusty integration."
+            "Remote login is not implemented in Local Crew yet.",
+            "See the remote portal docs and local handoff spec for the planned benlive.tv/localcrew integration."
           ],
           errors: [],
           shouldExit: false

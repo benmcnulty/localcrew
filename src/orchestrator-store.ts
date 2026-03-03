@@ -192,8 +192,8 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "## Memory Boundary",
     "",
     "- `external-memory/` is the committed seed layer and should contain only portable guidance, workflows, and durable patterns.",
-    "- `.crusty/` is internal local memory and may contain runtime summaries, queues, telemetry, and local experimentation.",
-    "- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.crusty/`, not in `external-memory/active/`.",
+    "- `.localcrew/` is internal local memory and may contain runtime summaries, queues, telemetry, and local experimentation.",
+    "- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.localcrew/`, not in `external-memory/active/`.",
     "- Promote only validated lessons from local memory into committed seeds after they have been reviewed and simplified.",
     "- Prefer concise summaries and stable indexes over sprawling process prose.",
     "",
@@ -206,10 +206,10 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "- Autonomous work may directly change only internal memory, prompt guidance, indexes, summaries, and other contained process artifacts.",
     "- Use connected resource aliases from the live resource inventory only. Contributor chat participants are a separate concept and must not be used as substitute resource aliases.",
     "- If a useful improvement would require external application, API, UI, script, source-code, or system-service work, write a detailed feature request ticket into `external-memory/outbox/feature-requests/` instead of treating it as executable autonomous work.",
-    "- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Crusty.",
+    "- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Local Crew.",
     "- Never create or rely on ad-hoc executable scripts, daemons, or undefined system processes from `/auto`; use only approved application capabilities.",
     "- Reject vague placeholder tasks. Every autonomous task must have a clear object, scope, and expected outcome.",
-    "- Use Wikipedia only for external factual knowledge, not for internal Crusty routing, prompt, naming, or model-diagnosis questions.",
+    "- Use Wikipedia only for external factual knowledge, not for internal Local Crew routing, prompt, naming, or model-diagnosis questions.",
     "- Unexpected failures should trigger diagnosis, quarantine, and recovery, not repeated blind retries.",
     "- Build observability that helps the user and the system understand queue health, model performance, tool effectiveness, and current focus at a glance.",
     "- Convert observations from completed work into concrete next-step tasks, roadmap updates, changelog notes, and tighter internal guidance."
@@ -224,7 +224,7 @@ function getDefaultRoadmap(): string {
     "- Improve memory quality so summaries, indexes, and directives stay compact, canonical, and resistant to long-run drift.",
     "- Expand observability through the HUD, local API, and browser GUI without weakening the internal/external memory boundary.",
     "- Strengthen safe-mode recovery so failures produce diagnosis and realignment instead of repeated derailment.",
-    "- Formalize the promotion path from local discoveries in `.crusty/` into simplified, committed `external-memory/` seeds.",
+    "- Formalize the promotion path from local discoveries in `.localcrew/` into simplified, committed `external-memory/` seeds.",
     "- Keep external feature work spec-driven through outbox tickets until it is deliberately implemented in the application layer."
   ].join("\n");
 }

@@ -3,7 +3,7 @@ import { stdin, stdout, stderr } from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { startApiServer } from "./api-server.ts";
-import { CrustyApp, type CommandResult } from "./app.ts";
+import { LocalCrewApp, type CommandResult } from "./app.ts";
 import {
   CommandParseError,
   formatDirectedMessageInput,
@@ -144,7 +144,7 @@ async function readRawBufferWithTimeout(timeoutMs: number): Promise<Buffer | nul
 }
 
 async function runStatusViewer(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
   enterAlternateScreen();
@@ -172,7 +172,7 @@ async function runStatusViewer(
 }
 
 async function runExploreViewer(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
   enterAlternateScreen();
@@ -180,11 +180,11 @@ async function runExploreViewer(
     await withRawMode(readline, async () => {
       let inputBuffer = "";
       let errorMessage = "";
-      let cachedTree: Awaited<ReturnType<CrustyApp["getExploreTree"]>> | null = null;
+      let cachedTree: Awaited<ReturnType<LocalCrewApp["getExploreTree"]>> | null = null;
       let treeCachedAt = 0;
       const treeCacheMs = 5000;
 
-      const getTree = async (): Promise<Awaited<ReturnType<CrustyApp["getExploreTree"]>>> => {
+      const getTree = async (): Promise<Awaited<ReturnType<LocalCrewApp["getExploreTree"]>>> => {
         if (!cachedTree || Date.now() - treeCachedAt > treeCacheMs) {
           cachedTree = await app.getExploreTree();
           treeCachedAt = Date.now();
@@ -263,7 +263,7 @@ async function runExploreViewer(
 }
 
 async function runHudViewer(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
   enterAlternateScreen();
@@ -318,7 +318,7 @@ async function runHudViewer(
 }
 
 async function resolveViewerRequest(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>,
   result: CommandResult
 ): Promise<void> {
@@ -350,7 +350,7 @@ async function promptWithPrefill(
 }
 
 async function resolveWorkflowPrompt(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>,
   result: CommandResult
 ): Promise<CommandResult> {
@@ -390,7 +390,7 @@ async function resolveWorkflowPrompt(
 }
 
 async function resolveFollowUpPrompt(
-  app: CrustyApp,
+  app: LocalCrewApp,
   readline: ReturnType<typeof createInterface>,
   initialResult: CommandResult
 ): Promise<CommandResult> {
@@ -441,7 +441,7 @@ async function resolveFollowUpPrompt(
 }
 
 export async function runRepl(rootDir = process.cwd()): Promise<void> {
-  const app = await CrustyApp.create({
+  const app = await LocalCrewApp.create({
     rootDir,
     warn: (message) => writeLine(stderr, message)
   });

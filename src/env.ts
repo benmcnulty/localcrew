@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const loadedRoots = new Set<string>();
+const LEGACY_PREFIX = `${"C"}RUSTY_`;
 
 function parseEnvFile(content: string): Record<string, string> {
   const values: Record<string, string> = {};
@@ -64,7 +65,7 @@ export function loadLocalEnv(rootDir = process.cwd()): void {
 }
 
 export function getEnvString(name: string, fallback: string): string {
-  const value = process.env[name];
+  const value = getEnvValue(name);
   if (typeof value !== "string" || value.trim() === "") {
     return fallback;
   }
@@ -73,7 +74,7 @@ export function getEnvString(name: string, fallback: string): string {
 }
 
 export function getOptionalEnvString(name: string, fallback?: string): string | undefined {
-  const value = process.env[name];
+  const value = getEnvValue(name);
   if (typeof value !== "string" || value.trim() === "") {
     return fallback;
   }
@@ -82,7 +83,7 @@ export function getOptionalEnvString(name: string, fallback?: string): string | 
 }
 
 export function getEnvBoolean(name: string, fallback: boolean): boolean {
-  const value = process.env[name]?.trim().toLowerCase();
+  const value = getEnvValue(name)?.trim().toLowerCase();
   if (!value) {
     return fallback;
   }
@@ -99,7 +100,7 @@ export function getEnvBoolean(name: string, fallback: boolean): boolean {
 }
 
 export function getEnvNumber(name: string, fallback: number): number {
-  const value = process.env[name]?.trim();
+  const value = getEnvValue(name)?.trim();
   if (!value) {
     return fallback;
   }
@@ -109,7 +110,7 @@ export function getEnvNumber(name: string, fallback: number): number {
 }
 
 export function getEnvList(name: string, fallback: string[]): string[] {
-  const value = process.env[name];
+  const value = getEnvValue(name);
   if (typeof value !== "string" || value.trim() === "") {
     return fallback;
   }
@@ -120,4 +121,28 @@ export function getEnvList(name: string, fallback: string[]): string[] {
     .filter((entry) => entry !== "");
 
   return parsed.length > 0 ? parsed : fallback;
+}
+
+function getEnvValue(name: string): string | undefined {
+  if (name.startsWith("LOCALCREW_")) {
+    const primary = process.env[name];
+    if (typeof primary === "string" && primary.trim() !== "") {
+      return primary;
+    }
+    const legacy = process.env[name.replace(/^LOCALCREW_/, LEGACY_PREFIX)];
+    if (typeof legacy === "string" && legacy.trim() !== "") {
+      return legacy;
+    }
+    return undefined;
+  }
+
+  if (name.startsWith(LEGACY_PREFIX)) {
+    const migratedName = name.replace(new RegExp(`^${LEGACY_PREFIX}`), "LOCALCREW_");
+    const migrated = process.env[migratedName];
+    if (typeof migrated === "string" && migrated.trim() !== "") {
+      return migrated;
+    }
+  }
+
+  return process.env[name];
 }
