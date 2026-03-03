@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { loadLocalEnv } from "../src/env.ts";
-import { chatWithOllamaDetailed } from "../src/ollama.ts";
+import { chatWithOllamaDetailed, getFetchTimeoutMs } from "../src/ollama.ts";
 import type { EndpointConfig } from "../src/types.ts";
+import { isNetworkError } from "../src/utils.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
   const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
@@ -60,5 +61,58 @@ describe("Anthropic env config", () => {
       expect(seenMaxTokens).toBe(4096);
       expect(result.text).toBe("Hello back");
     });
+  });
+});
+
+describe("Fetch timeout", () => {
+  test("chatWithOllamaDetailed passes an AbortSignal to the fetch call", async () => {
+    let receivedSignal: AbortSignal | null | undefined = null;
+
+    const endpoint: EndpointConfig = {
+      resourceAlias: "test",
+      nickname: "Test",
+      baseUrl: "http://localhost:1234",
+      apiStyle: "ollama",
+      model: "test-model",
+      instructions: "",
+      voicePreset: ""
+    };
+
+    await chatWithOllamaDetailed(
+      endpoint,
+      [{ role: "user", content: "hi" }],
+      async (_input, init) => {
+        receivedSignal = init?.signal;
+        return new Response(
+          JSON.stringify({ message: { content: "ok" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+    );
+
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("getFetchTimeoutMs returns default of 120000", () => {
+    expect(getFetchTimeoutMs()).toBe(120_000);
+  });
+});
+
+describe("isNetworkError", () => {
+  test("detects common network failure messages", () => {
+    expect(isNetworkError("fetch failed")).toBe(true);
+    expect(isNetworkError("ECONNREFUSED")).toBe(true);
+    expect(isNetworkError("ECONNRESET")).toBe(true);
+    expect(isNetworkError("ETIMEDOUT")).toBe(true);
+    expect(isNetworkError("request timed out")).toBe(true);
+    expect(isNetworkError("The operation was aborted")).toBe(true);
+    expect(isNetworkError("DNS resolution failed")).toBe(true);
+  });
+
+  test("does not flag HTTP errors as network errors", () => {
+    expect(isNetworkError("HTTP 500: Internal Server Error")).toBe(false);
+    expect(isNetworkError("HTTP 404: Not Found")).toBe(false);
+    expect(isNetworkError("Ollama response was missing message.content.")).toBe(false);
   });
 });

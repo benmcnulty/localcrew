@@ -4,6 +4,21 @@ import { ANTHROPIC_VERSION, trimTrailingSlash } from "./utils.ts";
 
 export type FetchFn = typeof fetch;
 
+/**
+ * Default timeout for inference fetch calls (milliseconds).
+ * Override with LOCALCREW_FETCH_TIMEOUT_MS env var.
+ * 0 disables the timeout entirely.
+ */
+export function getFetchTimeoutMs(): number {
+  return getEnvNumber("LOCALCREW_FETCH_TIMEOUT_MS", 120_000);
+}
+
+function makeFetchSignal(): AbortSignal | undefined {
+  const timeoutMs = getFetchTimeoutMs();
+  if (timeoutMs <= 0) return undefined;
+  return AbortSignal.timeout(timeoutMs);
+}
+
 export interface EndpointModelEntry {
   name: string;
   parameterSize?: string;
@@ -45,7 +60,8 @@ export async function chatWithOllamaDetailed(
         model: endpoint.model,
         messages,
         stream: false
-      })
+      }),
+      signal: makeFetchSignal()
     });
 
     if (!response.ok) {
@@ -101,7 +117,8 @@ export async function chatWithOllamaDetailed(
         max_tokens: getAnthropicMaxTokens(),
         ...(systemText ? { system: systemText } : {}),
         messages: anthropicMessages
-      })
+      }),
+      signal: makeFetchSignal()
     });
 
     if (!response.ok) {
@@ -152,7 +169,8 @@ export async function chatWithOllamaDetailed(
       model: endpoint.model,
       messages,
       stream: false
-    })
+    }),
+    signal: makeFetchSignal()
   });
 
   if (!response.ok) {
@@ -217,7 +235,8 @@ export async function listOllamaModels(
 
   if (apiStyle === "openai" || apiStyle === "anthropic") {
     const response = await fetchFn(`${trimTrailingSlash(baseUrl)}/v1/models`, {
-      headers
+      headers,
+      signal: makeFetchSignal()
     });
 
     if (!response.ok) {
@@ -238,7 +257,7 @@ export async function listOllamaModels(
       : [];
   }
 
-  const response = await fetchFn(`${trimTrailingSlash(baseUrl)}/api/tags`, { headers });
+  const response = await fetchFn(`${trimTrailingSlash(baseUrl)}/api/tags`, { headers, signal: makeFetchSignal() });
 
   if (!response.ok) {
     const bodyText = await response.text();
