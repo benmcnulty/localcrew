@@ -85,13 +85,25 @@ export interface AutoQueueTask {
   completedAt?: string;
   durationMs?: number;
   createdBy: string;
-  status: "queued" | "completed";
+  status: "queued" | "completed" | "failed";
   delegationRole?: string;
   requestedResource?: string;
   requestedModel?: string;
   assignedResource?: string;
   assignedModel?: string;
   agentName?: string;
+  parentTaskId?: number;
+  parentResultSummary?: string;
+  qualityVerification?: {
+    passed: boolean;
+    reason: string;
+    signals: {
+      substantive: boolean;
+      addressesTask: boolean;
+      artifactsVerified: boolean;
+      goalAligned: boolean;
+    };
+  };
   result?: string;
   errorMessage?: string;
   sourceDocumentRelativePath?: string;

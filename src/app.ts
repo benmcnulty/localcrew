@@ -505,9 +505,154 @@ function parseQueueFillOutput(content: string): Array<{ priority: TaskPriority; 
     .filter((task): task is { priority: TaskPriority; content: string } => task !== null);
 }
 
-function parseQueueReviewVerdict(content: string): "approve" | "revise" {
-  const match = content.trim().match(/(?:^|\n)VERDICT:\s*(approve|revise)\s*$/i);
-  return match && match[1].toLowerCase() === "approve" ? "approve" : "revise";
+function parseQueueReviewVerdict(content: string): "approve" | "revise" | "reject" {
+  const match = content.trim().match(/(?:^|\n)VERDICT:\s*(approve|revise|reject)\s*$/i);
+  if (!match) {
+    return "revise";
+  }
+  const verdict = match[1].toLowerCase();
+  if (verdict === "approve" || verdict === "reject") {
+    return verdict;
+  }
+  return "revise";
+}
+
+function summarizeForParentResult(text: string, maxChars = 1000): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars)}…`;
+}
+
+function extractPreflightGoal(preflightContext: string): string | null {
+  const match = preflightContext.match(
+    /(?:^|\n)GOAL:\s*([\s\S]*?)(?:\n(?:CONSTRAINTS|RISKS|APPROACH):|$)/i
+  );
+  if (!match) {
+    return null;
+  }
+  const goal = match[1].trim();
+  return goal.length > 0 ? goal : null;
+}
+
+function extractContentTerms(text: string): string[] {
+  const stopWords = new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "with",
+    "by",
+    "from",
+    "this",
+    "that",
+    "these",
+    "those",
+    "is",
+    "are",
+    "be",
+    "as",
+    "at",
+    "it",
+    "its",
+    "into",
+    "should",
+    "must",
+    "can",
+    "will",
+    "would",
+    "about",
+    "after",
+    "before",
+    "through",
+    "across"
+  ]);
+
+  const counts = new Map<string, number>();
+  for (const token of text.toLowerCase().match(/[a-z0-9_.-]+/g) ?? []) {
+    if (token.length < 3 || stopWords.has(token)) {
+      continue;
+    }
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 10)
+    .map(([token]) => token);
+}
+
+function isSubstantiveOutput(output: string): boolean {
+  const stripped = output
+    .replace(/^(sure|of course|i['’]ll|let me|here['’]s|certainly)[^.]*\.\s*/gi, "")
+    .replace(/\n---+\n/g, "\n")
+    .trim();
+  return stripped.length >= 10;
+}
+
+function outputAddressesTask(output: string, taskContent: string): boolean {
+  const taskTerms = extractContentTerms(taskContent);
+  if (taskTerms.length === 0) {
+    return true;
+  }
+  const normalizedOutput = output.toLowerCase();
+  const found = taskTerms.filter((term) => normalizedOutput.includes(term));
+  return found.length >= Math.max(1, Math.ceil(taskTerms.length * 0.3));
+}
+
+function outputAlignedWithGoal(output: string, goal: string): boolean {
+  const goalTerms = extractContentTerms(goal);
+  if (goalTerms.length === 0) {
+    return true;
+  }
+  const normalizedOutput = output.toLowerCase();
+  return goalTerms.some((term) => normalizedOutput.includes(term));
+}
+
+function verifyTaskOutput(options: {
+  task: AutoQueueTask;
+  output: string;
+  preflightGoal: string | null;
+  claimedWriteCount: number;
+  verifiedWriteCount: number;
+  postProcessErrors: string[];
+}): {
+  passed: boolean;
+  reason: string;
+  signals: {
+    substantive: boolean;
+    addressesTask: boolean;
+    artifactsVerified: boolean;
+    goalAligned: boolean;
+  };
+} {
+  const signals = {
+    substantive: isSubstantiveOutput(options.output),
+    addressesTask: outputAddressesTask(options.output, options.task.content),
+    artifactsVerified:
+      options.postProcessErrors.length === 0 &&
+      (options.claimedWriteCount === 0 || options.verifiedWriteCount >= options.claimedWriteCount),
+    goalAligned: options.preflightGoal
+      ? outputAlignedWithGoal(options.output, options.preflightGoal)
+      : true
+  };
+
+  const passed = signals.substantive && signals.artifactsVerified;
+  const reason = [
+    `substantive=${signals.substantive ? "yes" : "no"}`,
+    `addressesTask=${signals.addressesTask ? "yes" : "no"}`,
+    `artifactsVerified=${signals.artifactsVerified ? "yes" : "no"}`,
+    `goalAligned=${signals.goalAligned ? "yes" : "no"}`
+  ].join(", ");
+
+  return { passed, reason, signals };
 }
 
 function buildPrompt(
@@ -3092,6 +3237,8 @@ export class CrustyApp {
       requestedModel?: string;
       sourceDocumentRelativePath?: string;
       sourceDocumentName?: string;
+      parentTaskId?: number;
+      parentResultSummary?: string;
     } = {}
   ): Promise<AutoQueueTask> {
     const task: AutoQueueTask = {
@@ -3105,6 +3252,10 @@ export class CrustyApp {
       ...(options.requestedResource ? { requestedResource: options.requestedResource } : {}),
       ...(options.requestedModel ? { requestedModel: options.requestedModel } : {}),
       ...(options.agentName ? { agentName: options.agentName } : {}),
+      ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
+      ...(options.parentResultSummary
+        ? { parentResultSummary: summarizeForParentResult(options.parentResultSummary) }
+        : {}),
       ...(options.sourceDocumentRelativePath
         ? { sourceDocumentRelativePath: options.sourceDocumentRelativePath }
         : {}),
@@ -3586,6 +3737,8 @@ export class CrustyApp {
       agentName?: string;
       sourceDocumentRelativePath?: string;
       sourceDocumentName?: string;
+      parentTaskId?: number;
+      parentResultSummary?: string;
     } = {}
   ): Promise<{ tasks: AutoQueueTask[]; notes: string[] }> {
     const addedTasks: AutoQueueTask[] = [];
@@ -4017,7 +4170,8 @@ export class CrustyApp {
     await saveAgentMemory(agent.slug, nextMemory, this.rootDir);
 
     const queuedResult = await this.queueParsedTasks(parsed.queuedTasks, `agent:${agent.slug}`, {
-      agentName: agent.slug
+      agentName: agent.slug,
+      parentResultSummary: replyText
     });
     const queued = queuedResult.tasks;
     let writtenFiles: string[] = [];
@@ -4178,6 +4332,24 @@ export class CrustyApp {
       }
     }
 
+    const reviewVerdict = parseQueueReviewVerdict(reviewFeedback);
+    if (reviewVerdict === "reject") {
+      await appendChangelogEntry(
+        reviewerResource
+          ? `Auto queue draft rejected by reviewer @${reviewerResource.alias}; no tasks were finalized.`
+          : "Auto queue draft rejected; no tasks were finalized.",
+        this.rootDir
+      );
+      return {
+        queued: [],
+        notes: [
+          reviewerResource
+            ? `Queue fill rejected by @${reviewerResource.alias} (VERDICT: reject).`
+            : "Queue fill rejected (VERDICT: reject)."
+        ]
+      };
+    }
+
     const finalizeMessages = buildQueueFillFinalizeMessages({
       directives: documents.directives,
       inventory: documents.inventory,
@@ -4254,7 +4426,7 @@ export class CrustyApp {
     if (queuedResult.tasks.length > 0 || queuedResult.notes.length > 0) {
       await appendChangelogEntry(
         reviewerResource
-          ? `Auto queue filled after draft/review/finalize consensus between ${this.getOrchestratorName()} and @${reviewerResource.alias}. Verdict: ${parseQueueReviewVerdict(reviewFeedback)}.`
+          ? `Auto queue filled after draft/review/finalize consensus between ${this.getOrchestratorName()} and @${reviewerResource.alias}. Verdict: ${reviewVerdict}.`
           : `Auto queue filled after orchestrator-only planning because no secondary reviewer resource was available.`,
         this.rootDir
       );
@@ -4363,6 +4535,12 @@ export class CrustyApp {
     if (preflightContext) {
       extraContextBlocks.push(preflightContext);
     }
+    if (task.parentTaskId && task.parentResultSummary) {
+      extraContextBlocks.push(
+        `Prior task output (task #${task.parentTaskId}):\n${task.parentResultSummary}`
+      );
+    }
+    const preflightGoal = preflightContext ? extractPreflightGoal(preflightContext) : null;
 
     const resourceProfile = getResourceProfile(selection.alias, this.rootDir);
 
@@ -4468,16 +4646,29 @@ export class CrustyApp {
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
+    const verifiedWriteCount = writtenFiles.length;
+    const verification = verifyTaskOutput({
+      task,
+      output: replyText,
+      preflightGoal,
+      claimedWriteCount: parsed.fileWrites.length,
+      verifiedWriteCount,
+      postProcessErrors
+    });
     const taskCompletedAt = new Date().toISOString();
     const completedTask: AutoQueueTask = {
       ...task,
-      status: "completed",
+      status: verification.passed ? "completed" : "failed",
       startedAt: taskStartedAt,
       completedAt: taskCompletedAt,
       durationMs: Date.now() - taskStartMs,
       assignedResource: selection.alias,
       assignedModel: endpoint.model,
-      result: replyText
+      result: replyText,
+      qualityVerification: verification,
+      ...(verification.passed
+        ? {}
+        : { errorMessage: `Task output verification failed: ${verification.reason}` })
     };
 
     this.systemState = {
@@ -4506,7 +4697,17 @@ export class CrustyApp {
     }
 
     await this.persistSystemState();
-    const queuedResult = await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed");
+    const queuedResult = verification.passed
+      ? await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed", {
+          parentTaskId: completedTask.id,
+          parentResultSummary: completedTask.result
+        })
+      : {
+          tasks: [],
+          notes: [
+            `Suppressed ${parsed.queuedTasks.length} follow-up task${parsed.queuedTasks.length === 1 ? "" : "s"} because task #${completedTask.id} failed quality verification.`
+          ]
+        };
     const queued = queuedResult.tasks;
     let movedSourceLine: string | null = null;
     if (task.sourceDocumentRelativePath) {
@@ -4534,7 +4735,7 @@ export class CrustyApp {
       }
     }
     await appendChangelogEntry(
-      `Completed auto task #${task.id} on ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
+      `${verification.passed ? "Completed" : "Failed"} auto task #${task.id} on ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
     );
 
@@ -4547,8 +4748,9 @@ export class CrustyApp {
 
     return {
       lines: [
-        `${this.getOrchestratorName()} completed #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
+        `${this.getOrchestratorName()} ${verification.passed ? "completed" : "failed"} #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
         replyText,
+        ...(verification.passed ? [] : [`Verification: ${verification.reason}`]),
         ...(routingFallbackWarning ? [routingFallbackWarning] : []),
         ...writtenFiles,
         ...queuedResult.notes,
