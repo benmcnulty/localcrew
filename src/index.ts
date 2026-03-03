@@ -46,6 +46,32 @@ function clearScreen(): void {
   stdout.write("\u001b[2J\u001b[H");
 }
 
+function enterAlternateScreen(): void {
+  stdout.write("\u001b[?1049h");
+  stdout.write("\u001b[?25l");
+}
+
+function exitAlternateScreen(): void {
+  stdout.write("\u001b[?25h");
+  stdout.write("\u001b[?1049l");
+}
+
+function renderFrame(lines: string[], previousLines: string[]): void {
+  stdout.write("\u001b[H");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] !== previousLines[index]) {
+      stdout.write(`\u001b[${index + 1};1H`);
+      stdout.write("\u001b[2K");
+      stdout.write(lines[index]);
+    }
+  }
+
+  for (let index = lines.length; index < previousLines.length; index += 1) {
+    stdout.write(`\u001b[${index + 1};1H\u001b[2K`);
+  }
+}
+
 function isEscapeBuffer(buffer: Buffer): boolean {
   return buffer.length > 0 && buffer[0] === 27;
 }
@@ -121,148 +147,174 @@ async function runStatusViewer(
   app: CrustyApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
-  const lines = await app.getStatusLines();
+  enterAlternateScreen();
+  let previousLines: string[] = [];
 
-  await withRawMode(readline, async () => {
-    while (true) {
-      clearScreen();
-      lines.forEach((line) => writeLine(stdout, line));
-      const buffer = await readRawBuffer();
+  try {
+    await withRawMode(readline, async () => {
+      while (true) {
+        const lines = await app.getStatusLines();
+        renderFrame(lines, previousLines);
+        previousLines = lines;
 
-      if (isEscapeBuffer(buffer) || buffer.includes(3)) {
-        clearScreen();
-        return;
+        const buffer = await readRawBufferWithTimeout(2000);
+        if (!buffer) {
+          continue;
+        }
+        if (isEscapeBuffer(buffer) || buffer.includes(3)) {
+          return;
+        }
       }
-    }
-  });
+    });
+  } finally {
+    exitAlternateScreen();
+  }
 }
 
 async function runExploreViewer(
   app: CrustyApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
-  await withRawMode(readline, async () => {
-    let inputBuffer = "";
-    let errorMessage = "";
+  enterAlternateScreen();
+  try {
+    await withRawMode(readline, async () => {
+      let inputBuffer = "";
+      let errorMessage = "";
+      let cachedTree: Awaited<ReturnType<CrustyApp["getExploreTree"]>> | null = null;
+      let treeCachedAt = 0;
+      const treeCacheMs = 5000;
 
-    const renderPrompt = async (): Promise<void> => {
-      const tree = await app.getExploreTree();
-      clearScreen();
-      tree.lines.forEach((line) => writeLine(stdout, line));
-      if (errorMessage) {
-        writeLine(stderr, errorMessage);
-      }
-      stdout.write(`open path> ${inputBuffer}`);
-    };
+      const getTree = async (): Promise<Awaited<ReturnType<CrustyApp["getExploreTree"]>>> => {
+        if (!cachedTree || Date.now() - treeCachedAt > treeCacheMs) {
+          cachedTree = await app.getExploreTree();
+          treeCachedAt = Date.now();
+        }
+        return cachedTree;
+      };
 
-    const renderFile = async (path: string, content: string): Promise<void> => {
-      clearScreen();
-      writeLine(stdout, path);
-      writeLine(stdout, "");
-      content.split("\n").forEach((line) => writeLine(stdout, line));
-      writeLine(stdout, "");
-      writeLine(stdout, "Press Esc to return to the explorer.");
+      const renderPrompt = async (): Promise<void> => {
+        const tree = await getTree();
+        clearScreen();
+        tree.lines.forEach((line) => writeLine(stdout, line));
+        if (errorMessage) {
+          writeLine(stdout, errorMessage);
+        }
+        stdout.write(`open path> ${inputBuffer}`);
+      };
+
+      const renderFile = async (path: string, content: string): Promise<void> => {
+        clearScreen();
+        writeLine(stdout, path);
+        writeLine(stdout, "");
+        content.split("\n").forEach((line) => writeLine(stdout, line));
+        writeLine(stdout, "");
+        writeLine(stdout, "Press Esc to return to the explorer.");
+
+        while (true) {
+          const buffer = await readRawBuffer();
+          if (isEscapeBuffer(buffer) || buffer.includes(3)) {
+            return;
+          }
+        }
+      };
 
       while (true) {
+        await renderPrompt();
         const buffer = await readRawBuffer();
+
         if (isEscapeBuffer(buffer) || buffer.includes(3)) {
           return;
         }
-      }
-    };
 
-    while (true) {
-      await renderPrompt();
-      const buffer = await readRawBuffer();
-
-      if (isEscapeBuffer(buffer) || buffer.includes(3)) {
-        clearScreen();
-        return;
-      }
-
-      if (isBackspaceBuffer(buffer)) {
-        inputBuffer = inputBuffer.slice(0, -1);
-        errorMessage = "";
-        continue;
-      }
-
-      if (isEnterBuffer(buffer)) {
-        const requestedPath = inputBuffer.trim();
-        if (!requestedPath) {
-          errorMessage = "Enter a full path inside the internal system tree, or press Esc to exit.";
+        if (isBackspaceBuffer(buffer)) {
+          inputBuffer = inputBuffer.slice(0, -1);
+          errorMessage = "";
           continue;
         }
 
-        try {
-          const file = await app.readExploreFile(requestedPath);
-          inputBuffer = "";
-          errorMessage = "";
-          await renderFile(file.path, file.content);
-        } catch (error) {
-          errorMessage = (error as Error).message;
-        }
-        continue;
-      }
+        if (isEnterBuffer(buffer)) {
+          const requestedPath = inputBuffer.trim();
+          if (!requestedPath) {
+            errorMessage = "Enter a full path inside the internal system tree, or press Esc to exit.";
+            continue;
+          }
 
-      const printableText = getPrintableText(buffer);
-      if (printableText) {
-        inputBuffer += printableText;
-        errorMessage = "";
+          try {
+            const file = await app.readExploreFile(requestedPath);
+            inputBuffer = "";
+            errorMessage = "";
+            await renderFile(file.path, file.content);
+          } catch (error) {
+            errorMessage = (error as Error).message;
+          }
+          continue;
+        }
+
+        const printableText = getPrintableText(buffer);
+        if (printableText) {
+          inputBuffer += printableText;
+          errorMessage = "";
+        }
       }
-    }
-  });
+    });
+  } finally {
+    exitAlternateScreen();
+  }
 }
 
 async function runHudViewer(
   app: CrustyApp,
   readline: ReturnType<typeof createInterface>
 ): Promise<void> {
-  await withRawMode(readline, async () => {
-    const tabs: Array<"status" | "queue" | "metrics" | "detail"> = [
-      "status",
-      "queue",
-      "metrics",
-      "detail"
-    ];
-    let tabIndex = 0;
-    let lastPulseAt = 0;
+  enterAlternateScreen();
+  let previousLines: string[] = [];
 
-    while (true) {
-      if (app.shouldAutoPulse() && Date.now() - lastPulseAt >= app.getAutoPulseIntervalMs()) {
-        await app.runIdleCycle();
-        lastPulseAt = Date.now();
+  try {
+    await withRawMode(readline, async () => {
+      const tabs: Array<"status" | "queue" | "metrics" | "detail"> = [
+        "status",
+        "queue",
+        "metrics",
+        "detail"
+      ];
+      let tabIndex = 0;
+      let lastPulseAt = 0;
+
+      while (true) {
+        if (app.shouldAutoPulse() && Date.now() - lastPulseAt >= app.getAutoPulseIntervalMs()) {
+          await app.runIdleCycle();
+          lastPulseAt = Date.now();
+        }
+
+        const lines = await app.getHudLines(tabs[tabIndex]);
+        renderFrame(lines, previousLines);
+        previousLines = lines;
+
+        const buffer = await readRawBufferWithTimeout(1000);
+        if (!buffer) {
+          continue;
+        }
+
+        if (buffer.includes(3) || isEscapeBuffer(buffer)) {
+          return;
+        }
+
+        if (isArrowLeftBuffer(buffer)) {
+          tabIndex = (tabIndex + tabs.length - 1) % tabs.length;
+          previousLines = [];
+          continue;
+        }
+
+        if (isArrowRightBuffer(buffer)) {
+          tabIndex = (tabIndex + 1) % tabs.length;
+          previousLines = [];
+          continue;
+        }
       }
-
-      clearScreen();
-      const lines = await app.getHudLines(tabs[tabIndex]);
-      lines.forEach((line) => writeLine(stdout, line));
-
-      const buffer = await readRawBufferWithTimeout(250);
-      if (!buffer) {
-        continue;
-      }
-
-      if (buffer.includes(3)) {
-        clearScreen();
-        return;
-      }
-
-      if (isArrowLeftBuffer(buffer)) {
-        tabIndex = (tabIndex + tabs.length - 1) % tabs.length;
-        continue;
-      }
-
-      if (isArrowRightBuffer(buffer)) {
-        tabIndex = (tabIndex + 1) % tabs.length;
-        continue;
-      }
-
-      if (isEscapeBuffer(buffer)) {
-        clearScreen();
-        return;
-      }
-    }
-  });
+    });
+  } finally {
+    exitAlternateScreen();
+  }
 }
 
 async function resolveViewerRequest(
