@@ -64,8 +64,8 @@ function getDeviceFingerprint(machine) {
 }
 
 function getStoragePaths(rootDir) {
-  const storageDir = join(rootDir, ".crusty");
-  const identityDir = join(homedir(), ".crusty");
+  const storageDir = join(rootDir, ".localcrew");
+  const identityDir = join(homedir(), ".localcrew");
   return {
     storageDir,
     identityDir,
@@ -533,7 +533,7 @@ async function verifyOrchestratorConnection(orchestratorUrl) {
     healthResponse = await fetch(healthUrl);
   } catch (error) {
     throw new Error(
-      `Could not reach orchestrator at ${trimmedBase}. Check that Crusty is running on the orchestrator, the IP is correct, and inbound TCP 4310 is allowed. Original error: ${error.message}`
+      `Could not reach orchestrator at ${trimmedBase}. Check that Local Crew is running on the orchestrator, the IP is correct, and inbound TCP 4310 is allowed. Original error: ${error.message}`
     );
   }
 
@@ -1062,7 +1062,7 @@ async function main() {
 
   const reportPath = await writeLocalReport(options.rootDir, report);
 
-  console.log("Crusty agent setup complete.");
+  console.log("Local Crew agent setup complete.");
   console.log(`Repo root: ${options.rootDir}`);
   console.log(`Local report: ${reportPath}`);
   console.log(`Device nickname: ${nickname}`);

@@ -96,7 +96,7 @@ function getAuthHeaders(apiStyle, apiKeyEnv) {
 }
 
 function getStoragePaths(rootDir) {
-  const storageDir = join(rootDir, ".crusty");
+  const storageDir = join(rootDir, ".localcrew");
   return {
     storageDir,
     resourcesPath: join(storageDir, "resources.json"),
@@ -372,10 +372,10 @@ async function loadExistingOrchestratorName(rootDir) {
   try {
     const rawEnv = await readFile(envPath, "utf8");
     const match = rawEnv.match(
-      /# >>> crusty orchestrator setup >>>([\s\S]*?)# <<< crusty orchestrator setup <<</
+      /# >>> localcrew orchestrator setup >>>([\s\S]*?)# <<< localcrew orchestrator setup <<</
     );
     const assignments = parseEnvAssignments(match ? match[1] : rawEnv);
-    const configuredName = assignments.CRUSTY_ORCHESTRATOR_NAME;
+    const configuredName = assignments.LOCALCREW_ORCHESTRATOR_NAME;
     return typeof configuredName === "string" && configuredName.trim() !== ""
       ? configuredName.trim()
       : undefined;
@@ -525,54 +525,54 @@ function buildManagedEnvBlock({ setup, machine, discovered }) {
   const prefs = setup.preferences ?? {};
 
   return [
-    "# >>> crusty orchestrator setup >>>",
-    "CRUSTY_API_ENABLED=true",
-    `CRUSTY_API_BIND_HOST=${setup.bindHost}`,
-    `CRUSTY_API_PUBLIC_HOST=${localUiHost}`,
-    `CRUSTY_API_PORT=${setup.apiPort}`,
-    `CRUSTY_ORCHESTRATOR_NAME=${setup.name}`,
-    "CRUSTY_DEFAULT_ENDPOINT=erin",
-    `CRUSTY_ORCHESTRATOR_ALIAS=${setup.alias}`,
-    `CRUSTY_ORCHESTRATOR_LABEL=${setup.label}`,
-    `CRUSTY_ORCHESTRATOR_TIER=${setup.tier}`,
-    `CRUSTY_ORCHESTRATOR_BASE_URL=${setup.endpointUrl}`,
-    `CRUSTY_ORCHESTRATOR_API_STYLE=${setup.apiStyle}`,
-    ...(setup.apiKeyEnv ? [`CRUSTY_ORCHESTRATOR_API_KEY_ENV=${setup.apiKeyEnv}`] : []),
-    `CRUSTY_ORCHESTRATOR_HOST_NAME=${machine.hostName}`,
-    `CRUSTY_ORCHESTRATOR_PLATFORM=${machine.platform}`,
-    `CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES=${machine.cpuLogicalCores}`,
-    `CRUSTY_ORCHESTRATOR_RAM_GB=${machine.ramGb}`,
-    ...(machine.localIp ? [`CRUSTY_ORCHESTRATOR_LOCAL_IP=${machine.localIp}`] : []),
-    ...(discovered.defaultModel ? [`CRUSTY_ORCHESTRATOR_DEFAULT_MODEL=${discovered.defaultModel}`] : []),
+    "# >>> localcrew orchestrator setup >>>",
+    "LOCALCREW_API_ENABLED=true",
+    `LOCALCREW_API_BIND_HOST=${setup.bindHost}`,
+    `LOCALCREW_API_PUBLIC_HOST=${localUiHost}`,
+    `LOCALCREW_API_PORT=${setup.apiPort}`,
+    `LOCALCREW_ORCHESTRATOR_NAME=${setup.name}`,
+    "LOCALCREW_DEFAULT_ENDPOINT=erin",
+    `LOCALCREW_ORCHESTRATOR_ALIAS=${setup.alias}`,
+    `LOCALCREW_ORCHESTRATOR_LABEL=${setup.label}`,
+    `LOCALCREW_ORCHESTRATOR_TIER=${setup.tier}`,
+    `LOCALCREW_ORCHESTRATOR_BASE_URL=${setup.endpointUrl}`,
+    `LOCALCREW_ORCHESTRATOR_API_STYLE=${setup.apiStyle}`,
+    ...(setup.apiKeyEnv ? [`LOCALCREW_ORCHESTRATOR_API_KEY_ENV=${setup.apiKeyEnv}`] : []),
+    `LOCALCREW_ORCHESTRATOR_HOST_NAME=${machine.hostName}`,
+    `LOCALCREW_ORCHESTRATOR_PLATFORM=${machine.platform}`,
+    `LOCALCREW_ORCHESTRATOR_CPU_LOGICAL_CORES=${machine.cpuLogicalCores}`,
+    `LOCALCREW_ORCHESTRATOR_RAM_GB=${machine.ramGb}`,
+    ...(machine.localIp ? [`LOCALCREW_ORCHESTRATOR_LOCAL_IP=${machine.localIp}`] : []),
+    ...(discovered.defaultModel ? [`LOCALCREW_ORCHESTRATOR_DEFAULT_MODEL=${discovered.defaultModel}`] : []),
     ...(discovered.reasoningModel
-      ? [`CRUSTY_ORCHESTRATOR_REASONING_MODEL=${discovered.reasoningModel}`]
+      ? [`LOCALCREW_ORCHESTRATOR_REASONING_MODEL=${discovered.reasoningModel}`]
       : []),
     ...(discovered.codingModel
-      ? [`CRUSTY_ORCHESTRATOR_CODING_MODEL=${discovered.codingModel}`]
+      ? [`LOCALCREW_ORCHESTRATOR_CODING_MODEL=${discovered.codingModel}`]
       : []),
     ...(discovered.toolsModel
-      ? [`CRUSTY_ORCHESTRATOR_TOOLS_MODEL=${discovered.toolsModel}`]
+      ? [`LOCALCREW_ORCHESTRATOR_TOOLS_MODEL=${discovered.toolsModel}`]
       : []),
     ...(discovered.embeddingModel
-      ? [`CRUSTY_ORCHESTRATOR_EMBEDDING_MODEL=${discovered.embeddingModel}`]
+      ? [`LOCALCREW_ORCHESTRATOR_EMBEDDING_MODEL=${discovered.embeddingModel}`]
       : []),
-    `CRUSTY_ENDPOINT_ERIN_RESOURCE=${setup.alias}`,
-    "CRUSTY_ENDPOINT_ERIN_NICKNAME=Erin",
-    ...(discovered.defaultModel ? [`CRUSTY_ENDPOINT_ERIN_MODEL=${discovered.defaultModel}`] : []),
-    `CRUSTY_ENDPOINT_ZORA_RESOURCE=${setup.alias}`,
-    "CRUSTY_ENDPOINT_ZORA_NICKNAME=Zora",
-    ...(discovered.defaultModel ? [`CRUSTY_ENDPOINT_ZORA_MODEL=${discovered.defaultModel}`] : []),
-    `CRUSTY_ENDPOINT_SAM_RESOURCE=${setup.alias}`,
-    "CRUSTY_ENDPOINT_SAM_NICKNAME=Sam",
-    ...(discovered.defaultModel ? [`CRUSTY_ENDPOINT_SAM_MODEL=${discovered.defaultModel}`] : []),
-    `CRUSTY_ENDPOINT_PAV_RESOURCE=${setup.alias}`,
-    "CRUSTY_ENDPOINT_PAV_NICKNAME=Pav",
-    ...(discovered.defaultModel ? [`CRUSTY_ENDPOINT_PAV_MODEL=${discovered.defaultModel}`] : []),
-    ...(prefs.zipCode ? [`CRUSTY_PREFERENCES_ZIP_CODE=${prefs.zipCode}`] : []),
+    `LOCALCREW_ENDPOINT_ERIN_RESOURCE=${setup.alias}`,
+    "LOCALCREW_ENDPOINT_ERIN_NICKNAME=Erin",
+    ...(discovered.defaultModel ? [`LOCALCREW_ENDPOINT_ERIN_MODEL=${discovered.defaultModel}`] : []),
+    `LOCALCREW_ENDPOINT_ZORA_RESOURCE=${setup.alias}`,
+    "LOCALCREW_ENDPOINT_ZORA_NICKNAME=Zora",
+    ...(discovered.defaultModel ? [`LOCALCREW_ENDPOINT_ZORA_MODEL=${discovered.defaultModel}`] : []),
+    `LOCALCREW_ENDPOINT_SAM_RESOURCE=${setup.alias}`,
+    "LOCALCREW_ENDPOINT_SAM_NICKNAME=Sam",
+    ...(discovered.defaultModel ? [`LOCALCREW_ENDPOINT_SAM_MODEL=${discovered.defaultModel}`] : []),
+    `LOCALCREW_ENDPOINT_PAV_RESOURCE=${setup.alias}`,
+    "LOCALCREW_ENDPOINT_PAV_NICKNAME=Pav",
+    ...(discovered.defaultModel ? [`LOCALCREW_ENDPOINT_PAV_MODEL=${discovered.defaultModel}`] : []),
+    ...(prefs.zipCode ? [`LOCALCREW_PREFERENCES_ZIP_CODE=${prefs.zipCode}`] : []),
     ...(prefs.jobSearchEnabled !== undefined
-      ? [`CRUSTY_JOB_SEARCH_ENABLED=${prefs.jobSearchEnabled ? "true" : "false"}`]
+      ? [`LOCALCREW_JOB_SEARCH_ENABLED=${prefs.jobSearchEnabled ? "true" : "false"}`]
       : []),
-    "# <<< crusty orchestrator setup <<<"
+    "# <<< localcrew orchestrator setup <<<"
   ].join("\n");
 }
 
@@ -588,7 +588,7 @@ async function writeManagedEnv(rootDir, block) {
 
   const previous = await readFile(envPath, "utf8");
   const pattern =
-    /# >>> crusty orchestrator setup >>>[\s\S]*?# <<< crusty orchestrator setup <<<\n?/g;
+    /# >>> localcrew orchestrator setup >>>[\s\S]*?# <<< localcrew orchestrator setup <<<\n?/g;
   const next = pattern.test(previous)
     ? previous.replace(pattern, nextBlock)
     : `${previous.trimEnd()}\n\n${nextBlock}`;
@@ -637,7 +637,7 @@ async function syncExistingConfigName(rootDir, name) {
   }
 }
 
-async function startCrustyProcess(rootDir) {
+async function startLocalCrewProcess(rootDir) {
   const command = process.platform === "win32" ? "npm.cmd" : "npm";
 
   await new Promise((resolveStart, rejectStart) => {
@@ -751,7 +751,7 @@ async function main() {
       ? `http://${setup.publicHost}:${setup.apiPort}/display`
       : localDisplayUrl;
 
-  console.log("Crusty setup complete.");
+  console.log("Local Crew setup complete.");
   console.log(`Repo root: ${setup.rootDir}`);
   console.log(`Managed env: ${envPath}`);
   console.log(`Resource inventory: ${resourcesPath}`);
@@ -794,10 +794,10 @@ async function main() {
   console.log("");
   console.log("Next steps:");
   if (setup.noStart) {
-    console.log("1. Start Crusty with: npm run start");
+    console.log("1. Start Local Crew with: npm run start");
     console.log("2. Open the Local UI or Billboard display links above after startup.");
   } else {
-    console.log("1. Crusty will start now in this terminal.");
+    console.log("1. Local Crew will start now in this terminal.");
     console.log("2. Open the Local UI or Billboard display links above after startup.");
   }
   console.log("3. Remember this orchestrator address for agent setup:");
@@ -823,8 +823,8 @@ async function main() {
 
   if (!setup.noStart) {
     console.log("");
-    console.log("Starting Crusty now: npm run start");
-    await startCrustyProcess(setup.rootDir);
+    console.log("Starting Local Crew now: npm run start");
+    await startLocalCrewProcess(setup.rootDir);
   }
 }
 
