@@ -114,7 +114,7 @@
    - Ensure sensitive fields are redacted in stream output by default.
 
 14. Unexpected workspace folder creation outside intended write zones
-   - Observed path: `# Updated Spec\n\nNew content.` created at repo root with a parallel `.crusty` tree inside.
+   - Observed path: `# Updated Spec\n\nNew content.` created at repo root with a parallel `.localcrew` tree inside.
    - Impact: uncontrolled writes outside expected internal/external-memory boundaries increase safety risk.
    - Root cause class: insufficient canonical path allowlisting and write-target enforcement for autonomous WRITE operations.
 
@@ -132,7 +132,7 @@
 Reviewed sources:
 - `external-memory/outbox/2026-03-02-developer-review.md`
 - `external-memory/outbox/feature-requests/task-on-orchestrator-create-a-telemetry-collector-that-runs-ever.md`
-- `.crusty/system/state.json` (completed auto tasks)
+- `.localcrew/system/state.json` (completed auto tasks)
 
 Quality findings:
 

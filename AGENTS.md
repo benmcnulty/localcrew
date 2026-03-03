@@ -8,13 +8,13 @@ bun test test/foo.test.ts   # single file
 bunx tsc --noEmit           # type check only
 npm run start               # run CLI + API with Node
 npm run start:bun           # run with Bun runtime
-npm run setup:crusty        # bootstrap primary orchestrator device
+npm run setup:crew          # bootstrap primary orchestrator device
 node scripts/setup-agent.js # onboard a secondary agent device
 ```
 
 ## Architecture
 
-`src/app.ts` (`CrustyApp`) is the orchestration hub — it owns mode state, command dispatch, and chat routing. Keep new logic outside of it when it belongs to a focused module instead.
+`src/app.ts` (`LocalCrewApp`) is the orchestration hub — it owns mode state, command dispatch, and chat routing. Keep new logic outside of it when it belongs to a focused module instead.
 
 Module boundaries (each has a single job; do not mix concerns):
 
@@ -27,7 +27,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `ollama.ts` | HTTP calls to inference endpoints (ollama, openai, anthropic) |
 | `messages.ts` | Build prompt message arrays — no I/O |
 | `resources.ts` | Resource CRUD, tier routing, capacity summary, network topology |
-| `config.ts` | Load/save participant config from `.crusty/config.json` |
+| `config.ts` | Load/save participant config from `.localcrew/config.json` |
 | `session-store.ts` | Load/save shared conversation transcript |
 | `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
 | `api-server.ts` | Fork + IPC management for the HTTP child process |
@@ -51,7 +51,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
 | `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion, status bar |
 
-Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored local runtime state. Never commit `.crusty/`, `.env`, or `.env.local`.
+Storage layout: `external-memory/` is committed seed data; `.localcrew/` is ignored local runtime state. Never commit `.localcrew/`, `.env`, or `.env.local`.
 
 ## Code Style
 
@@ -83,17 +83,17 @@ Storage layout: `external-memory/` is committed seed data; `.crusty/` is ignored
 
 ## Testing
 
-Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Every test touching the filesystem must use the `withTempDir` pattern — create an OS temp dir, pass it as `rootDir` to all storage functions, and clean up in `finally`. Never write to the real `.crusty/`. See `test/core.test.ts` for the canonical pattern.
+Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Every test touching the filesystem must use the `withTempDir` pattern — create an OS temp dir, pass it as `rootDir` to all storage functions, and clean up in `finally`. Never write to the real `.localcrew/`. See `test/core.test.ts` for the canonical pattern.
 
 ## Security
 
 - No hardcoded secrets, node addresses, or machine-specific values in source — use ignored env files
-- API authentication uses `CRUSTY_API_TOKEN` (Bearer token); CORS origin is `CRUSTY_API_CORS_ORIGIN`
-- All API endpoints (including SSE `/api/events`) require Bearer token authentication when `CRUSTY_API_TOKEN` is set; only static UI assets and `/api/health` are public
+- API authentication uses `LOCALCREW_API_TOKEN` (Bearer token); CORS origin is `LOCALCREW_API_CORS_ORIGIN`
+- All API endpoints (including SSE `/api/events`) require Bearer token authentication when `LOCALCREW_API_TOKEN` is set; only static UI assets and `/api/health` are public
 - Audit log writes use `withFileLock` to prevent corruption on concurrent appends
 - Changelog appends are serialized with `withFileLock` and written atomically
 - Dropbox inbox ingestion uses `withFileLock` to prevent double-processing under concurrent auto-pulse
-- `readInternalFile()` validates paths stay within `.crusty/system/` or `external-memory/` via `relative()` containment check
+- `readInternalFile()` validates paths stay within `.localcrew/system/` or `external-memory/` via `relative()` containment check
 - `ensureSafeRelativePath()` (dropbox) rejects `..`, hidden files, and empty segments
 - `ensureSafeGeneratedRelativePath()` (app.ts) prevents traversal in autonomous WRITE blocks
 - `loadSeedFile()` validates the resolved path stays within the external-memory directory
@@ -107,7 +107,7 @@ Autonomous agents interact with the file system through a layered architecture w
 | Layer | Module | Access | Sandboxed |
 |---|---|---|---|
 | Atomic primitives | `storage.ts` | `atomicWriteFile()`, `withFileLock()` | N/A |
-| Internal files | `internal-files.ts` | Read + search `.crusty/system/` and `external-memory/` | Yes — path traversal prevented |
+| Internal files | `internal-files.ts` | Read + search `.localcrew/system/` and `external-memory/` | Yes — path traversal prevented |
 | External memory | `external-memory.ts` | Read-only committed seed documents | Yes — path escape validated |
 | Dropbox workflow | `dropbox.ts` | inbox → active → outbox file lifecycle | Yes — `ensureSafeRelativePath()` |
 | Autonomous writes | `app.ts` | WRITE[internal], WRITE[active], WRITE[outbox] blocks | Yes — `ensureSafeGeneratedRelativePath()` |
@@ -115,4 +115,4 @@ Autonomous agents interact with the file system through a layered architecture w
 
 ### Search Capability
 
-`searchInternalFiles(query, rootDir)` provides case-insensitive full-text search across `.crusty/system/` and `external-memory/`. Returns up to 100 matching lines with file paths and line numbers. Exposed via `GET /api/explore/search?q=<query>` (auth required). Binary files and files larger than 512 KB are skipped.
+`searchInternalFiles(query, rootDir)` provides case-insensitive full-text search across `.localcrew/system/` and `external-memory/`. Returns up to 100 matching lines with file paths and line numbers. Exposed via `GET /api/explore/search?q=<query>` (auth required). Binary files and files larger than 512 KB are skipped.

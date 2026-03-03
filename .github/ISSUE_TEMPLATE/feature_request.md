@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for Crusty
+about: Suggest an idea for Local Crew
 title: ""
 labels: enhancement
 assignees: ""

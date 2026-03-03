@@ -1,25 +1,25 @@
 # Remote Portal Plan
 
-This document captures the public-safe contract Crusty will eventually need for `benlive.tv/crusty`.
+This document captures the public-safe contract Local Crew will eventually need for `benlive.tv/localcrew`.
 
 It is intentionally architectural. Local branch names, test credentials, and staging specifics belong in the ignored local handoff document, not in the repo.
 
 ## Goal
 
-Support authenticated operators who run Crusty locally and want:
+Support authenticated operators who run Local Crew locally and want:
 
 - a remote browser HUD for their local swarm
 - authenticated task submission into their local queue
 - visibility into agent state, queue health, and recent completions
 - an install-owned orchestrator profile with its own nickname, status, and connected resources
-- eventual safe networking between multiple user-controlled Crusty swarms
+- eventual safe networking between multiple user-controlled Local Crew swarms
 - profile metadata that can summarize the relative compute envelope of a swarm, such as known RAM, CPU threads, GPU count, VRAM, and context capacity
 
 ## Local/Remote Boundary
 
-Crusty must keep two layers distinct:
+Local Crew must keep two layers distinct:
 
-- local authority: the local Crusty process, local Ollama endpoints, local `.crusty/` runtime state, and local `external-memory` dropbox contents
+- local authority: the local Local Crew process, local Ollama endpoints, local `.localcrew/` runtime state, and local `external-memory` dropbox contents
 - remote coordination: authenticated account identity, profile metadata, subscription flags, remote HUD reads, and remote task requests
 - remote coordination also includes orchestrator profile metadata, feature flags, and trust policy for any future swarm-to-swarm interaction
 
@@ -30,7 +30,7 @@ The remote portal must never become the source of truth for local autonomous mem
 The local app will eventually need:
 
 - a `/login` flow that authenticates the local operator against the remote portal
-- a local auth/session store separate from `.crusty/` autonomous memory
+- a local auth/session store separate from `.localcrew/` autonomous memory
 - a local orchestrator profile binding that links the install-owned orchestrator identity to the operator account without exposing local internal memory
 - an authenticated sync worker that can:
   - publish a lightly detailed local HUD snapshot
@@ -63,7 +63,7 @@ Requirements:
 
 - operator sign-in in the browser
 - explicit association between operator account and one or more orchestrator profiles
-- local Crusty device authorization to act for that operator
+- local Local Crew device authorization to act for that operator
 - revocable session tokens
 - support for admin testing and temporary simulated privilege levels during development
 
@@ -95,7 +95,7 @@ The first remote HUD should publish only lightweight state:
 - aggregate capacity metadata for the swarm when the local install has provided it
 
 Do not publish full local autonomous memory by default.
-Do not publish private agent memory, internal `.crusty` files, raw prompts, or full transcripts by default.
+Do not publish private agent memory, internal `.localcrew` files, raw prompts, or full transcripts by default.
 
 ## Private-First Social Layer
 
@@ -164,7 +164,7 @@ When building the remote side, development agents should preserve:
 - parity between the CLI and browser UI
 - the boundary between committed external-memory seeds and local internal runtime state
 - the existing local queue model as the core execution primitive
-- the ability to disable the remote layer entirely and keep Crusty fully local
+- the ability to disable the remote layer entirely and keep Local Crew fully local
 - feature-flagged rollout and staged branch delivery so incomplete remote capabilities do not destabilize the local product
 - least-privilege API design, revocable credentials, and audit-first remote write paths
 - responsive browser layouts across mobile, tablet, and desktop widths

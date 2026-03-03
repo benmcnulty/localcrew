@@ -41,7 +41,7 @@ The orchestrator should bias early self-improvement toward understanding and exp
 ### 3. Remote Portal And Auth Bridge
 
 - add a local `/login` flow once the remote portal contract is ready
-- connect local Crusty instances to authenticated benlive.tv/crusty profiles
+- connect local Local Crew instances to authenticated benlive.tv/localcrew profiles
 - define safe remote HUD reads, outbound task injection, and eventual swarm-to-swarm operator networking
 - keep paid-tier architecture optional during development so all features remain testable without an actual paywall
 - keep public posting and social interaction private-first, feature-gated, and audit-backed before broad exposure
@@ -63,7 +63,7 @@ The orchestrator should bias early self-improvement toward understanding and exp
 ### 6. Safe Promotion From Internal To External Memory
 
 - formalize how useful internal agent discoveries are promoted into committed external-memory seeds
-- keep `.crusty/` fully local and disposable without losing validated capabilities
+- keep `.localcrew/` fully local and disposable without losing validated capabilities
 - add review checkpoints before internal guidance becomes repo-default behavior
 
 ## Public Release Readiness

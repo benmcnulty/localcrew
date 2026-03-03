@@ -22,10 +22,10 @@ git --no-pager log -n 5 --oneline
 Create a handoff note in local runtime memory:
 
 ```bash
-mkdir -p .crusty/system/handoffs
+mkdir -p .localcrew/system/handoffs
 ```
 
-Write `.crusty/system/handoffs/overnight-<date>.md` with:
+Write `.localcrew/system/handoffs/overnight-<date>.md` with:
 - build/test status
 - operator names
 - device roster and model profile mode
@@ -36,7 +36,7 @@ Write `.crusty/system/handoffs/overnight-<date>.md` with:
 Primary node:
 
 ```bash
-npm run setup:crusty
+npm run setup:crew
 npm run start
 ```
 
@@ -46,10 +46,10 @@ Confirm API health and SSE stream:
 curl -s http://127.0.0.1:4310/api/health
 ```
 
-If `CRUSTY_API_TOKEN` is enabled, verify authenticated events endpoint:
+If `LOCALCREW_API_TOKEN` is enabled, verify authenticated events endpoint:
 
 ```bash
-curl -N -H "Authorization: Bearer $CRUSTY_API_TOKEN" http://127.0.0.1:4310/api/events
+curl -N -H "Authorization: Bearer $LOCALCREW_API_TOKEN" http://127.0.0.1:4310/api/events
 ```
 
 ## 4) Agent Device Onboarding
@@ -98,11 +98,11 @@ Verify all of the following in `/status` or `/display`:
 ## 7) Logging Requirements
 
 During the run, preserve:
-- `.crusty/system/secure/orchestrator/telemetry/audit-log.jsonl`
-- `.crusty/system/secure/orchestrator/telemetry/summary.json`
-- `.crusty/system/changelog.md`
-- `.crusty/system/focus-todo.md`
-- `.crusty/system/state.json`
+- `.localcrew/system/secure/orchestrator/telemetry/audit-log.jsonl`
+- `.localcrew/system/secure/orchestrator/telemetry/summary.json`
+- `.localcrew/system/changelog.md`
+- `.localcrew/system/focus-todo.md`
+- `.localcrew/system/state.json`
 
 Post-run, archive key excerpts into:
 

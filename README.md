@@ -1,6 +1,6 @@
-# Crusty
+# Local Crew
 
-Crusty is a local-first orchestration CLI for multi-device inference networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, web grounding tools, transactional telemetry, a local browser dashboard, and observability tools such as `/status`, `/hud`, and `/explore`.
+Local Crew is a local-first orchestration CLI for multi-device inference networks. It gives you a shared conversational shell, autonomous `/auto` mode, persistent orchestrator memory, agent identities, queue-based delegation, web grounding tools, transactional telemetry, a local browser dashboard, and observability tools such as `/status`, `/hud`, and `/explore`.
 
 Local node addresses, model assignments, and hardware-specific notes are loaded from ignored env files — nothing machine-specific is committed to source.
 
@@ -28,7 +28,7 @@ Provider foundation is built around:
 - Daily work sessions (`/daily start | finish | status`) with task tracking and digest generation
 - Local HTTP API and browser dashboard served from the same surface
 - External dropbox flow through `external-memory/inbox`, `external-memory/active`, and `external-memory/outbox`
-- Local orchestrator state under `.crusty/`
+- Local orchestrator state under `.localcrew/`
 - Internal file explorer plus status and HUD views in the terminal
 - Cross-platform Ollama benchmark scripts for macOS, Windows 11, and Linux
 - Hierarchical network topology: any capable device can serve as a sub-orchestrator with its own subordinate agents
@@ -36,9 +36,9 @@ Provider foundation is built around:
 
 ## Quick Start
 
-1. Run `npm run setup:crusty` on the best local device with Ollama or another supported endpoint. This primary device becomes your local agent orchestrator. The setup flow prompts for the agent-orchestrator name, preloads the existing local name when you rerun setup later, and then starts Crusty automatically in the same terminal.
+1. Run `npm run setup:crew` on the best local device with Ollama or another supported endpoint. This primary device becomes your local agent orchestrator. The setup flow prompts for the agent-orchestrator name, preloads the existing local name when you rerun setup later, and then starts Local Crew automatically in the same terminal.
 2. Open the printed `Local UI` link or stay in the CLI and use `/help`.
-3. Bring the next best agent device online and run `node scripts/setup-agent.js` on that device, or use the standalone `setup-agent.js` download when that is published. The Crusty setup output shows the full primary-device IP to remember. The agent setup prompt pre-fills the first three IP numbers from the local network, and you confirm or enter the final number before it tests the connection. It then prompts for a device nickname, shows a verified configuration summary, syncs the verified configuration, and stays running as a local monitor by default. For local endpoints, that monitor exposes a narrow agent gateway URL for the orchestrator and keeps requests limited to the configured orchestrator IP instead of requiring broad LAN exposure of the underlying inference service. Re-running it on the same device replaces that device's prior synced listing instead of duplicating it and reuses prior local setup values when available. Use `--once` if you want a one-shot setup run instead of the persistent monitor. For OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync. You can still add devices manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`.
+3. Bring the next best agent device online and run `node scripts/setup-agent.js` on that device, or use the standalone `setup-agent.js` download when that is published. The Local Crew setup output shows the full primary-device IP to remember. The agent setup prompt pre-fills the first three IP numbers from the local network, and you confirm or enter the final number before it tests the connection. It then prompts for a device nickname, shows a verified configuration summary, syncs the verified configuration, and stays running as a local monitor by default. For local endpoints, that monitor exposes a narrow agent gateway URL for the orchestrator and keeps requests limited to the configured orchestrator IP instead of requiring broad LAN exposure of the underlying inference service. Re-running it on the same device replaces that device's prior synced listing instead of duplicating it and reuses prior local setup values when available. Use `--once` if you want a one-shot setup run instead of the persistent monitor. For OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync. You can still add devices manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`.
 
 Once the orchestrator is up, the fast validation path is:
 
@@ -49,7 +49,7 @@ Once the orchestrator is up, the fast validation path is:
 - use `/resource refresh <alias>` when models change and `/resource edit <alias>` to fill in hardware and context metadata the endpoint cannot self-report yet
 - use the browser UI at the printed `Local UI` link for editable resources, participants, and direct test chat
 
-The orchestrator identity name is install-local and comes from `CRUSTY_ORCHESTRATOR_NAME` or `npm run setup:crusty -- --name "Your Name"`.
+The orchestrator identity name is install-local and comes from `LOCALCREW_ORCHESTRATOR_NAME` or `npm run setup:crew -- --name "Your Name"`.
 
 Notable views:
 
@@ -90,11 +90,11 @@ Additional CLI commands:
 - `/daily finish` — complete the session and generate a digest
 - `/clear` — reset the app back to its env-backed first-run state
 - `/end` — end the current chat or group session
-- `/exit` — exit Crusty
+- `/exit` — exit Local Crew
 
 ## Hierarchical Orchestration
 
-Crusty supports hierarchical device topologies where multiple devices can serve as orchestrators, each coordinating their own subordinate agents.
+Local Crew supports hierarchical device topologies where multiple devices can serve as orchestrators, each coordinating their own subordinate agents.
 
 **Resource roles:**
 - `primary-orchestrator` — the main device running the REPL and managing the overall network
@@ -121,7 +121,7 @@ Use `/topology` to view the live hierarchy at any time.
 
 ## Web Tools & Grounding
 
-Crusty exposes six external data tools to orchestrators and agents. Models emit a special marker line in their response; the app resolves the tool and re-prompts with the results.
+Local Crew exposes six external data tools to orchestrators and agents. Models emit a special marker line in their response; the app resolves the tool and re-prompts with the results.
 
 | Marker | Example | Tool |
 |--------|---------|------|
@@ -137,7 +137,7 @@ Web search is topic-gated to: `news`, `jobs`, `software-engineering`, `ai-engine
 ## Local State
 
 - `.env` and `.env.local` are ignored and may contain device-specific configuration.
-- `.crusty/` is ignored and contains local config, memory, queue state, and orchestrator documents.
+- `.localcrew/` is ignored and contains local config, memory, queue state, and orchestrator documents.
 - `external-memory/` is committed and contains durable seed directives, workflows, and built-in agent specs that are restored on fresh installs.
 - `external-memory/inbox`, `external-memory/active`, and `external-memory/outbox` are tracked only as folders; their contents stay local and untracked.
 - `/clear` resets the app back to its env-backed first-run state.
@@ -174,12 +174,12 @@ Web search is topic-gated to: `news`, `jobs`, `software-engineering`, `ai-engine
 
 Control the API listener with:
 
-- `CRUSTY_API_ENABLED=true`
-- `CRUSTY_API_BIND_HOST=0.0.0.0`
-- `CRUSTY_API_PUBLIC_HOST=127.0.0.1`
-- `CRUSTY_API_PORT=4310`
-- `CRUSTY_API_CORS_ORIGIN=http://localhost:3000` — allowed CORS origin (omit for no CORS headers)
-- `CRUSTY_API_TOKEN=your-secret` — optional Bearer token for API authentication
+- `LOCALCREW_API_ENABLED=true`
+- `LOCALCREW_API_BIND_HOST=0.0.0.0`
+- `LOCALCREW_API_PUBLIC_HOST=127.0.0.1`
+- `LOCALCREW_API_PORT=4310`
+- `LOCALCREW_API_CORS_ORIGIN=http://localhost:3000` — allowed CORS origin (omit for no CORS headers)
+- `LOCALCREW_API_TOKEN=your-secret` — optional Bearer token for API authentication
 
 ## Platform Scripts
 
@@ -187,7 +187,7 @@ Control the API listener with:
 - Windows 11: `scripts/ollama-optimize-windows.ps1`
 - Linux: `scripts/ollama-optimize-linux.sh`
 
-Each script benchmarks a local Ollama endpoint, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the primary Crusty device first with `npm run setup:crusty`, then bring secondary agent devices online with `node scripts/setup-agent.js`.
+Each script benchmarks a local Ollama endpoint, recommends a context length and concurrency tier, and writes a machine-readable profile JSON for later routing decisions. The intended onboarding flow is: bootstrap the primary Local Crew device first with `npm run setup:crew`, then bring secondary agent devices online with `node scripts/setup-agent.js`.
 
 ## Documentation
 

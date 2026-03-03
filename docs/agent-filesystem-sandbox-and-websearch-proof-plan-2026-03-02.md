@@ -6,7 +6,7 @@ During marathon run review, two high-risk integrity gaps were confirmed:
 
 1. Unexpected autonomous writes produced an out-of-scope root folder:
    - `# Updated Spec\n\nNew content.`
-   - with a parallel `.crusty` subtree inside.
+   - with a parallel `.localcrew` subtree inside.
 2. A task claimed successful outbox writes (`web_search_demo_report.md`, `web_search_demo_steps.md`), but those artifacts were not present in `external-memory/outbox/`.
 
 This document defines implementation requirements for tomorrow (post-marathon), documentation-only for now.
@@ -23,7 +23,7 @@ This document defines implementation requirements for tomorrow (post-marathon), 
 
 Autonomous writes must be accepted only for canonical targets:
 
-- `WRITE[internal]` → `.crusty/system/**`
+- `WRITE[internal]` → `.localcrew/system/**`
 - `WRITE[active]` → `external-memory/active/**`
 - `WRITE[outbox]` → `external-memory/outbox/**`
 
@@ -91,7 +91,7 @@ After marathon completes:
 
 1. Inspect and archive unexpected root folder:
    - `# Updated Spec\n\nNew content.`
-2. Compare files inside unexpected subtree with canonical `.crusty/` state; keep only intentional data.
+2. Compare files inside unexpected subtree with canonical `.localcrew/` state; keep only intentional data.
 3. Remove unexpected folder after archival.
 4. Re-run targeted autonomy safety tests.
 

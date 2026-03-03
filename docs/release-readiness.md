@@ -1,6 +1,6 @@
 # Release Readiness Runbook
 
-This runbook defines the minimum release gate for Crusty and the operational checks expected by senior leadership for deployment confidence.
+This runbook defines the minimum release gate for Local Crew and the operational checks expected by senior leadership for deployment confidence.
 
 ## Release Gate (Must Pass)
 
@@ -15,7 +15,7 @@ Fast path command:
 3. CI pass on pull request and `main`
    - `.github/workflows/ci.yml` must be green
 4. Security baseline
-   - API token behavior validated when `CRUSTY_API_TOKEN` is set
+   - API token behavior validated when `LOCALCREW_API_TOKEN` is set
    - SSE endpoint auth behavior validated (`/api/events`)
 5. Dependency policy
    - `package.json` contains zero runtime dependencies unless a documented exception is approved
@@ -139,7 +139,7 @@ Goal: enable Python-based autonomous tool authoring/execution safely, with clear
 ### Safety Boundaries
 
 - File system write scope:
-   - allow only scoped internal paths (for example `.crusty/system/` or staged workspace folders explicitly designated for autonomous artifacts).
+   - allow only scoped internal paths (for example `.localcrew/system/` or staged workspace folders explicitly designated for autonomous artifacts).
    - deny hidden/reserved filenames and traversal by default.
 - Network scope:
    - default deny outbound network; allowlist only approved endpoints when required.

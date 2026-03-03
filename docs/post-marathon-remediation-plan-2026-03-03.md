@@ -14,7 +14,7 @@ Scope: documentation and planning only. No runtime/code changes are included in 
 - Empty/insufficient result payloads detected: 3
 - Claimed `WRITE[...]` markers in task results: 3
 - Missing expected outbox artifacts for web-search proof despite completed status
-- Unexpected root path created: `# Updated Spec\n\nNew content.` with nested `.crusty` content
+- Unexpected root path created: `# Updated Spec\n\nNew content.` with nested `.localcrew` content
 
 ## Strategic Goals for Tomorrow
 
@@ -35,7 +35,7 @@ Scope: documentation and planning only. No runtime/code changes are included in 
 ### Implementation requirements
 
 - Enforce strict write-stage roots only:
-  - `internal` -> `.crusty/system/**`
+  - `internal` -> `.localcrew/system/**`
   - `active` -> `external-memory/active/**`
   - `outbox` -> `external-memory/outbox/**`
 - Add canonical path normalization and containment checks before writes.
