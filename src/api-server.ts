@@ -169,7 +169,7 @@ async function buildApiResponse(
   const requiredToken = getApiToken();
   if (requiredToken) {
     // Skip auth for static UI assets, health check, and read-only display data
-    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work", "/api/events", "/api/status"];
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work", "/api/events", "/api/status", "/api/queue", "/api/resources", "/api/audit"];
     if (!publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });

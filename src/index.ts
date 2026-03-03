@@ -25,6 +25,39 @@ function writeLine(stream: { write(chunk: string): boolean }, line: string): voi
   stream.write(`${line}\n`);
 }
 
+/**
+ * Save the readline input buffer (text + cursor position), clear the current
+ * terminal line, run a callback that prints arbitrary output, then redraw the
+ * prompt and restore the buffered text with the cursor at its original column.
+ *
+ * This prevents background writes (auto‑pulse results, warnings, etc.) from
+ * visually clobbering whatever the user is currently typing.
+ */
+function withReadlineRedraw(
+  readline: ReturnType<typeof createInterface>,
+  getPromptString: () => string,
+  fn: () => void
+): void {
+  const rlAny = readline as unknown as { line?: string; cursor?: number };
+  const bufferedLine = rlAny.line ?? "";
+  const cursorPos = rlAny.cursor ?? bufferedLine.length;
+
+  // Erase the current prompt + user input line.
+  stdout.write("\r\u001b[2K");
+
+  fn();
+
+  // Redraw prompt + buffered text.
+  const prompt = getPromptString();
+  stdout.write(`${prompt}${bufferedLine}`);
+
+  // Move cursor back from end‑of‑line to saved position within the text.
+  const moveBack = bufferedLine.length - cursorPos;
+  if (moveBack > 0) {
+    stdout.write(`\u001b[${moveBack}D`);
+  }
+}
+
 function renderBackgroundResult(
   readline: ReturnType<typeof createInterface>,
   getPromptString: () => string,
@@ -34,12 +67,10 @@ function renderBackgroundResult(
     return;
   }
 
-  const bufferedLine = (readline as unknown as { line?: string }).line ?? "";
-  stdout.write("\r\u001b[2K");
-  result.lines.forEach((line) => writeLine(stdout, line));
-  result.errors.forEach((line) => writeLine(stderr, errorText(line)));
-  // Redraw prompt without status bar for inline background updates
-  stdout.write(`${getPromptString()}${bufferedLine}`);
+  withReadlineRedraw(readline, getPromptString, () => {
+    result.lines.forEach((line) => writeLine(stdout, line));
+    result.errors.forEach((line) => writeLine(stderr, errorText(line)));
+  });
 }
 
 function clearScreen(): void {
@@ -441,13 +472,19 @@ async function resolveFollowUpPrompt(
 }
 
 export async function runRepl(rootDir = process.cwd()): Promise<void> {
+  // Mutable warn handler: starts as a plain stderr writer, then gets upgraded
+  // to a readline-aware version once the readline interface is created. This
+  // prevents background warning messages from clobbering the user's typing.
+  let warnImpl = (message: string): void => writeLine(stderr, message);
+  const warn = (message: string): void => warnImpl(message);
+
   const app = await LocalCrewApp.create({
     rootDir,
-    warn: (message) => writeLine(stderr, message)
+    warn
   });
   const apiServer = await startApiServer(app, {
     rootDir,
-    warn: (message) => writeLine(stderr, message)
+    warn
   });
   if (apiServer) {
     app.setApiServerHandle(apiServer);
@@ -460,6 +497,16 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     terminal: true,
     completer,
   });
+
+  // Upgrade warn to readline-aware: clears the current input line, writes
+  // the warning, then restores the prompt and buffered text so the user's
+  // typing is never lost.
+  warnImpl = (message: string): void => {
+    withReadlineRedraw(readline, getPromptOnly, () => {
+      writeLine(stderr, message);
+    });
+  };
+
   let pulseShutdown = false;
   let viewerActive = false;
 

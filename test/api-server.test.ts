@@ -387,4 +387,34 @@ describe("API server", () => {
       }
     });
   });
+
+  test("allows read-only display data endpoints without token", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-token";
+
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello"),
+        speakFn: () => {}
+      });
+
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        // These endpoints must be public for the /display billboard
+        for (const path of ["/api/status", "/api/queue", "/api/resources", "/api/audit", "/api/daily-work"]) {
+          const response = await fetch(`${api!.url}${path}`);
+          expect(response.status).toBe(200);
+        }
+      } finally {
+        await api?.close();
+      }
+    });
+  });
 });
