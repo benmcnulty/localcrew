@@ -2,14 +2,14 @@
 
 ## Runtime Model
 
-Crusty has two related but separate concepts:
+Local Crew has two related but separate concepts:
 
 - Participants: `@erin`, `@zora`, `@sam`, `@pav` are the starter personalities used in direct chat and group chat. Their nicknames, resource bindings, instructions, and models are editable at runtime.
-- Resources: local Ollama or OpenAI-compatible endpoints registered in `.crusty/resources.json` are the underlying inference nodes the orchestrator can delegate work to in `/auto`.
+- Resources: local Ollama or OpenAI-compatible endpoints registered in `.localcrew/resources.json` are the underlying inference nodes the orchestrator can delegate work to in `/auto`.
 
 ## Storage
 
-Crusty keeps a strict boundary between committed external system memory and ignored local internal runtime state.
+Local Crew keeps a strict boundary between committed external system memory and ignored local internal runtime state.
 
 Committed external system memory lives in `external-memory/` and seeds durable behavior:
 
@@ -17,16 +17,16 @@ Committed external system memory lives in `external-memory/` and seeds durable b
 - `external-memory/agents/*`: built-in agent identities such as `data-analyst`
 - `external-memory/inbox`, `external-memory/active`, `external-memory/outbox`: local dropbox folders for file-driven work intake and delivery; only the folders are tracked, not their contents
 
-Local runtime state lives in `.crusty/` and is intentionally ignored by git.
+Local runtime state lives in `.localcrew/` and is intentionally ignored by git.
 
-- `.crusty/config.json`: participant routing, nicknames, voices, instructions, and orchestrator profile name
-- `.crusty/resources.json`: local resource inventory, tiers, provider style, models, hardware hints, and roles
-- `.crusty/sessions.json`: shared chat transcript and compaction state
-- `.crusty/system/state.json`: auto queue and completion history
-- `.crusty/system/secure/orchestrator/*.md`: orchestrator directives, roadmap, focus todo, changelog, workflow, inventory
-- `.crusty/system/secure/orchestrator/telemetry/audit-log.jsonl`: append-only transaction log
-- `.crusty/system/secure/orchestrator/telemetry/summary.json`: indexed telemetry summary for fast reads
-- `.crusty/system/secure/agents/*`: per-agent specs and memory
+- `.localcrew/config.json`: participant routing, nicknames, voices, instructions, and orchestrator profile name
+- `.localcrew/resources.json`: local resource inventory, tiers, provider style, models, hardware hints, and roles
+- `.localcrew/sessions.json`: shared chat transcript and compaction state
+- `.localcrew/system/state.json`: auto queue and completion history
+- `.localcrew/system/secure/orchestrator/*.md`: orchestrator directives, roadmap, focus todo, changelog, workflow, inventory
+- `.localcrew/system/secure/orchestrator/telemetry/audit-log.jsonl`: append-only transaction log
+- `.localcrew/system/secure/orchestrator/telemetry/summary.json`: indexed telemetry summary for fast reads
+- `.localcrew/system/secure/agents/*`: per-agent specs and memory
 
 ## Configuration
 
@@ -42,10 +42,10 @@ For the prototype chat surfaces, the intended layering is:
 
 The local browser-facing API is also env-driven:
 
-- `CRUSTY_API_ENABLED`
-- `CRUSTY_API_BIND_HOST`
-- `CRUSTY_API_PUBLIC_HOST`
-- `CRUSTY_API_PORT`
+- `LOCALCREW_API_ENABLED`
+- `LOCALCREW_API_BIND_HOST`
+- `LOCALCREW_API_PUBLIC_HOST`
+- `LOCALCREW_API_PORT`
 
 ## Queue And Delegation
 
@@ -104,7 +104,7 @@ Current observability surfaces:
 When `/auto` is idle and the queue is empty, the orchestrator checks `external-memory/inbox` before generating self-improvement work.
 
 - The next inbox document is moved into `external-memory/active`
-- its `Crusty-Status:` tag is updated to `active`
+- its `LocalCrew-Status:` tag is updated to `active`
 - the orchestrator queues a high-priority task against that active document
 - the task receives the active document body as prompt context
 - the orchestrator can emit `WRITE[active][path] ... ENDWRITE` for rough drafts and `WRITE[outbox][path] ... ENDWRITE` for final deliverables
@@ -112,7 +112,7 @@ When `/auto` is idle and the queue is empty, the orchestrator checks `external-m
 
 ## Grounding & Web Tools
 
-Orchestrators and agents can request external data through six constrained tool workflows. The model emits a marker line in its response (e.g. `WIKIPEDIA: query`), Crusty resolves the request, logs the transaction, and re-prompts the model with the retrieved context.
+Orchestrators and agents can request external data through six constrained tool workflows. The model emits a marker line in its response (e.g. `WIKIPEDIA: query`), Local Crew resolves the request, logs the transaction, and re-prompts the model with the retrieved context.
 
 Available tools:
 

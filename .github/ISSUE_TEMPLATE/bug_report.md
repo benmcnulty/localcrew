@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a bug in Crusty
+about: Report a bug in Local Crew
 title: ""
 labels: bug
 assignees: ""

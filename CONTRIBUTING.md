@@ -1,12 +1,12 @@
-# Contributing to Crusty
+# Contributing to Local Crew
 
-Thank you for your interest in contributing to Crusty. This document covers the workflow for reporting issues, submitting changes, and meeting the quality bar required for merge.
+Thank you for your interest in contributing to Local Crew. This document covers the workflow for reporting issues, submitting changes, and meeting the quality bar required for merge.
 
 ## Getting Started
 
 1. Fork the repository and clone your fork
 2. Install dependencies: `npm install`
-3. Bootstrap the orchestrator: `npm run setup:crusty`
+3. Bootstrap the orchestrator: `npm run setup:crew`
 4. Start the app: `npm start` or `bun run src/index.ts`
 
 ### Prerequisites
@@ -61,11 +61,11 @@ Run `/code-review` in Claude Code, or ask Claude to review your staged changes. 
 - 2-space indentation, double quotes, semicolons
 - Small, focused functions — avoid large monolithic methods
 - Tests use `bun:test` and live in `test/*.test.ts`
-- Tests must be isolated with temp directories — never write to real `.crusty/`
+- Tests must be isolated with temp directories — never write to real `.localcrew/`
 
 ## Zero External Dependencies
 
-Crusty has a deliberate zero-dependency policy. Runtime code must use built-in platform APIs only:
+Local Crew has a deliberate zero-dependency policy. Runtime code must use built-in platform APIs only:
 
 - Native `fetch` for HTTP
 - `node:fs/promises` for file I/O
@@ -76,7 +76,7 @@ Crusty has a deliberate zero-dependency policy. Runtime code must use built-in p
 
 ## Web Tools & Grounding
 
-Crusty exposes six grounding tools to orchestrators and agents via a marker-based protocol. Models emit a special line in their response; the app parses it, resolves the tool, and re-prompts with the result.
+Local Crew exposes six grounding tools to orchestrators and agents via a marker-based protocol. Models emit a special line in their response; the app parses it, resolves the tool, and re-prompts with the result.
 
 | Marker | Format | Tool |
 |--------|--------|------|
@@ -123,7 +123,7 @@ Open a GitHub issue with:
 
 ## Security
 
-- **Never** commit `.crusty/`, `.env`, `.env.local`, or local agent memory
+- **Never** commit `.localcrew/`, `.env`, `.env.local`, or local agent memory
 - `external-memory/` is the committed portable seed layer — only stable, validated content belongs here
 - Machine-specific configuration belongs in gitignored local files
 - When adding provider support, preserve the boundary between public-safe repo defaults and install-local secrets
@@ -153,7 +153,7 @@ Open a GitHub issue with:
 | `src/dropbox.ts` | inbox → active → outbox file workflow |
 | `src/api-server.ts` | Fork `api-worker.js` as child process; proxy HTTP ↔ IPC |
 | `src/gui.ts` | Inline browser dashboard HTML/CSS/JS (served via API) |
-| `src/storage.ts` | Low-level file read/write helpers for `.crusty/` |
+| `src/storage.ts` | Low-level file read/write helpers for `.localcrew/` |
 | `src/session-store.ts` | Load/save shared conversation transcript |
 | `src/compact.ts` | Conversation compaction (summarize old messages) |
 

@@ -1,5 +1,34 @@
 # Setup
 
+## Minimal Step-by-Step (Recommended)
+
+1. Install and validate:
+   - `npm install`
+   - `bunx tsc --noEmit && npm test`
+2. Bootstrap primary orchestrator device:
+   - `npm run setup:crew`
+3. Start Local Crew on primary:
+   - `npm run start`
+4. On each secondary device, onboard once:
+   - `node scripts/setup-agent.js`
+5. Validate network and models on primary:
+   - `/resource list`
+   - `/topology`
+   - `/models <resourceAlias>`
+6. Set model profile for the run:
+   - `/model profile auto`
+   - (or `/model profile all-llamas` for strict llama-only routing)
+7. Start autonomous run:
+   - `/daily start`
+   - `/auto`
+8. Observe live display:
+   - open `http://<orchestrator-host>:4310/display`
+9. Stop and finalize:
+   - `/stop`
+   - `/daily finish`
+
+For a full operations checklist (logging, rollback, report handoff), use [docs/overnight-runbook.md](overnight-runbook.md).
+
 ## Requirements
 
 - Node.js and npm are the default runtime and setup path
@@ -10,14 +39,14 @@
 ## First-Run Flow
 
 1. Clone the repo and run `npm install`.
-2. On the best local device, run `npm run setup:crusty`. This primary device becomes the local agent orchestrator.
+2. On the best local device, run `npm run setup:crew`. This primary device becomes the local agent orchestrator.
    - the setup flow prompts for the agent-orchestrator name
    - when you rerun setup later, that prompt is prefilled from the existing local configuration
-   - after configuration, Crusty starts automatically in the same terminal unless you pass `--no-start`
+   - after configuration, Local Crew starts automatically in the same terminal unless you pass `--no-start`
 3. Open the printed `Local UI` link or stay in the CLI.
 4. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
    - `node scripts/setup-agent.js`
-   - the Crusty setup output shows the full primary-device IP to remember
+   - the Local Crew setup output shows the full primary-device IP to remember
    - the script will prompt for `Orchestrator IP:` and prefill the first three IP numbers from the local network when available
    - confirm or enter the final number of the orchestrator IP before continuing
    - it immediately tests `http://<orchestrator-ip>:4310/api/health` before continuing
@@ -42,65 +71,65 @@ The first-run goal is a single working orchestrator resource. Once that is stabl
 
 ## Configuration Model
 
-Crusty keeps a strict split between committed external system memory and ignored local runtime state.
+Local Crew keeps a strict split between committed external system memory and ignored local runtime state.
 
 - `external-memory/` is committed and contains durable orchestrator directives, workflows, and built-in agent specs.
-- `.crusty/` is ignored and contains local queue state, internal memory, telemetry, and resource inventory.
+- `.localcrew/` is ignored and contains local queue state, internal memory, telemetry, and resource inventory.
 - `.env` and `.env.local` are ignored and can hold machine-specific overrides.
 
-The orchestrator bootstrap script writes a managed block to `.env.local` and seeds `.crusty/resources.json` for the first local resource. The agent bootstrap script is self-contained, writes a local agent report, and can sync it directly into the orchestrator over the local API.
+The orchestrator bootstrap script writes a managed block to `.env.local` and seeds `.localcrew/resources.json` for the first local resource. The agent bootstrap script is self-contained, writes a local agent report, and can sync it directly into the orchestrator over the local API.
 
 ## Environment Variables
 
 The main public-safe env surface is:
 
-- `CRUSTY_API_ENABLED`
-- `CRUSTY_API_BIND_HOST`
-- `CRUSTY_API_PUBLIC_HOST`
-- `CRUSTY_API_PORT`
-- `CRUSTY_API_CORS_ORIGIN` — allowed CORS origin for the local API (omit for no CORS headers)
-- `CRUSTY_API_TOKEN` — optional Bearer token for API authentication
-- `CRUSTY_ORCHESTRATOR_NAME`
-- `CRUSTY_ORCHESTRATOR_ALIAS`
-- `CRUSTY_ORCHESTRATOR_LABEL`
-- `CRUSTY_ORCHESTRATOR_TIER`
-- `CRUSTY_ORCHESTRATOR_BASE_URL`
-- `CRUSTY_ORCHESTRATOR_API_STYLE`
-- `CRUSTY_ORCHESTRATOR_HOST_NAME`
-- `CRUSTY_ORCHESTRATOR_PLATFORM`
-- `CRUSTY_ORCHESTRATOR_DEFAULT_MODEL`
-- `CRUSTY_ORCHESTRATOR_REASONING_MODEL`
-- `CRUSTY_ORCHESTRATOR_CODING_MODEL`
-- `CRUSTY_ORCHESTRATOR_TOOLS_MODEL`
-- `CRUSTY_ORCHESTRATOR_EMBEDDING_MODEL`
-- `CRUSTY_ORCHESTRATOR_ROLE`
-- `CRUSTY_ORCHESTRATOR_CAPABILITIES`
-- `CRUSTY_ORCHESTRATOR_NOTES`
+- `LOCALCREW_API_ENABLED`
+- `LOCALCREW_API_BIND_HOST`
+- `LOCALCREW_API_PUBLIC_HOST`
+- `LOCALCREW_API_PORT`
+- `LOCALCREW_API_CORS_ORIGIN` — allowed CORS origin for the local API (omit for no CORS headers)
+- `LOCALCREW_API_TOKEN` — optional Bearer token for API authentication
+- `LOCALCREW_ORCHESTRATOR_NAME`
+- `LOCALCREW_ORCHESTRATOR_ALIAS`
+- `LOCALCREW_ORCHESTRATOR_LABEL`
+- `LOCALCREW_ORCHESTRATOR_TIER`
+- `LOCALCREW_ORCHESTRATOR_BASE_URL`
+- `LOCALCREW_ORCHESTRATOR_API_STYLE`
+- `LOCALCREW_ORCHESTRATOR_HOST_NAME`
+- `LOCALCREW_ORCHESTRATOR_PLATFORM`
+- `LOCALCREW_ORCHESTRATOR_DEFAULT_MODEL`
+- `LOCALCREW_ORCHESTRATOR_REASONING_MODEL`
+- `LOCALCREW_ORCHESTRATOR_CODING_MODEL`
+- `LOCALCREW_ORCHESTRATOR_TOOLS_MODEL`
+- `LOCALCREW_ORCHESTRATOR_EMBEDDING_MODEL`
+- `LOCALCREW_ORCHESTRATOR_ROLE`
+- `LOCALCREW_ORCHESTRATOR_CAPABILITIES`
+- `LOCALCREW_ORCHESTRATOR_NOTES`
 
 Optional runtime tuning:
 
-- `CRUSTY_AUTO_PULSE_INTERVAL_MS` — auto-mode pulse interval in milliseconds (default: 1500)
-- `CRUSTY_AUTO_SOURCE_DOC_CHAR_LIMIT` — max chars from a source document fed to auto prompts (default: 12000)
-- `CRUSTY_ANTHROPIC_MAX_TOKENS` — max tokens for Anthropic-style completions (default: 2048)
+- `LOCALCREW_AUTO_PULSE_INTERVAL_MS` — auto-mode pulse interval in milliseconds (default: 1500)
+- `LOCALCREW_AUTO_SOURCE_DOC_CHAR_LIMIT` — max chars from a source document fed to auto prompts (default: 12000)
+- `LOCALCREW_ANTHROPIC_MAX_TOKENS` — max tokens for Anthropic-style completions (default: 2048)
 
-Participant routing still supports optional env overrides such as `CRUSTY_ENDPOINT_ERIN_RESOURCE`, `CRUSTY_ENDPOINT_ERIN_NICKNAME`, and `CRUSTY_ENDPOINT_ERIN_MODEL`, but the preferred path for ongoing device management is `/resource`, `/participant`, `/nickname`, `/bind`, and `/model` in the CLI or Local UI.
+Participant routing still supports optional env overrides such as `LOCALCREW_ENDPOINT_ERIN_RESOURCE`, `LOCALCREW_ENDPOINT_ERIN_NICKNAME`, and `LOCALCREW_ENDPOINT_ERIN_MODEL`, but the preferred path for ongoing device management is `/resource`, `/participant`, `/nickname`, `/bind`, and `/model` in the CLI or Local UI.
 
 Resource hardware and context metadata can also be kept local and dynamic:
 
-- `CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES`
-- `CRUSTY_ORCHESTRATOR_RAM_GB`
-- `CRUSTY_ORCHESTRATOR_GPU_MODEL`
-- `CRUSTY_ORCHESTRATOR_GPU_COUNT`
-- `CRUSTY_ORCHESTRATOR_TOTAL_VRAM_GB`
-- `CRUSTY_ORCHESTRATOR_MAX_CONTEXT_TOKENS`
+- `LOCALCREW_ORCHESTRATOR_CPU_LOGICAL_CORES`
+- `LOCALCREW_ORCHESTRATOR_RAM_GB`
+- `LOCALCREW_ORCHESTRATOR_GPU_MODEL`
+- `LOCALCREW_ORCHESTRATOR_GPU_COUNT`
+- `LOCALCREW_ORCHESTRATOR_TOTAL_VRAM_GB`
+- `LOCALCREW_ORCHESTRATOR_MAX_CONTEXT_TOKENS`
 
-For non-orchestrator devices, the preferred path is `/resource refresh <alias>` for live model discovery and `/resource edit <alias>` for extra hardware metadata so those values stay in `.crusty/resources.json` instead of env files.
+For non-orchestrator devices, the preferred path is `/resource refresh <alias>` for live model discovery and `/resource edit <alias>` for extra hardware metadata so those values stay in `.localcrew/resources.json` instead of env files.
 
 Shell env values take precedence over `.env`, which takes precedence over `.env.local`.
 
 If you want a non-default orchestrator identity name during install, run:
 
-- `npm run setup:crusty -- --name "Aster"`
+- `npm run setup:crew -- --name "Aster"`
 
 ## Device Benchmark Scripts
 

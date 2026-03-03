@@ -123,7 +123,7 @@ Current name is functional internally, but public-facing differentiation can be 
 
 - Use a two-part naming model:
   - Product name (public): e.g., **Shepherd** or **Swarmkeeper**
-  - Internal codename (legacy-compatible during migration): keep `crusty` temporarily as technical identifier.
+   - Internal codename (legacy-compatible during migration): keep `localcrew` temporarily as technical identifier.
 
 ## Rebrand Execution Plan (Safe Find/Replace Strategy)
 
