@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { CrustyApp } from "./app.ts";
+import type { LocalCrewApp } from "./app.ts";
 import { CommandParseError, parseCommand } from "./commands.ts";
 import {
   getEnvBoolean,
@@ -88,11 +88,11 @@ function normalizeHudTab(value: string | null): "status" | "queue" | "metrics" |
 }
 
 function getCorsOrigin(): string {
-  return getEnvString("CRUSTY_API_CORS_ORIGIN", "");
+  return getEnvString("LOCALCREW_API_CORS_ORIGIN", "");
 }
 
 function getApiToken(): string | undefined {
-  return getOptionalEnvString("CRUSTY_API_TOKEN");
+  return getOptionalEnvString("LOCALCREW_API_TOKEN");
 }
 
 function getRequestApiToken(request: ApiRequest): string {
@@ -150,7 +150,7 @@ function parseJsonBody<T>(bodyText: string): T {
 }
 
 async function buildApiResponse(
-  app: CrustyApp,
+  app: LocalCrewApp,
   request: ApiRequest
 ): Promise<ApiResponsePayload> {
   // Handle CORS preflight
@@ -165,7 +165,7 @@ async function buildApiResponse(
     };
   }
 
-  // Authenticate if CRUSTY_API_TOKEN is configured
+  // Authenticate if LOCALCREW_API_TOKEN is configured
   const requiredToken = getApiToken();
   if (requiredToken) {
     // Skip auth for static UI assets and health check
@@ -563,7 +563,7 @@ async function buildApiResponse(
 
   if (request.method === "POST" && request.url.pathname === "/api/login") {
     return jsonResponse(501, {
-      error: "Remote login is not implemented in local Crusty yet. See the remote portal docs and handoff spec."
+      error: "Remote login is not implemented in Local Crew yet. See the remote portal docs and handoff spec."
     });
   }
 
@@ -571,7 +571,7 @@ async function buildApiResponse(
 }
 
 async function startNodeWorkerApi(
-  app: CrustyApp,
+  app: LocalCrewApp,
   bindHost: string,
   requestedPort: number,
   localHost: string,
@@ -721,7 +721,7 @@ function buildFetchResponse(payload: ApiResponsePayload): Response {
 }
 
 function startVirtualApiServer(
-  app: CrustyApp,
+  app: LocalCrewApp,
   warn: (message: string) => void
 ): ApiServerHandle | null {
   const originalFetch = globalThis.fetch;
@@ -729,7 +729,7 @@ function startVirtualApiServer(
     return null;
   }
 
-  const origin = `http://crusty-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.invalid`;
+  const origin = `http://localcrew-local-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.invalid`;
   const wrappedFetch: typeof fetch = async (input, init) => {
     const request = input instanceof Request && init === undefined ? input : new Request(input, init);
     const url = new URL(request.url);
@@ -776,7 +776,7 @@ function startVirtualApiServer(
 }
 
 export async function startApiServer(
-  app: CrustyApp,
+  app: LocalCrewApp,
   options: {
     rootDir?: string;
     warn?: (message: string) => void;
@@ -786,14 +786,14 @@ export async function startApiServer(
   const warn = options.warn ?? (() => {});
   loadLocalEnv(rootDir);
 
-  if (!getEnvBoolean("CRUSTY_API_ENABLED", true)) {
+  if (!getEnvBoolean("LOCALCREW_API_ENABLED", true)) {
     return null;
   }
 
-  const bindHost = getEnvString("CRUSTY_API_BIND_HOST", getEnvString("CRUSTY_API_HOST", "127.0.0.1"));
+  const bindHost = getEnvString("LOCALCREW_API_BIND_HOST", getEnvString("LOCALCREW_API_HOST", "127.0.0.1"));
   const localHost = bindHost === "0.0.0.0" || bindHost === "::" ? "127.0.0.1" : bindHost;
-  const publicHost = getEnvString("CRUSTY_API_PUBLIC_HOST", localHost);
-  const requestedPort = getEnvNumber("CRUSTY_API_PORT", 4310);
+  const publicHost = getEnvString("LOCALCREW_API_PUBLIC_HOST", localHost);
+  const requestedPort = getEnvNumber("LOCALCREW_API_PORT", 4310);
   const bunRuntime = (globalThis as { Bun?: object }).Bun;
   if (bunRuntime) {
     if (requestedPort === 0) {

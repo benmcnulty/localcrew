@@ -11,7 +11,7 @@ const ALLOWED_SEARCH_TOPICS = new Set([
 
 const MAX_RESULTS = 5;
 const SEARCH_CHAR_LIMIT = 280;
-const USER_AGENT = "crusty-local-orchestrator";
+const USER_AGENT = "localcrew-local-orchestrator";
 
 const DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/";
 const DUCKDUCKGO_LITE_URL = "https://lite.duckduckgo.com/lite/";

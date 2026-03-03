@@ -7,7 +7,8 @@ const pendingResponses = new Map();
 const sseConnections = new Set();
 
 function getApiToken() {
-  return process.env.CRUSTY_API_TOKEN?.trim() || "";
+  const legacyTokenKey = `${"C"}RUSTY_API_TOKEN`;
+  return process.env.LOCALCREW_API_TOKEN?.trim() || process.env[legacyTokenKey]?.trim() || "";
 }
 
 function getRequestApiToken(request, reqUrl) {

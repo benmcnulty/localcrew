@@ -105,7 +105,7 @@ function getOptionalPositiveNumber(value: unknown): number | undefined {
 }
 
 export function getOrchestratorResourceAlias(rootDir = process.cwd()): string {
-  return normalizeAlias(getEnvString("CRUSTY_ORCHESTRATOR_ALIAS", "orchestrator"));
+  return normalizeAlias(getEnvString("LOCALCREW_ORCHESTRATOR_ALIAS", "orchestrator"));
 }
 
 function getDefaultLocalResource(rootDir = process.cwd()): ResourceProfile {
@@ -113,37 +113,37 @@ function getDefaultLocalResource(rootDir = process.cwd()): ResourceProfile {
   const alias = getOrchestratorResourceAlias(rootDir);
   return {
     alias,
-    label: getEnvString("CRUSTY_ORCHESTRATOR_LABEL", "Local Orchestrator"),
-    tier: getTier(getOptionalEnvString("CRUSTY_ORCHESTRATOR_TIER"), "top"),
-    baseUrl: getEnvString("CRUSTY_ORCHESTRATOR_BASE_URL", "http://127.0.0.1:11434"),
-    apiStyle: normalizeApiStyle(getOptionalEnvString("CRUSTY_ORCHESTRATOR_API_STYLE")),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_API_KEY_ENV")
-      ? { apiKeyEnv: getOptionalEnvString("CRUSTY_ORCHESTRATOR_API_KEY_ENV") }
+    label: getEnvString("LOCALCREW_ORCHESTRATOR_LABEL", "Local Crew"),
+    tier: getTier(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_TIER"), "top"),
+    baseUrl: getEnvString("LOCALCREW_ORCHESTRATOR_BASE_URL", "http://127.0.0.1:11434"),
+    apiStyle: normalizeApiStyle(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_API_STYLE")),
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_API_KEY_ENV")
+      ? { apiKeyEnv: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_API_KEY_ENV") }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_HOST_NAME")
-      ? { hostName: getOptionalEnvString("CRUSTY_ORCHESTRATOR_HOST_NAME") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_HOST_NAME")
+      ? { hostName: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_HOST_NAME") }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_PLATFORM")
-      ? { platform: getOptionalEnvString("CRUSTY_ORCHESTRATOR_PLATFORM") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_PLATFORM")
+      ? { platform: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_PLATFORM") }
       : {}),
-    defaultModel: getEnvString("CRUSTY_ORCHESTRATOR_DEFAULT_MODEL", "llama3.1:8b"),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_REASONING_MODEL")
-      ? { reasoningModel: getOptionalEnvString("CRUSTY_ORCHESTRATOR_REASONING_MODEL") }
+    defaultModel: getEnvString("LOCALCREW_ORCHESTRATOR_DEFAULT_MODEL", "llama3.1:8b"),
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_REASONING_MODEL")
+      ? { reasoningModel: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_REASONING_MODEL") }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_CODING_MODEL")
-      ? { codingModel: getOptionalEnvString("CRUSTY_ORCHESTRATOR_CODING_MODEL") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_CODING_MODEL")
+      ? { codingModel: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_CODING_MODEL") }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_TOOLS_MODEL")
-      ? { toolsModel: getOptionalEnvString("CRUSTY_ORCHESTRATOR_TOOLS_MODEL") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_TOOLS_MODEL")
+      ? { toolsModel: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_TOOLS_MODEL") }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_EMBEDDING_MODEL")
-      ? { embeddingModel: getOptionalEnvString("CRUSTY_ORCHESTRATOR_EMBEDDING_MODEL") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_EMBEDDING_MODEL")
+      ? { embeddingModel: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_EMBEDDING_MODEL") }
       : {}),
     role: getEnvString(
-      "CRUSTY_ORCHESTRATOR_ROLE",
+      "LOCALCREW_ORCHESTRATOR_ROLE",
       "Primary orchestration resource for chat, planning, verification, and local artifact work."
     ),
-    capabilities: getEnvList("CRUSTY_ORCHESTRATOR_CAPABILITIES", [
+    capabilities: getEnvList("LOCALCREW_ORCHESTRATOR_CAPABILITIES", [
       "reasoning",
       "planning",
       "chat",
@@ -151,28 +151,28 @@ function getDefaultLocalResource(rootDir = process.cwd()): ResourceProfile {
       "tool formatting",
       "embeddings"
     ]),
-    notes: getEnvList("CRUSTY_ORCHESTRATOR_NOTES", [
+    notes: getEnvList("LOCALCREW_ORCHESTRATOR_NOTES", [
       "This is the first device a new user should bring online.",
       "Use the local setup script to confirm Ollama connectivity and seed the orchestrator profile.",
       "Bring additional agent devices online through the CLI or GUI once the orchestrator is stable."
     ]),
-    ...(getEnvNumber("CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES", 0) > 0
-      ? { cpuLogicalCores: getEnvNumber("CRUSTY_ORCHESTRATOR_CPU_LOGICAL_CORES", 0) }
+    ...(getEnvNumber("LOCALCREW_ORCHESTRATOR_CPU_LOGICAL_CORES", 0) > 0
+      ? { cpuLogicalCores: getEnvNumber("LOCALCREW_ORCHESTRATOR_CPU_LOGICAL_CORES", 0) }
       : {}),
-    ...(getEnvNumber("CRUSTY_ORCHESTRATOR_RAM_GB", 0) > 0
-      ? { ramGb: getEnvNumber("CRUSTY_ORCHESTRATOR_RAM_GB", 0) }
+    ...(getEnvNumber("LOCALCREW_ORCHESTRATOR_RAM_GB", 0) > 0
+      ? { ramGb: getEnvNumber("LOCALCREW_ORCHESTRATOR_RAM_GB", 0) }
       : {}),
-    ...(getOptionalEnvString("CRUSTY_ORCHESTRATOR_GPU_MODEL")
-      ? { gpuModel: getOptionalEnvString("CRUSTY_ORCHESTRATOR_GPU_MODEL") }
+    ...(getOptionalEnvString("LOCALCREW_ORCHESTRATOR_GPU_MODEL")
+      ? { gpuModel: getOptionalEnvString("LOCALCREW_ORCHESTRATOR_GPU_MODEL") }
       : {}),
-    ...(getEnvNumber("CRUSTY_ORCHESTRATOR_GPU_COUNT", 0) > 0
-      ? { gpuCount: getEnvNumber("CRUSTY_ORCHESTRATOR_GPU_COUNT", 0) }
+    ...(getEnvNumber("LOCALCREW_ORCHESTRATOR_GPU_COUNT", 0) > 0
+      ? { gpuCount: getEnvNumber("LOCALCREW_ORCHESTRATOR_GPU_COUNT", 0) }
       : {}),
-    ...(getEnvNumber("CRUSTY_ORCHESTRATOR_TOTAL_VRAM_GB", 0) > 0
-      ? { totalVramGb: getEnvNumber("CRUSTY_ORCHESTRATOR_TOTAL_VRAM_GB", 0) }
+    ...(getEnvNumber("LOCALCREW_ORCHESTRATOR_TOTAL_VRAM_GB", 0) > 0
+      ? { totalVramGb: getEnvNumber("LOCALCREW_ORCHESTRATOR_TOTAL_VRAM_GB", 0) }
       : {}),
-    ...(getEnvNumber("CRUSTY_ORCHESTRATOR_MAX_CONTEXT_TOKENS", 0) > 0
-      ? { maxContextTokens: getEnvNumber("CRUSTY_ORCHESTRATOR_MAX_CONTEXT_TOKENS", 0) }
+    ...(getEnvNumber("LOCALCREW_ORCHESTRATOR_MAX_CONTEXT_TOKENS", 0) > 0
+      ? { maxContextTokens: getEnvNumber("LOCALCREW_ORCHESTRATOR_MAX_CONTEXT_TOKENS", 0) }
       : {})
   };
 }

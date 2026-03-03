@@ -48,7 +48,7 @@ export interface DropboxWrite {
   path: string;
 }
 
-const STATUS_TAG_PREFIX = "Crusty-Status:";
+const STATUS_TAG_PREFIX = "LocalCrew-Status:";
 const STAGE_ORDER: DropboxStage[] = ["inbox", "active", "outbox"];
 
 function sortEntries(entries: DropboxEntry[]): DropboxEntry[] {

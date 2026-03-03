@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { unlinkSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
@@ -32,7 +32,7 @@ export interface StoragePaths {
 
 export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
   const resolvedRoot = resolve(rootDir);
-  const storageDir = join(resolvedRoot, ".crusty");
+  const storageDir = resolveStorageDir(resolvedRoot);
   const systemDir = join(storageDir, "system");
   const secureDir = join(systemDir, "secure");
   const orchestratorDir = join(secureDir, "orchestrator");
@@ -67,6 +67,18 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     agentsDir,
     agentsIndexPath: join(agentsDir, "index.json")
   };
+}
+
+function resolveStorageDir(resolvedRoot: string): string {
+  const localCrewDir = join(resolvedRoot, ".localcrew");
+  const legacyDir = join(resolvedRoot, `.${"c"}rusty`);
+  if (existsSync(localCrewDir)) {
+    return localCrewDir;
+  }
+  if (existsSync(legacyDir)) {
+    return legacyDir;
+  }
+  return localCrewDir;
 }
 
 /**

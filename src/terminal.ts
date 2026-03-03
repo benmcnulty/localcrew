@@ -241,7 +241,7 @@ export function buildStyledPrompt(state: PromptState): string {
     case "agent":
       return `${dim("[")}${blue("agent")} ${dim("@")}${white(state.currentAgent ?? "unknown")}${dim("]")}${blue("›")} `;
     default:
-      return `${bold(cyan("crusty"))}${dim("›")} `;
+      return `${bold(cyan("crew"))}${dim("›")} `;
   }
 }
 
@@ -256,7 +256,7 @@ function buildPlainPrompt(state: PromptState): string {
     case "agent":
       return `[agent @${state.currentAgent ?? "unknown"}]› `;
     default:
-      return "crusty› ";
+      return "crew› ";
   }
 }
 
@@ -334,7 +334,7 @@ export const COMMAND_DEFS: CommandDef[] = [
   { name: "/default", params: "[alias]", description: "Get/set default participant" },
   { name: "/direct", params: '<resourceAlias> "message" [model]', description: "Direct resource query" },
   { name: "/end", params: "", description: "End current mode" },
-  { name: "/exit", params: "", description: "Exit Crusty" },
+  { name: "/exit", params: "", description: "Exit Local Crew" },
   { name: "/explore", params: "", description: "Open file explorer" },
   { name: "/group", params: "", description: "Start group chat" },
   { name: "/help", params: "[topic]", description: "Show help (topics: chat, auto, resources, …)" },

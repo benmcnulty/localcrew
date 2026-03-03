@@ -11,7 +11,7 @@ export interface EndpointModelEntry {
 }
 
 function getAnthropicMaxTokens(): number {
-  return getEnvNumber("CRUSTY_ANTHROPIC_MAX_TOKENS", 2048);
+  return getEnvNumber("LOCALCREW_ANTHROPIC_MAX_TOKENS", 2048);
 }
 
 function formatHttpError(status: number, bodyText: string): string {

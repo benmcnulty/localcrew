@@ -119,7 +119,7 @@ export async function searchReddit(
 
   const response = await fetchFn(searchUrl.toString(), {
     headers: {
-      "user-agent": "crusty-local-orchestrator"
+      "user-agent": "localcrew-local-orchestrator"
     }
   });
 

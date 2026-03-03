@@ -63,21 +63,21 @@ function getDefaultEndpointConfig(
     // Resource not found during bootstrap — fall back to hardcoded defaults
   }
 
-  const nickname = getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_NICKNAME`, fallbackNickname);
+  const nickname = getEnvString(`LOCALCREW_ENDPOINT_${upperAlias}_NICKNAME`, fallbackNickname);
 
   return {
-    resourceAlias: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_RESOURCE`, resourceAlias),
+    resourceAlias: getEnvString(`LOCALCREW_ENDPOINT_${upperAlias}_RESOURCE`, resourceAlias),
     nickname,
-    baseUrl: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_BASE_URL`, fallbackBaseUrl),
+    baseUrl: getEnvString(`LOCALCREW_ENDPOINT_${upperAlias}_BASE_URL`, fallbackBaseUrl),
     apiStyle: fallbackApiStyle,
     ...(fallbackApiKeyEnv ? { apiKeyEnv: fallbackApiKeyEnv } : {}),
-    model: getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_MODEL`, fallbackModel),
+    model: getEnvString(`LOCALCREW_ENDPOINT_${upperAlias}_MODEL`, fallbackModel),
     instructions: getEnvString(
-      `CRUSTY_ENDPOINT_${upperAlias}_INSTRUCTIONS`,
+      `LOCALCREW_ENDPOINT_${upperAlias}_INSTRUCTIONS`,
       getDefaultInstruction(alias, nickname)
     ),
     voicePreset: normalizeVoicePreset(
-      getEnvString(`CRUSTY_ENDPOINT_${upperAlias}_VOICE`, getDefaultVoicePreset(alias)),
+      getEnvString(`LOCALCREW_ENDPOINT_${upperAlias}_VOICE`, getDefaultVoicePreset(alias)),
       alias
     )
   };
@@ -101,7 +101,7 @@ export function getDefaultConfig(rootDir = process.cwd()): AppConfig {
   const endpoints = getDefaultEndpoints(rootDir);
   const endpointAliases = Object.keys(endpoints);
   const requestedDefault = getEnvString(
-    "CRUSTY_DEFAULT_ENDPOINT",
+    "LOCALCREW_DEFAULT_ENDPOINT",
     endpointAliases[0] ?? "orchestrator"
   ).toLowerCase();
 
@@ -110,7 +110,7 @@ export function getDefaultConfig(rootDir = process.cwd()): AppConfig {
     defaultEndpoint: endpointAliases.includes(requestedDefault)
       ? requestedDefault
       : (endpointAliases[0] ?? "orchestrator"),
-    soundEnabled: getEnvBoolean("CRUSTY_SOUND_ENABLED", true),
+    soundEnabled: getEnvBoolean("LOCALCREW_SOUND_ENABLED", true),
     endpoints
   };
 }
