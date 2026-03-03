@@ -25,16 +25,20 @@ import {
 } from "../src/orchestrator-store.ts";
 import type { AutoQueueTask, DailyWorkSession } from "../src/types.ts";
 import {
+  classifyTask,
   chooseResourceForTask,
+  computeResourceScore,
   detectTaskPurpose,
   getEffectiveResourceRole,
   getNetworkTopology,
   getResourceCapacitySummary,
   getResourceProfilesByTier,
   isOrchestratorCapable,
+  routeTask,
   renderNetworkTopology,
   saveResources,
   selectModelForEndpoint,
+  type ResourceTelemetry,
   type ResourceProfile
 } from "../src/resources.ts";
 import {
@@ -329,6 +333,99 @@ describe("resource routing", () => {
           tier: "top"
         })
       );
+    });
+  });
+
+  test("classifies task metadata for planning and research workloads", () => {
+    const planning = classifyTask("Draft a roadmap and orchestrate a multi-step migration plan.");
+    const research = classifyTask("SEARCH[news]: latest AI engineering role trends");
+
+    expect(planning.taskType).toBe("planning");
+    expect(planning.reasoningDepth).toBe("high");
+    expect(planning.tokenEstimate).toBeGreaterThan(0);
+    expect(research.taskType).toBe("research");
+    expect(research.requiresWebTools).toBe(true);
+  });
+
+  test("scores resources based on queue depth, memory headroom, and task fit", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const [orchestrator, workhorse] = getResourceProfilesByTier(rootDir).top;
+      const task = classifyTask("Design a comprehensive architecture migration with tradeoff analysis.");
+
+      const loadedTelemetry: ResourceTelemetry = {
+        queueDepth: 4,
+        ramUsagePct: 90,
+        tokensPerSecond: 8,
+        activeModel: "llama3.1:8b",
+        avgQueueWaitMs: 1200,
+        successRate: 0.9,
+        failureCount: 1
+      };
+      const healthyTelemetry: ResourceTelemetry = {
+        queueDepth: 0,
+        ramUsagePct: 20,
+        tokensPerSecond: 18,
+        activeModel: "llama3.1:8b",
+        avgQueueWaitMs: 100,
+        successRate: 1,
+        failureCount: 0
+      };
+
+      const loadedScore = computeResourceScore(orchestrator, loadedTelemetry, task);
+      const healthyScore = computeResourceScore(workhorse, healthyTelemetry, task);
+      expect(healthyScore).toBeGreaterThan(loadedScore);
+    });
+  });
+
+  test("routes tasks to highest scored resource", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const resources = Object.values(getResourceProfilesByTier(rootDir)).flat();
+      const task = classifyTask("Classify and tag incoming documents into the metadata index.");
+      const telemetry: Record<string, ResourceTelemetry> = {
+        orchestrator: {
+          queueDepth: 2,
+          ramUsagePct: 70,
+          tokensPerSecond: 12,
+          activeModel: "llama3.1:8b",
+          avgQueueWaitMs: 600,
+          successRate: 0.95,
+          failureCount: 0
+        },
+        workhorse: {
+          queueDepth: 3,
+          ramUsagePct: 60,
+          tokensPerSecond: 10,
+          activeModel: "llama3.1:8b",
+          avgQueueWaitMs: 800,
+          successRate: 0.95,
+          failureCount: 0
+        },
+        helper: {
+          queueDepth: 0,
+          ramUsagePct: 25,
+          tokensPerSecond: 16,
+          activeModel: "qwen2.5:0.5b",
+          avgQueueWaitMs: 50,
+          successRate: 1,
+          failureCount: 0
+        },
+        overflow: {
+          queueDepth: 1,
+          ramUsagePct: 30,
+          tokensPerSecond: 9,
+          activeModel: "llama3.2:3b",
+          avgQueueWaitMs: 200,
+          successRate: 1,
+          failureCount: 0
+        }
+      };
+
+      const routed = routeTask(task, resources, telemetry);
+      expect(routed.resource.alias).toBe("helper");
+      expect(routed.score).toBeGreaterThan(0);
+      expect(routed.rationale).toContain("highest");
     });
   });
 });

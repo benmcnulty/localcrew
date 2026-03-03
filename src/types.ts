@@ -2,6 +2,7 @@ export type Role = "system" | "user" | "assistant";
 export type EndpointApiStyle = "ollama" | "openai" | "anthropic";
 export type ModelPolicy = "fixed" | "auto";
 export type ModelPurpose = "default" | "reasoning" | "coding" | "tools";
+export type ModelProfileMode = "all-llamas" | "custom" | "auto";
 
 /**
  * Resource role within the orchestration network.
@@ -38,6 +39,7 @@ export interface UserPreferences {
   personalWebsiteUrl?: string;
   dailyDigestDirective?: string;
   jobSearchEnabled?: boolean;
+  modelProfile?: ModelProfileMode;
 }
 
 export interface AppConfig {
@@ -430,6 +432,8 @@ export type Command =
   | { type: "model.assign"; alias: string; model: string }
   | { type: "model.policy"; alias: string; policy: ModelPolicy }
   | { type: "model.purpose"; alias: string; purpose: "reasoning" | "coding" | "tools"; model: string }
+  | { type: "model.profile.get" }
+  | { type: "model.profile.set"; mode: ModelProfileMode }
   | { type: "default.get" }
   | { type: "default.set"; alias: string }
   | { type: "nickname.get"; alias?: string }

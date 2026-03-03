@@ -77,6 +77,7 @@ import {
   addResource,
   chooseResourceForTask,
   detectTaskPurpose,
+  getModelProfile,
   getEffectiveResourceRole,
   getResourceCapacitySummary,
   getOrchestratorResourceAlias,
@@ -88,6 +89,7 @@ import {
   removeResource,
   renderNetworkTopology,
   renderResourceInventory,
+  setModelProfile,
   selectModelForEndpoint,
   updateResource
 } from "./resources.ts";
@@ -869,6 +871,7 @@ export class CrustyApp {
     this.warn = options.warn ?? (() => {});
     this.platform = options.platform ?? process.platform;
     this.autoCyclePromise = null;
+    setModelProfile(config.preferences?.modelProfile ?? "auto");
     this.runtime = {
       mode: "command",
       currentEndpoint: config.defaultEndpoint
@@ -5474,6 +5477,7 @@ export class CrustyApp {
       if (command.type === "model.get") {
         const endpoint = this.config.endpoints[this.runtime.currentEndpoint];
         const policyLabel = endpoint.modelPolicy === "auto" ? "auto" : "fixed";
+        const profileLabel = getModelProfile();
         const purposeModels = [
           endpoint.reasoningModel ? `reasoning=${endpoint.reasoningModel}` : null,
           endpoint.codingModel ? `coding=${endpoint.codingModel}` : null,
@@ -5484,11 +5488,38 @@ export class CrustyApp {
           : "";
         return {
           lines: [
-            `Current participant: @${this.runtime.currentEndpoint} (${endpoint.nickname}) using @${endpoint.resourceAlias}/${endpoint.model} [policy=${policyLabel}${purposeSuffix}]. Plain messages still go to @${this.config.defaultEndpoint}.`
+            `Current participant: @${this.runtime.currentEndpoint} (${endpoint.nickname}) using @${endpoint.resourceAlias}/${endpoint.model} [policy=${policyLabel}${purposeSuffix}] [profile=${profileLabel}]. Plain messages still go to @${this.config.defaultEndpoint}.`
           ],
           errors: [],
           shouldExit: false
         };
+      }
+
+      if (command.type === "model.profile.get") {
+        return {
+          lines: [`Model profile mode: ${getModelProfile()}.`],
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "model.profile.set") {
+        try {
+          setModelProfile(command.mode);
+          this.config = setPreference(this.config, "modelProfile", command.mode);
+          await this.persistConfig();
+          return {
+            lines: [`Model profile mode is now ${command.mode}.`],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [(error as Error).message],
+            shouldExit: false
+          };
+        }
       }
 
       if (command.type === "model.set") {

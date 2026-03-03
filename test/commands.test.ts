@@ -254,6 +254,25 @@ describe("parseCommand", () => {
     expect(() => parseCommand("/model zora coding")).toThrow();
   });
 
+  test("parses model profile subcommands", () => {
+    expect(parseCommand("/model profile")).toEqual({
+      type: "model.profile.get"
+    });
+    expect(parseCommand("/model profile all-llamas")).toEqual({
+      type: "model.profile.set",
+      mode: "all-llamas"
+    });
+    expect(parseCommand("/model profile custom")).toEqual({
+      type: "model.profile.set",
+      mode: "custom"
+    });
+    expect(parseCommand("/model profile auto")).toEqual({
+      type: "model.profile.set",
+      mode: "auto"
+    });
+    expect(() => parseCommand("/model profile nope")).toThrow();
+  });
+
   test("parses nickname, bind, and orchestrator commands", () => {
     expect(parseCommand('/nickname @reviewer "Reviewer Prime"')).toEqual({
       type: "nickname.set",
