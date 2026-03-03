@@ -302,12 +302,19 @@ function normalizePreferences(raw: unknown): UserPreferences | undefined {
       }
     }
   }
+  if (candidate.modelProfile !== undefined) {
+    const modelProfileValue = String(candidate.modelProfile).trim().toLowerCase();
+    if (modelProfileValue === "all-llamas" || modelProfileValue === "custom" || modelProfileValue === "auto") {
+      result.modelProfile = modelProfileValue;
+      hasField = true;
+    }
+  }
 
   return hasField ? result : undefined;
 }
 
 export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
-  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled"];
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled", "modelProfile"];
   if (!validKeys.includes(key as keyof UserPreferences)) {
     throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
   }
@@ -332,6 +339,17 @@ export function setPreference(config: AppConfig, key: string, value: string): Ap
     return {
       ...config,
       preferences: { ...existing, jobSearchEnabled: boolValue }
+    };
+  }
+
+  if (key === "modelProfile") {
+    const v = trimmed.toLowerCase();
+    if (v !== "all-llamas" && v !== "custom" && v !== "auto") {
+      throw new Error('Invalid modelProfile. Valid values: all-llamas, custom, auto');
+    }
+    return {
+      ...config,
+      preferences: { ...existing, modelProfile: v }
     };
   }
 

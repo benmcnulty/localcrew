@@ -9,7 +9,7 @@ import {
   loadLocalEnv
 } from "./env.ts";
 import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
-import type { EndpointApiStyle, EndpointConfig, ModelPurpose, ResourceRole } from "./types.ts";
+import type { EndpointApiStyle, EndpointConfig, ModelProfileMode, ModelPurpose, ResourceRole } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
 export type ResourceApiStyle = EndpointApiStyle;
@@ -57,6 +57,28 @@ export interface ResourceCapacitySummary {
 }
 
 const RESOURCE_ALIAS_PATTERN = /^[a-z][a-z0-9_-]*$/;
+let activeModelProfile: ModelProfileMode = "auto";
+
+export function setModelProfile(mode: ModelProfileMode): void {
+  activeModelProfile = mode;
+}
+
+export function getModelProfile(): ModelProfileMode {
+  return activeModelProfile;
+}
+
+function findModelByFamily(profile: ResourceProfile, family: string): string | undefined {
+  const lowerFamily = family.toLowerCase();
+  const candidates = [
+    profile.defaultModel,
+    profile.reasoningModel,
+    profile.codingModel,
+    profile.toolsModel,
+    ...(profile.availableModels ?? [])
+  ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()));
+
+  return candidates.find((candidate) => candidate.toLowerCase().startsWith(lowerFamily));
+}
 
 function getTier(value: string | undefined, fallback: ResourceTier): ResourceTier {
   return value === "top" || value === "mid" || value === "low" ? value : fallback;
@@ -450,6 +472,14 @@ export function selectModel(
   profile: ResourceProfile,
   purpose: "default" | "reasoning" | "coding" | "tools"
 ): string {
+  if (activeModelProfile === "all-llamas") {
+    const llamaModel = findModelByFamily(profile, "llama");
+    if (!llamaModel) {
+      throw new Error(`Model profile all-llamas requires a llama model on @${profile.alias}.`);
+    }
+    return llamaModel;
+  }
+
   if (purpose === "coding" && profile.codingModel) {
     return profile.codingModel;
   }
@@ -551,6 +581,173 @@ export function selectModelForEndpoint(
   return endpoint.model;
 }
 
+export interface TaskMetadata {
+  taskId: number;
+  content: string;
+  tokenEstimate: number;
+  taskType: "chat" | "reasoning" | "extraction" | "classification" | "planning" | "research";
+  reasoningDepth: "low" | "medium" | "high";
+  latencySensitive: boolean;
+  requiresWebTools: boolean;
+  requiresVision: boolean;
+}
+
+export interface ResourceTelemetry {
+  queueDepth: number;
+  ramUsagePct: number;
+  tokensPerSecond: number;
+  activeModel: string | null;
+  avgQueueWaitMs: number;
+  successRate: number;
+  failureCount: number;
+}
+
+const SCORE_WEIGHTS = {
+  availability: 0.4,
+  memoryHeadroom: 0.3,
+  capabilityMatch: 0.3
+};
+
+const MAX_QUEUE_DEPTH = 5;
+
+function clamp01(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function estimateTokenCount(content: string): number {
+  return Math.max(32, Math.ceil(content.length / 4));
+}
+
+function inferReasoningDepth(content: string, taskType: TaskMetadata["taskType"]): TaskMetadata["reasoningDepth"] {
+  const normalized = content.toLowerCase();
+  if (
+    /\b(complex|multi[- ]?step|thorough|comprehensive|end[- ]?to[- ]?end|deep|architecture|tradeoff|benchmark|evaluate)\b/.test(
+      normalized
+    )
+  ) {
+    return "high";
+  }
+
+  if (taskType === "reasoning" || taskType === "planning" || /\b(analyze|compare|design|plan)\b/.test(normalized)) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function inferTaskType(content: string): TaskMetadata["taskType"] {
+  const normalized = content.toLowerCase();
+  if (/\b(search|wikipedia|reddit|news|research|references|citations?)\b/.test(normalized)) {
+    return "research";
+  }
+  if (/\b(classify|categorize|tag|label|triage)\b/.test(normalized)) {
+    return "classification";
+  }
+  if (/\b(extract|parse|summarize table|json|index|metadata)\b/.test(normalized)) {
+    return "extraction";
+  }
+  if (/\b(plan|roadmap|proposal|spec|draft|queue fill|orchestrate)\b/.test(normalized)) {
+    return "planning";
+  }
+  if (/\b(reason|analyze|compare|evaluate|critique|assess|why)\b/.test(normalized)) {
+    return "reasoning";
+  }
+  return "chat";
+}
+
+export function classifyTask(content: string): TaskMetadata {
+  const taskType = inferTaskType(content);
+  return {
+    taskId: 0,
+    content,
+    tokenEstimate: estimateTokenCount(content),
+    taskType,
+    reasoningDepth: inferReasoningDepth(content, taskType),
+    latencySensitive: /\b(urgent|asap|immediately|quick|fast)\b/i.test(content),
+    requiresWebTools: /\b(search|wikipedia|reddit|web)\b/i.test(content),
+    requiresVision: /\b(image|screenshot|diagram|vision)\b/i.test(content)
+  };
+}
+
+function capabilityMatchScore(resource: ResourceProfile, task: TaskMetadata): number {
+  if (task.reasoningDepth === "high" || task.tokenEstimate > 8000) {
+    return resource.tier === "top" ? 1 : resource.tier === "mid" ? 0.6 : 0.3;
+  }
+
+  if (task.taskType === "classification" || task.taskType === "extraction") {
+    return resource.tier === "low" ? 0.9 : resource.tier === "mid" ? 0.8 : 0.7;
+  }
+
+  if (task.taskType === "research") {
+    if (resource.tier === "top") return 1;
+    if (resource.tier === "mid") return 0.8;
+    return 0.5;
+  }
+
+  if (task.taskType === "planning" || task.taskType === "reasoning") {
+    return resource.tier === "top" ? 0.95 : resource.tier === "mid" ? 0.7 : 0.45;
+  }
+
+  return resource.tier === "low" ? 0.8 : resource.tier === "mid" ? 0.85 : 0.9;
+}
+
+export function computeResourceScore(
+  resource: ResourceProfile,
+  telemetry: ResourceTelemetry,
+  task: TaskMetadata
+): number {
+  const availability = clamp01(1 - telemetry.queueDepth / MAX_QUEUE_DEPTH);
+  const memoryHeadroom = clamp01(1 - telemetry.ramUsagePct / 100);
+  const capabilityMatch = capabilityMatchScore(resource, task);
+
+  return (
+    SCORE_WEIGHTS.availability * availability +
+    SCORE_WEIGHTS.memoryHeadroom * memoryHeadroom +
+    SCORE_WEIGHTS.capabilityMatch * capabilityMatch
+  );
+}
+
+export function routeTask(
+  task: TaskMetadata,
+  resources: ResourceProfile[],
+  telemetry: Record<string, ResourceTelemetry>
+): { resource: ResourceProfile; score: number; rationale: string } {
+  if (resources.length === 0) {
+    throw new Error("No resources are configured.");
+  }
+
+  const scored = resources.map((resource) => {
+    const metrics = telemetry[resource.alias] ?? {
+      queueDepth: 0,
+      ramUsagePct: 0,
+      tokensPerSecond: 0,
+      activeModel: null,
+      avgQueueWaitMs: 0,
+      successRate: 1,
+      failureCount: 0
+    };
+    const score = computeResourceScore(resource, metrics, task);
+    return { resource, score };
+  });
+
+  scored.sort((left, right) => {
+    if (left.score !== right.score) {
+      return right.score - left.score;
+    }
+    return left.resource.alias.localeCompare(right.resource.alias);
+  });
+
+  const selected = scored[0];
+  const rationale = `Scored ${selected.resource.alias} highest (${selected.score.toFixed(2)}) for ${task.taskType} work with ${task.reasoningDepth} reasoning depth.`;
+  return {
+    resource: selected.resource,
+    score: selected.score,
+    rationale
+  };
+}
+
 function pickFirst(
   resources: ResourceProfile[],
   predicate: (profile: ResourceProfile) => boolean
@@ -639,6 +836,20 @@ export function chooseResourceForTask(
 } {
   const resourceLoad = options.resourceLoad ?? {};
   const resources = sortForRouting(listResources(rootDir));
+  const telemetryByAlias: Record<string, ResourceTelemetry> = Object.fromEntries(
+    resources.map((resource) => [
+      resource.alias,
+      {
+        queueDepth: getResourceLoad(resource.alias, resourceLoad),
+        ramUsagePct: 0,
+        tokensPerSecond: 0,
+        activeModel: null,
+        avgQueueWaitMs: 0,
+        successRate: 1,
+        failureCount: 0
+      }
+    ])
+  );
   const orchestratorAlias = options.primaryOrchestratorAlias ?? getOrchestratorResourceAlias(rootDir);
   const orchestrator = resources.find((profile) => profile.alias === orchestratorAlias) ?? resources[0];
   if (!orchestrator) {
@@ -773,11 +984,25 @@ export function chooseResourceForTask(
     };
   }
 
+  const classified = classifyTask(task);
+  const scoredRoute = routeTask(classified, resources, telemetryByAlias);
+  const fallbackPurpose =
+    classified.taskType === "reasoning" || classified.taskType === "planning"
+      ? "reasoning"
+      : classified.taskType === "classification" || classified.taskType === "extraction"
+        ? "tools"
+        : "default";
+
   return {
-    alias: orchestrator.alias,
-    tier: orchestrator.tier,
-    purpose: orchestrator.reasoningModel ? "reasoning" : "default",
-    rationale: `Defaulted to ${orchestrator.alias} as the primary orchestrator resource for reasoning and verification after considering the current resource load profile.`
+    alias: scoredRoute.resource.alias,
+    tier: scoredRoute.resource.tier,
+    purpose:
+      fallbackPurpose === "reasoning" && scoredRoute.resource.reasoningModel
+        ? "reasoning"
+        : fallbackPurpose === "tools" && scoredRoute.resource.toolsModel
+          ? "tools"
+          : "default",
+    rationale: scoredRoute.rationale
   };
 }
 

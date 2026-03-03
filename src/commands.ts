@@ -48,7 +48,7 @@ function usage(command: string): string {
     case "/direct":
       return 'Usage: /direct <resourceAlias> "<message>" [model]';
     case "/model":
-      return "Usage: /model [alias] | /model <alias> <model> | /model <alias> policy auto|fixed | /model <alias> coding|reasoning|tools <model>";
+      return "Usage: /model [alias] | /model <alias> <model> | /model <alias> policy auto|fixed | /model <alias> coding|reasoning|tools <model> | /model profile [all-llamas|custom|auto]";
     case "/default":
       return "Usage: /default [alias]";
     case "/nickname":
@@ -476,6 +476,22 @@ export function parseCommand(input: string): Command {
     case "/model":
       if (rest.length === 0) {
         return { type: "model.get" };
+      }
+      if (rest[0].toLowerCase() === "profile") {
+        if (rest.length === 1) {
+          return { type: "model.profile.get" };
+        }
+        if (rest.length !== 2) {
+          throw new CommandParseError("Usage: /model profile [all-llamas|custom|auto]");
+        }
+        const mode = rest[1].toLowerCase();
+        if (mode !== "all-llamas" && mode !== "custom" && mode !== "auto") {
+          throw new CommandParseError("Usage: /model profile [all-llamas|custom|auto]");
+        }
+        return {
+          type: "model.profile.set",
+          mode
+        };
       }
       if (rest.length === 1) {
         return {

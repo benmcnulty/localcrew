@@ -1471,9 +1471,23 @@ describe("CrustyApp", () => {
 
       expect(invalidResult.errors).toEqual(['Unknown endpoint alias "nope".']);
       expect(validResult.lines[0]).toContain(
-        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b [policy=fixed]."
+        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b [policy=fixed] [profile=auto]."
       );
       expect(validResult.lines[0]).toContain("Plain messages still go to @erin.");
+    });
+  });
+
+  test("sets and reports model profile mode", async () => {
+    await withTempDir(async (rootDir) => {
+      const app = await CrustyApp.create({ rootDir });
+
+      const setResult = await app.execute(parseCommand("/model profile all-llamas"));
+      const getResult = await app.execute(parseCommand("/model profile"));
+      const config = await loadConfig(rootDir);
+
+      expect(setResult.lines).toEqual(["Model profile mode is now all-llamas."]);
+      expect(getResult.lines).toEqual(["Model profile mode: all-llamas."]);
+      expect(config.preferences?.modelProfile).toBe("all-llamas");
     });
   });
 });
