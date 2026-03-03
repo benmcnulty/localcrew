@@ -91,6 +91,8 @@ import {
   renderResourceInventory,
   setModelProfile,
   selectModelForEndpoint,
+  checkContextBudget,
+  findHighestContextResource,
   type ResourceTelemetry,
   updateResource
 } from "./resources.ts";
@@ -141,6 +143,14 @@ import { searchReddit } from "./reddit.ts";
 import { searchWeb, isAllowedSearchTopic } from "./web-search.ts";
 import { fetchPageText } from "./page-fetcher.ts";
 import { fetchWeather } from "./weather.ts";
+import {
+  getDailyWorkSnapshot,
+  isDailyWorkStale,
+  saveDailyWork,
+  parseDailyWorkIntervalMs,
+  buildDailyWorkTaskContent,
+  type DailyWorkSnapshot,
+} from "./daily-work.ts";
 import { fetchBenLive } from "./benlive.ts";
 import { fetchWebsite } from "./website.ts";
 import { formatCurrentDateTime, titleCase } from "./utils.ts";
@@ -1325,6 +1335,15 @@ export class LocalCrewApp {
     return getDropboxSnapshot(this.rootDir);
   }
 
+  getPreferences() {
+    return this.config.preferences;
+  }
+
+  async getDailyWorkSnapshot(): Promise<DailyWorkSnapshot> {
+    const intervalMs = parseDailyWorkIntervalMs(this.config.preferences?.dailyWorkIntervalHours);
+    return getDailyWorkSnapshot(this.rootDir, intervalMs);
+  }
+
   async getResourcesSnapshot() {
     return listResources(this.rootDir);
   }
@@ -2344,11 +2363,13 @@ export class LocalCrewApp {
         "  /preferences set zip <code>         Set default weather zip code",
         "  /preferences set website <url>      Set personal website URL",
         "  /preferences set directive \"text\"    Set daily digest directive",
+        "  /preferences set interval <hours>    Set daily work refresh interval (e.g. 6)",
+        "  /preferences set dailyDirective \"text\"  Set daily work briefing directive",
         "",
         "Preferences are stored locally in .localcrew/config.json and used by",
         "the weather tool, personal website tool, and daily digest generation.",
         "",
-        "Full key names also accepted: zipCode, personalWebsiteUrl, dailyDigestDirective.",
+        "Full key names also accepted: zipCode, personalWebsiteUrl, dailyDigestDirective, dailyWorkIntervalHours, dailyWorkDirective.",
       ],
       daily: [
         "# Daily Work Sessions",
@@ -3525,7 +3546,57 @@ export class LocalCrewApp {
     createRecoveryTask: boolean;
     startedAt?: string;
     taskStartMs?: number;
-  }): Promise<{ recoveryTask?: AutoQueueTask }> {
+  }): Promise<{ recoveryTask?: AutoQueueTask; retried?: boolean }> {
+    const MAX_RETRIES = 1;
+    const currentRetries = options.task.retryCount ?? 0;
+
+    // Retry-with-fallback: if the task has retries left and a different resource
+    // exists, re-queue it with the failed resource noted for avoidance.
+    if (currentRetries < MAX_RETRIES && options.assignedResource && !this.isSafeModeRecoveryTask(options.task)) {
+      const retryTask: AutoQueueTask = {
+        ...options.task,
+        status: "queued",
+        retryCount: currentRetries + 1,
+        lastFailedResource: options.assignedResource,
+        requestedResource: undefined,
+        assignedResource: undefined,
+        assignedModel: undefined,
+        result: undefined,
+        errorMessage: undefined
+      };
+
+      this.systemState = {
+        ...this.systemState,
+        auto: {
+          ...this.systemState.auto,
+          pending: this.sortPendingTasks([retryTask, ...options.remaining])
+        }
+      };
+      await this.persistSystemState();
+      await appendChangelogEntry(
+        `Retrying auto task #${options.task.id} (attempt ${currentRetries + 1}/${MAX_RETRIES + 1}) after failure on ${options.assignedResource}: ${options.errorMessage}`,
+        this.rootDir
+      );
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "auto.task.retry",
+          summary: `Retrying task #${options.task.id} after failure on ${options.assignedResource}.`,
+          success: true,
+          actor: "orchestrator",
+          target: `task:${options.task.id}`,
+          metadata: {
+            retryCount: currentRetries + 1,
+            failedResource: options.assignedResource,
+            errorMessage: options.errorMessage
+          }
+        },
+        this.rootDir
+      );
+      return { retried: true };
+    }
+
     const completedAt = new Date().toISOString();
     const failedTask: AutoQueueTask = {
       ...options.task,
@@ -3637,6 +3708,7 @@ export class LocalCrewApp {
     "orchestrator-summary.md": (paths) => paths.orchestratorMemorySummaryPath,
     "focus-todo.md": (paths) => paths.focusTodoPath,
     "roadmap.md": (paths) => paths.roadmapPath,
+    "daily-work.md": (paths) => paths.dailyWorkPath,
   };
 
   /**
@@ -4651,9 +4723,10 @@ export class LocalCrewApp {
     const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
     const taskStartedAt = new Date().toISOString();
     const taskStartMs = Date.now();
-    const [documents, agents] = await Promise.all([
+    const [documents, agents, telemetrySummary] = await Promise.all([
       loadSystemDocuments(this.rootDir),
-      listAgents(this.rootDir)
+      listAgents(this.rootDir),
+      loadTelemetrySummary(this.rootDir)
     ]);
     const resourceLoad = this.systemState.auto.pending.reduce<Record<string, number>>(
       (accumulator, pendingTask) => {
@@ -4667,16 +4740,25 @@ export class LocalCrewApp {
     );
     let selection;
     let routingFallbackWarning: string | null = null;
+
+    // If this is a retry, heavily penalize the resource that previously failed
+    // so the routing engine picks a different one.
+    if (task.lastFailedResource) {
+      resourceLoad[task.lastFailedResource] = (resourceLoad[task.lastFailedResource] ?? 0) + 10;
+    }
+
     try {
       selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
         resourceLoad,
-        primaryOrchestratorAlias: this.resolveOrchestratorAlias()
+        primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
+        telemetrySummary
       });
     } catch (error) {
       const invalidRequestedResource = task.requestedResource;
       selection = chooseResourceForTask(task.content, "auto", this.rootDir, {
         resourceLoad,
-        primaryOrchestratorAlias: this.resolveOrchestratorAlias()
+        primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
+        telemetrySummary
       });
       task.requestedResource = undefined;
       routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${selection.alias}.`;
@@ -4712,6 +4794,13 @@ export class LocalCrewApp {
         startedAt: taskStartedAt,
         taskStartMs
       });
+      if (recovery.retried) {
+        return {
+          lines: [`Auto task #${task.id} failed on ${selection.alias} (no model). Retrying on another resource.`],
+          errors: [],
+          shouldExit: false
+        };
+      }
       return {
         lines: recovery.recoveryTask
           ? [
@@ -4725,6 +4814,57 @@ export class LocalCrewApp {
       };
     }
     const extraContextBlocks = await this.getAutoTaskExtraContext(task);
+
+    // Context budget pre-flight: estimate whether the prompt will fit within
+    // the selected resource's context window. If it doesn't fit, attempt to
+    // reroute to the resource with the highest available context window.
+    const systemContextChars =
+      (documents.directives?.length ?? 0) +
+      (documents.inventory?.length ?? 0) +
+      (documents.roadmap?.length ?? 0) +
+      (documents.focusTodo?.length ?? 0) +
+      (documents.changelog?.length ?? 0) +
+      (documents.orchestratorSummary?.length ?? 0);
+    const budgetCheck = checkContextBudget(task.content, selection.alias, this.rootDir, {
+      systemContextChars
+    });
+    if (!budgetCheck.fits) {
+      const highestCtxResource = findHighestContextResource(this.rootDir);
+      if (highestCtxResource && highestCtxResource.alias !== selection.alias) {
+        const rerouteCheck = checkContextBudget(task.content, highestCtxResource.alias, this.rootDir, {
+          systemContextChars
+        });
+        if (rerouteCheck.fits) {
+          const originalAlias = selection.alias;
+          selection.alias = highestCtxResource.alias;
+          selection.tier = highestCtxResource.tier;
+          selection.rationale = `Rerouted from ${originalAlias} (context budget exceeded: ${budgetCheck.estimatedPromptTokens}/${budgetCheck.availableTokens} tokens) to ${highestCtxResource.alias} (${rerouteCheck.availableTokens} tokens available).`;
+          const rerouteEndpoint = this.getAutoTaskEndpoint(selection);
+          if (rerouteEndpoint.model?.trim()) {
+            Object.assign(endpoint, rerouteEndpoint);
+            await appendAuditEvent(
+              {
+                timestamp: new Date().toISOString(),
+                kind: "system",
+                scope: "auto.route.context-budget-reroute",
+                summary: `Rerouted task #${task.id} from ${originalAlias} to ${highestCtxResource.alias} due to context budget overflow.`,
+                success: true,
+                actor: "orchestrator",
+                target: `task:${task.id}`,
+                metadata: {
+                  originalResource: originalAlias,
+                  originalMaxContext: budgetCheck.maxContextTokens,
+                  estimatedPromptTokens: budgetCheck.estimatedPromptTokens,
+                  newResource: highestCtxResource.alias,
+                  newMaxContext: rerouteCheck.maxContextTokens
+                }
+              },
+              this.rootDir
+            );
+          }
+        }
+      }
+    }
 
     // Pre-flight: ask the model to reason briefly about the task before executing.
     // Failure is non-fatal — we log it and proceed without the context block.
@@ -4833,6 +4973,13 @@ export class LocalCrewApp {
         startedAt: taskStartedAt,
         taskStartMs
       });
+      if (recovery.retried) {
+        return {
+          lines: [`Auto task #${task.id} failed on ${selection.alias}: ${errorMessage}. Retrying on another resource.`],
+          errors: [],
+          shouldExit: false
+        };
+      }
       return {
         lines: recovery.recoveryTask
           ? [
@@ -5011,6 +5158,42 @@ export class LocalCrewApp {
 
     try {
       return await this.runAutoCycleLocked(async () => {
+        // Front-load daily work generation when the document is stale or missing.
+        // Only active when the user has configured a daily work interval preference
+        // or a daily work directive, indicating they want the feature.
+        const dailyWorkEnabled = Boolean(
+          this.config.preferences?.dailyWorkIntervalHours ||
+          this.config.preferences?.dailyWorkDirective
+        );
+        if (this.systemState.auto.pending.length === 0 && dailyWorkEnabled) {
+          const intervalMs = parseDailyWorkIntervalMs(this.config.preferences?.dailyWorkIntervalHours);
+          const stale = await isDailyWorkStale(this.rootDir, intervalMs);
+          if (stale) {
+            const dateSlug = new Date().toISOString().slice(0, 10);
+            const taskContent = buildDailyWorkTaskContent(dateSlug);
+            // Check if we already have a daily-work task queued to avoid duplicates.
+            const alreadyQueued = this.systemState.auto.pending.some(
+              (t) => t.content.includes("Daily Work briefing")
+            );
+            if (!alreadyQueued) {
+              const queued = await this.queueParsedTasks(
+                [{ priority: "high", content: taskContent, requestedResource: undefined }],
+                "orchestrator:daily-work"
+              );
+              if (queued.tasks.length > 0) {
+                return {
+                  lines: [
+                    `Daily work document is stale — queued high-priority refresh task #${queued.tasks[0].id}.`,
+                    ...queued.notes
+                  ],
+                  errors: [],
+                  shouldExit: false
+                };
+              }
+            }
+          }
+        }
+
         if (this.systemState.auto.pending.length === 0) {
           const ingested = await this.ingestNextInboxDocumentTask();
           if (ingested) {
@@ -5051,9 +5234,11 @@ export class LocalCrewApp {
           errorMessage: `Unexpected auto-cycle exception: ${(error as Error).message}`,
           createRecoveryTask: !this.isSafeModeRecoveryTask(task)
         });
-        recoveryLine = recovery.recoveryTask
-          ? `Quarantined task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
-          : `Quarantined failed safe mode recovery task #${task.id}.`;
+        recoveryLine = recovery.retried
+          ? `Task #${task.id} will be retried on another resource after auto-cycle exception.`
+          : recovery.recoveryTask
+            ? `Quarantined task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+            : `Quarantined failed safe mode recovery task #${task.id}.`;
       }
       return {
         lines: recoveryLine ? [recoveryLine] : [],
@@ -5918,6 +6103,8 @@ export class LocalCrewApp {
         if (prefs.city) lines.push(`  city: ${prefs.city}`);
         if (prefs.personalWebsiteUrl) lines.push(`  personalWebsiteUrl: ${prefs.personalWebsiteUrl}`);
         if (prefs.dailyDigestDirective) lines.push(`  dailyDigestDirective: ${prefs.dailyDigestDirective}`);
+        if (prefs.dailyWorkIntervalHours) lines.push(`  dailyWorkIntervalHours: ${prefs.dailyWorkIntervalHours}`);
+        if (prefs.dailyWorkDirective) lines.push(`  dailyWorkDirective: ${prefs.dailyWorkDirective}`);
         return { lines, errors: [], shouldExit: false };
       }
 

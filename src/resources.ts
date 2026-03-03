@@ -602,10 +602,49 @@ export interface ResourceTelemetry {
   failureCount: number;
 }
 
+/**
+ * Build a ResourceTelemetry record for a resource by combining live queue
+ * load data with historical telemetry summary statistics.
+ */
+export function buildResourceTelemetry(
+  alias: string,
+  queueDepth: number,
+  telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> }
+): ResourceTelemetry {
+  const stats = telemetrySummary?.resources?.[alias];
+  if (!stats || stats.calls === 0) {
+    return {
+      queueDepth,
+      ramUsagePct: 0,
+      tokensPerSecond: 0,
+      activeModel: null,
+      avgQueueWaitMs: 0,
+      successRate: 1,
+      failureCount: 0
+    };
+  }
+  const successRate = stats.calls > 0 ? Math.max(0, (stats.calls - stats.errors) / stats.calls) : 1;
+  const avgDurationMs = stats.calls > 0 ? stats.totalDurationMs / stats.calls : 0;
+  const tokensPerSecond = stats.totalDurationMs > 0
+    ? (stats.evalCount / (stats.totalDurationMs / 1000))
+    : 0;
+  return {
+    queueDepth,
+    ramUsagePct: 0,
+    tokensPerSecond,
+    activeModel: null,
+    avgQueueWaitMs: avgDurationMs,
+    successRate,
+    failureCount: stats.errors
+  };
+}
+
 const SCORE_WEIGHTS = {
-  availability: 0.4,
-  memoryHeadroom: 0.3,
-  capabilityMatch: 0.3
+  availability: 0.3,
+  memoryHeadroom: 0.15,
+  capabilityMatch: 0.3,
+  reliability: 0.15,
+  throughput: 0.1
 };
 
 const MAX_QUEUE_DEPTH = 5;
@@ -701,11 +740,18 @@ export function computeResourceScore(
   const availability = clamp01(1 - telemetry.queueDepth / MAX_QUEUE_DEPTH);
   const memoryHeadroom = clamp01(1 - telemetry.ramUsagePct / 100);
   const capabilityMatch = capabilityMatchScore(resource, task);
+  const reliability = clamp01(telemetry.successRate);
+  // Normalize throughput: assume 50 tok/s is excellent, 0 means unknown (treat as neutral 0.5)
+  const throughput = telemetry.tokensPerSecond > 0
+    ? clamp01(telemetry.tokensPerSecond / 50)
+    : 0.5;
 
   return (
     SCORE_WEIGHTS.availability * availability +
     SCORE_WEIGHTS.memoryHeadroom * memoryHeadroom +
-    SCORE_WEIGHTS.capabilityMatch * capabilityMatch
+    SCORE_WEIGHTS.capabilityMatch * capabilityMatch +
+    SCORE_WEIGHTS.reliability * reliability +
+    SCORE_WEIGHTS.throughput * throughput
   );
 }
 
@@ -823,6 +869,7 @@ export function chooseResourceForTask(
   options: {
     resourceLoad?: Record<string, number>;
     primaryOrchestratorAlias?: string;
+    telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> };
   } = {}
 ): {
   alias: string;
@@ -839,15 +886,11 @@ export function chooseResourceForTask(
   const telemetryByAlias: Record<string, ResourceTelemetry> = Object.fromEntries(
     resources.map((resource) => [
       resource.alias,
-      {
-        queueDepth: getResourceLoad(resource.alias, resourceLoad),
-        ramUsagePct: 0,
-        tokensPerSecond: 0,
-        activeModel: null,
-        avgQueueWaitMs: 0,
-        successRate: 1,
-        failureCount: 0
-      }
+      buildResourceTelemetry(
+        resource.alias,
+        getResourceLoad(resource.alias, resourceLoad),
+        options.telemetrySummary
+      )
     ])
   );
   const orchestratorAlias = options.primaryOrchestratorAlias ?? getOrchestratorResourceAlias(rootDir);
@@ -1004,6 +1047,70 @@ export function chooseResourceForTask(
           : "default",
     rationale: scoredRoute.rationale
   };
+}
+
+/**
+ * Estimate the total prompt token cost for an auto task and check whether it
+ * fits within the target resource's context window. Returns a budget report
+ * with a recommendation.
+ *
+ * The estimate is intentionally conservative (4 chars ≈ 1 token) to avoid
+ * dispatching tasks that will fail due to context overflow.
+ */
+export function checkContextBudget(
+  taskContent: string,
+  resourceAlias: string,
+  rootDir = process.cwd(),
+  options: {
+    /** Total chars of system documents, directives, and extra context. */
+    systemContextChars?: number;
+    /** Fraction of context window to reserve for response (default 0.2). */
+    responseReserveFraction?: number;
+  } = {}
+): {
+  fits: boolean;
+  resourceAlias: string;
+  maxContextTokens: number;
+  estimatedPromptTokens: number;
+  availableTokens: number;
+  recommendation: string;
+} {
+  const profile = getResourceProfile(resourceAlias, rootDir);
+  const maxContext = profile.maxContextTokens ?? 4096;
+  const reserveFraction = options.responseReserveFraction ?? 0.2;
+  const systemChars = options.systemContextChars ?? 0;
+  const taskChars = taskContent.length;
+  const totalPromptChars = systemChars + taskChars;
+  const estimatedPromptTokens = Math.ceil(totalPromptChars / 4);
+  const availableTokens = Math.floor(maxContext * (1 - reserveFraction));
+  const fits = estimatedPromptTokens <= availableTokens;
+
+  let recommendation: string;
+  if (fits) {
+    const headroom = availableTokens - estimatedPromptTokens;
+    recommendation = `Prompt fits within ${resourceAlias} context budget (${estimatedPromptTokens}/${availableTokens} tokens, ${headroom} headroom).`;
+  } else {
+    recommendation = `Prompt exceeds ${resourceAlias} context budget (${estimatedPromptTokens} estimated vs ${availableTokens} available). Consider rerouting to a higher-context resource.`;
+  }
+
+  return {
+    fits,
+    resourceAlias,
+    maxContextTokens: maxContext,
+    estimatedPromptTokens,
+    availableTokens,
+    recommendation
+  };
+}
+
+/**
+ * Find the resource with the highest context window from those available.
+ * Used as a fallback when the initially chosen resource cannot fit the prompt.
+ */
+export function findHighestContextResource(rootDir = process.cwd()): ResourceProfile | undefined {
+  const resources = listResources(rootDir);
+  if (resources.length === 0) return undefined;
+  return [...resources].sort((a, b) => (b.maxContextTokens ?? 0) - (a.maxContextTokens ?? 0))[0];
 }
 
 export function getResourceProfilesByTier(

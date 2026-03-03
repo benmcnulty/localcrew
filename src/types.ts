@@ -38,6 +38,8 @@ export interface UserPreferences {
   city?: string;
   personalWebsiteUrl?: string;
   dailyDigestDirective?: string;
+  dailyWorkIntervalHours?: string;
+  dailyWorkDirective?: string;
   jobSearchEnabled?: boolean;
   modelProfile?: ModelProfileMode;
 }
@@ -114,6 +116,10 @@ export interface AutoQueueTask {
   delegatedOrchestrator?: string;
   /** Resources assigned as subordinates to assist the delegated orchestrator with this task. */
   subordinateResources?: string[];
+  /** Number of times this task has been retried after failure. */
+  retryCount?: number;
+  /** Resource alias that failed on the previous attempt, used to avoid re-routing to the same resource. */
+  lastFailedResource?: string;
 }
 
 export interface DailyWorkSession {

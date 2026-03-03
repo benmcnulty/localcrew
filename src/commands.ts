@@ -72,7 +72,7 @@ function usage(command: string): string {
     case "/reset":
       return "Usage: /reset";
     case "/preferences":
-      return 'Usage: /preferences | /preferences set <key> <value> — keys: city, zipCode (or zip), website, directive';
+      return 'Usage: /preferences | /preferences set <key> <value> — keys: city, zipCode (or zip), website, directive, interval, dailyDirective';
     case "/daily":
       return "Usage: /daily | /daily start | /daily finish";
     case "/promote":
@@ -705,6 +705,10 @@ export function parseCommand(input: string): Command {
           website: "personalWebsiteUrl",
           dailydigestdirective: "dailyDigestDirective",
           directive: "dailyDigestDirective",
+          dailyworkintervalhours: "dailyWorkIntervalHours",
+          interval: "dailyWorkIntervalHours",
+          dailyworkdirective: "dailyWorkDirective",
+          dailydirective: "dailyWorkDirective",
         };
         if (!keyMap[key]) {
           throw new CommandParseError(usage("/preferences"));

@@ -28,6 +28,7 @@ export interface StoragePaths {
   telemetrySummaryPath: string;
   agentsDir: string;
   agentsIndexPath: string;
+  dailyWorkPath: string;
 }
 
 export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
@@ -65,7 +66,8 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     auditLogPath: join(telemetryDir, "audit-log.jsonl"),
     telemetrySummaryPath: join(telemetryDir, "summary.json"),
     agentsDir,
-    agentsIndexPath: join(agentsDir, "index.json")
+    agentsIndexPath: join(agentsDir, "index.json"),
+    dailyWorkPath: join(orchestratorDir, "daily-work.md"),
   };
 }
 
