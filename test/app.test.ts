@@ -416,6 +416,50 @@ describe("CrustyApp", () => {
     });
   });
 
+  test("emits enriched display state and task events during auto processing", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const pushedEvents: Array<Record<string, unknown>> = [];
+      const app = await CrustyApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            "Completed a concrete routing policy review with specific queue safeguards and verification checks."
+          ),
+        speakFn: () => {}
+      });
+
+      app.setApiServerHandle({
+        pushDisplayEvent(payload) {
+          pushedEvents.push(payload);
+        }
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Review routing policy safeguards and queue verification checks."));
+
+      const taskStart = pushedEvents.find((event) => event.type === "task-start");
+      const taskComplete = pushedEvents.find((event) => event.type === "task-complete");
+      const latestState = [...pushedEvents].reverse().find((event) => event.type === "state") as
+        | {
+            auto?: { failedCount?: number; completedCount?: number };
+            modelProfile?: string;
+            systemTps?: number;
+            activeResources?: unknown;
+          }
+        | undefined;
+
+      expect(taskStart).toBeDefined();
+      expect(taskComplete).toBeDefined();
+      expect(latestState).toBeDefined();
+      expect(latestState?.auto?.failedCount).toBeDefined();
+      expect(latestState?.auto?.completedCount).toBeGreaterThanOrEqual(1);
+      expect(latestState?.modelProfile).toBeDefined();
+      expect(typeof latestState?.systemTps).toBe("number");
+      expect(Array.isArray(latestState?.activeResources)).toBe(true);
+    });
+  });
+
   test("stops auto mode without clearing the queue state", async () => {
     await withTempDir(async (rootDir) => {
       const app = await CrustyApp.create({ rootDir, speakFn: () => {} });

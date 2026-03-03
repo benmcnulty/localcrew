@@ -24,4 +24,23 @@ describe("Display activity lifecycle", () => {
     expect(html).toContain("window.addEventListener('focus',syncActivityState)");
     expect(html).toContain("window.addEventListener('blur',syncActivityState)");
   });
+
+  test("consumes enriched SSE state and task events", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain("applyStatePayload(d)");
+    expect(html).toContain("msg.type==='task-start'");
+    expect(html).toContain("msg.type==='task-complete'");
+    expect(html).toContain("msg.type==='task-write'");
+    expect(html).toContain("msg.type==='queue-fill'");
+    expect(html).toContain("msg.type==='daily-complete'");
+  });
+
+  test("applies paused display class for animation throttling", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain("document.body.classList.toggle('paused',!shouldStayActive())");
+    expect(html).toContain(".paused #dqfill");
+    expect(html).toContain(".paused .dbar-fill");
+  });
 });
