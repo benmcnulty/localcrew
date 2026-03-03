@@ -1,6 +1,6 @@
 # In Focus Todo
 
-- [high] Surface job opportunities aligned with Ben's skills (AI eng, LLM infra, agent orchestration): run SEARCH[jobs] and SEARCH[news] each autonomous session; log findings with scope=job-research; store curated summaries in .crusty/system/job-opportunities.md.
+- [high] Surface job opportunities aligned with Ben's skills (AI eng, LLM infra, agent orchestration): run SEARCH[jobs] and SEARCH[news] each autonomous session; log findings with scope=job-research; store curated summaries in .localcrew/system/job-opportunities.md.
 - [high] Research current industry compensation for senior/principal AI engineers and LLM infrastructure roles; cross-reference with user-profile.md benchmarks; update benchmarks after multiple confirming data points.
 - [high] Keep canonical resource naming, routing, and queue delegation resistant to context drift.
 - [high] Leverage daily work sessions to bound autonomous work into coherent deliverable cycles.

@@ -1,6 +1,6 @@
 # External System Memory
 
-This directory is the committed, portable seed layer for Crusty.
+This directory is the committed, portable seed layer for Local Crew.
 
 It is intended for:
 
@@ -18,10 +18,10 @@ It is not intended for:
 - machine-specific resource details
 - speculative implementation drafts generated during `/auto`
 
-Those belong in the ignored `.crusty/` directory as internal system memory.
+Those belong in the ignored `.localcrew/` directory as internal system memory.
 
 Internal notes, summaries, diagnostics, and process artifacts generated during `/auto`
-should stay under `.crusty/system/secure/orchestrator/` rather than being treated as
+should stay under `.localcrew/system/secure/orchestrator/` rather than being treated as
 portable external memory.
 
 ## Promotion Rule

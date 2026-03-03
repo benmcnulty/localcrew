@@ -69,7 +69,7 @@ When performing job research tasks in `/auto`:
 3. Use `SEARCH[jobs]: LLM infrastructure engineer staff principal remote` for tier calibration.
 4. Cross-reference findings with compensation benchmarks above; flag roles ≥$200k TC as high priority.
 5. Summarize new findings in a brief audit event: scope `job-research`, noting role title, company, TC range, and fit signal.
-6. Store curated results in `.crusty/system/job-opportunities.md` (internal memory, not committed).
+6. Store curated results in `.localcrew/system/job-opportunities.md` (internal memory, not committed).
 7. Promote only stable compensation benchmarks to this file via `WRITE[external][user-profile.md]` after multiple confirming data points.
 
 ## Research Cadence

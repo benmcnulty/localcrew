@@ -7,7 +7,7 @@
 - Use canonical memory file updates during autonomous work to keep orchestrator state accurate across context boundaries.
 - Expand observability through the HUD, local API, and browser GUI without weakening the internal/external memory boundary.
 - Strengthen safe-mode recovery so failures produce diagnosis and realignment instead of repeated derailment.
-- Formalize the promotion path from local discoveries in `.crusty/` into simplified, committed `external-memory/` seeds.
+- Formalize the promotion path from local discoveries in `.localcrew/` into simplified, committed `external-memory/` seeds.
 - Support orchestrator role reassignment across devices to enable flexible multi-device topologies.
 - Leverage hierarchical orchestration for complex tasks: sub-orchestrators coordinate subordinate agents, primary orchestrator focuses on high-level delegation.
 - Enable online/offline resilience: sub-orchestrator networks continue operating when the primary is unavailable.

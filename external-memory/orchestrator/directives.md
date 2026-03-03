@@ -16,8 +16,8 @@ Your job is to route work across the available inference resources, keep memory 
 ## Memory Boundary
 
 - `external-memory/` is the committed seed layer. It should contain only portable guidance, workflows, and durable patterns worth keeping across fresh installs.
-- `.crusty/` is internal local memory. It may contain runtime summaries, queues, telemetry, and local experimentation, but it must not redefine the application contract.
-- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.crusty/`, not in `external-memory/active/`.
+- `.localcrew/` is internal local memory. It may contain runtime summaries, queues, telemetry, and local experimentation, but it must not redefine the application contract.
+- Internal notes, summaries, diagnostics, and process artifacts generated during `/auto` belong in `.localcrew/`, not in `external-memory/active/`.
 - Promote only validated lessons from local memory into `external-memory/` after they have been reviewed and simplified.
 - Prefer concise summaries, stable indexes, and small high-value updates over sprawling process prose.
 
@@ -30,10 +30,10 @@ Your job is to route work across the available inference resources, keep memory 
 - Autonomous work may directly change only internal memory, prompt guidance, indexes, summaries, and other contained process artifacts.
 - Use connected resource aliases from the live resource inventory only. Contributor chat participants are a separate concept and must not be used as substitute resource aliases.
 - If a useful improvement would require external application, API, UI, script, source-code, or system-service work, write a detailed feature request ticket into `external-memory/outbox/feature-requests/` instead of treating it as executable autonomous work.
-- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Crusty.
+- Never invent resource names, nicknames, or aliases. Use only the exact resource roster provided by Local Crew.
 - Never create or rely on ad-hoc executable scripts, daemons, or undefined system processes from `/auto`; use only approved application capabilities.
 - Reject vague placeholder tasks. Every autonomous task must have a clear object, scope, and expected outcome.
-- Use Wikipedia only for external factual knowledge, not for internal Crusty routing, prompt, naming, or model-diagnosis questions.
+- Use Wikipedia only for external factual knowledge, not for internal Local Crew routing, prompt, naming, or model-diagnosis questions.
 
 ## Context Window Management
 
@@ -75,7 +75,7 @@ Your job is to route work across the available inference resources, keep memory 
 - Prioritize roles that match the user's core strengths: autonomous agent systems, LLM infrastructure, multi-device orchestration, TypeScript/Bun backend, developer tooling.
 - Cross-reference discovered roles against the compensation benchmarks in `user-profile.md`. Surface roles at or above the midpoint for their tier.
 - Log findings as audit events with scope `job-research` so they appear in `/status` and can be reviewed in the audit log.
-- Store curated opportunity summaries in `.crusty/system/job-opportunities.md` — internal memory, not committed. Update this file incrementally rather than overwriting.
+- Store curated opportunity summaries in `.localcrew/system/job-opportunities.md` — internal memory, not committed. Update this file incrementally rather than overwriting.
 - Promote only stable compensation benchmark updates back to `user-profile.md` after multiple confirming data points across sessions.
 - This directive is **user-scoped**: the `user-profile.md` file is the single source of truth for who the current user is and what they need. Other installations should maintain their own `user-profile.md` with their own skills and targets.
 
