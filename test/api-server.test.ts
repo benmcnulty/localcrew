@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { startApiServer } from "../src/api-server.ts";
-import { CrustyApp } from "../src/app.ts";
+import { LocalCrewApp } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { saveResources, type ResourceProfile } from "../src/resources.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
-  const rootDir = await mkdtemp(join(tmpdir(), "crusty-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
 
   try {
     await run(rootDir);
@@ -73,41 +73,41 @@ async function seedResourceInventory(rootDir: string): Promise<void> {
   await saveResources(resources, rootDir);
 }
 
-const originalApiPort = process.env.CRUSTY_API_PORT;
-const originalApiHost = process.env.CRUSTY_API_HOST;
-const originalApiBindHost = process.env.CRUSTY_API_BIND_HOST;
-const originalApiPublicHost = process.env.CRUSTY_API_PUBLIC_HOST;
-const originalApiToken = process.env.CRUSTY_API_TOKEN;
+const originalApiPort = process.env.LOCALCREW_API_PORT;
+const originalApiHost = process.env.LOCALCREW_API_HOST;
+const originalApiBindHost = process.env.LOCALCREW_API_BIND_HOST;
+const originalApiPublicHost = process.env.LOCALCREW_API_PUBLIC_HOST;
+const originalApiToken = process.env.LOCALCREW_API_TOKEN;
 
 afterEach(() => {
   if (originalApiPort === undefined) {
-    delete process.env.CRUSTY_API_PORT;
+    delete process.env.LOCALCREW_API_PORT;
   } else {
-    process.env.CRUSTY_API_PORT = originalApiPort;
+    process.env.LOCALCREW_API_PORT = originalApiPort;
   }
 
   if (originalApiHost === undefined) {
-    delete process.env.CRUSTY_API_HOST;
+    delete process.env.LOCALCREW_API_HOST;
   } else {
-    process.env.CRUSTY_API_HOST = originalApiHost;
+    process.env.LOCALCREW_API_HOST = originalApiHost;
   }
 
   if (originalApiBindHost === undefined) {
-    delete process.env.CRUSTY_API_BIND_HOST;
+    delete process.env.LOCALCREW_API_BIND_HOST;
   } else {
-    process.env.CRUSTY_API_BIND_HOST = originalApiBindHost;
+    process.env.LOCALCREW_API_BIND_HOST = originalApiBindHost;
   }
 
   if (originalApiPublicHost === undefined) {
-    delete process.env.CRUSTY_API_PUBLIC_HOST;
+    delete process.env.LOCALCREW_API_PUBLIC_HOST;
   } else {
-    process.env.CRUSTY_API_PUBLIC_HOST = originalApiPublicHost;
+    process.env.LOCALCREW_API_PUBLIC_HOST = originalApiPublicHost;
   }
 
   if (originalApiToken === undefined) {
-    delete process.env.CRUSTY_API_TOKEN;
+    delete process.env.LOCALCREW_API_TOKEN;
   } else {
-    process.env.CRUSTY_API_TOKEN = originalApiToken;
+    process.env.LOCALCREW_API_TOKEN = originalApiToken;
   }
 });
 
@@ -116,12 +116,12 @@ describe("API server", () => {
     "serves status, telemetry, queue, agents, hud, UI, and write actions over HTTP",
     async () => {
     await withTempDir(async (rootDir) => {
-      process.env.CRUSTY_API_HOST = "127.0.0.1";
-      process.env.CRUSTY_API_PORT = "0";
-      process.env.CRUSTY_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
       await seedResourceInventory(rootDir);
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async (input) => {
           const url = String(input);
@@ -347,7 +347,7 @@ describe("API server", () => {
         expect(participantDelete.result.lines[0]).toContain("Removed participant @reviewer.");
         expect(dropbox.inbox.map((entry: { relativePath: string }) => entry.relativePath)).toContain("remote.md");
         expect(tree.lines.some((line: string) => line.includes("external-memory"))).toBe(true);
-        expect(file.content).toContain("Crusty-Status: inbox");
+        expect(file.content).toContain("LocalCrew-Status: inbox");
         expect(uiHtml).toContain("section-dashboard");
       } finally {
         await api!.close();
@@ -359,14 +359,14 @@ describe("API server", () => {
 
   test("protects SSE events with token auth when configured", async () => {
     await withTempDir(async (rootDir) => {
-      process.env.CRUSTY_API_HOST = "127.0.0.1";
-      process.env.CRUSTY_API_PORT = "0";
-      process.env.CRUSTY_API_BIND_HOST = "127.0.0.1";
-      process.env.CRUSTY_API_TOKEN = "test-token";
+      process.env.LOCALCREW_API_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-token";
 
       await seedResourceInventory(rootDir);
 
-      const app = await CrustyApp.create({
+      const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () => makeChatResponse("Hello from Erin"),
         speakFn: () => {}

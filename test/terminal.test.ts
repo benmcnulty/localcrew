@@ -210,7 +210,7 @@ describe("buildStyledPrompt", () => {
   beforeEach(() => setColorEnabled(true));
   afterEach(() => setColorEnabled(true));
 
-  test("command mode prompt contains crusty", () => {
+  test("command mode prompt contains crew", () => {
     const result = buildStyledPrompt({
       mode: "command",
       currentEndpoint: "erin",
@@ -220,7 +220,7 @@ describe("buildStyledPrompt", () => {
       autoBusy: false,
       resourceCount: 2,
     });
-    expect(result).toContain("crusty");
+    expect(result).toContain("crew");
     expect(result).toContain("›");
   });
 
@@ -278,7 +278,7 @@ describe("buildStyledPrompt", () => {
       autoBusy: false,
       resourceCount: 2,
     });
-    expect(result).toBe("crusty› ");
+    expect(result).toBe("crew› ");
     expect(result).not.toContain("\u001b");
   });
 });
@@ -458,19 +458,19 @@ describe("formatAgentStatusLine", () => {
   afterEach(() => setColorEnabled(true));
 
   test("shows idle status", () => {
-    const result = formatAgentStatusLine("helper", "Crusty", "idle");
+    const result = formatAgentStatusLine("helper", "Captain", "idle");
     expect(result).toContain("@helper");
-    expect(result).toContain("Crusty");
+    expect(result).toContain("Captain");
     expect(result).toContain("idle");
   });
 
   test("shows busy status", () => {
-    const result = formatAgentStatusLine("worker", "Crusty", "busy");
+    const result = formatAgentStatusLine("worker", "Captain", "busy");
     expect(result).toContain("processing");
   });
 
   test("shows offline status", () => {
-    const result = formatAgentStatusLine("node", "Crusty", "offline");
+    const result = formatAgentStatusLine("node", "Captain", "offline");
     expect(result).toContain("offline");
   });
 });

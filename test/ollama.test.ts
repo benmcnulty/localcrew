@@ -9,7 +9,7 @@ import { chatWithOllamaDetailed } from "../src/ollama.ts";
 import type { EndpointConfig } from "../src/types.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
-  const rootDir = await mkdtemp(join(tmpdir(), "crusty-"));
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
 
   try {
     await run(rootDir);
@@ -21,7 +21,7 @@ async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<voi
 describe("Anthropic env config", () => {
   test("reads max_tokens from local env files at request time", async () => {
     await withTempDir(async (rootDir) => {
-      await writeFile(join(rootDir, ".env.local"), "CRUSTY_ANTHROPIC_MAX_TOKENS=4096\n");
+      await writeFile(join(rootDir, ".env.local"), "LOCALCREW_ANTHROPIC_MAX_TOKENS=4096\n");
       loadLocalEnv(rootDir);
 
       let seenMaxTokens = 0;

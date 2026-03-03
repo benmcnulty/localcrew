@@ -59,7 +59,7 @@ const BASE_AGENT_OPTIONS = {
   agentName: "Zora",
   agentSlug: "zora",
   preferredResource: "orchestrator",
-  orchestratorName: "Crusty",
+  orchestratorName: "Captain",
   spec: "You are Zora.",
   summary: "",
   recentMessages: [],
@@ -73,7 +73,7 @@ const BASE_AUTO_OPTIONS = {
   focusTodo: "Next step.",
   changelog: "v0.1",
   orchestratorSummary: "All good.",
-  orchestratorName: "Crusty",
+  orchestratorName: "Captain",
   agents: [],
   task: "Document the routing logic.",
   priority: "medium",
@@ -122,7 +122,7 @@ const BASE_FILL_OPTIONS = {
   focusTodo: "Next step.",
   changelog: "v0.1",
   orchestratorSummary: "All good.",
-  orchestratorName: "Crusty",
+  orchestratorName: "Captain",
   agents: []
 } as const;
 
@@ -145,7 +145,7 @@ describe("buildQueueFillReviewMessages – temporal grounding", () => {
   test("injects currentDateTime before the user message", () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
     const messages = buildQueueFillReviewMessages({
-      orchestratorName: "Crusty",
+      orchestratorName: "Captain",
       reviewerAlias: "zora",
       draftTasks: "[medium] tighten routing docs",
       inventory: "1 device.",
@@ -181,7 +181,7 @@ describe("buildQueueFillFinalizeMessages – temporal grounding", () => {
 
 describe("buildTaskPreflightMessages", () => {
   const BASE_PREFLIGHT = {
-    orchestratorName: "Crusty",
+    orchestratorName: "Captain",
     task: "Audit the routing logic and document it.",
     priority: "medium",
     directives: "No external changes.",
