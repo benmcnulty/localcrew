@@ -54,6 +54,14 @@ export function cyan(text: string): string { return wrap("36", "39", text); }
 export function white(text: string): string { return wrap("37", "39", text); }
 export function gray(text: string): string { return wrap("90", "39", text); }
 
+/**
+ * Apply a 256-color foreground to a single character.
+ * Falls back to plain text when color is disabled.
+ */
+export function fg256(colorCode: number, ch: string): string {
+  return supportsColor() ? `\u001b[38;5;${colorCode}m${ch}\u001b[39m` : ch;
+}
+
 // ---------------------------------------------------------------------------
 // Semantic helpers
 // ---------------------------------------------------------------------------
@@ -143,9 +151,23 @@ export function renderBanner(options: BannerOptions): string[] {
     publicDisplayUrl,
   } = options;
 
-  const titleArt = bold(cyan("  ╔═╗┬─┐┬ ┬┌─┐┌┬┐┬ ┬"));
-  const titleArt2 = bold(cyan("  ║  ├┬┘│ │└─┐ │ └┬┘"));
-  const titleArt3 = bold(cyan("  ╚═╝┴└─└─┘└─┘ ┴  ┴ "));
+  // "Local Crew" in box-drawing glyphs with a cyan→magenta gradient
+  const artRow1 = "  ╦  ┌─┐┌─┐┌─┐┬    ╔═╗┬─┐┌─┐┬ ┬";
+  const artRow2 = "  ║  │ ││  ├─┤│    ║  ├┬┘├┤ │││";
+  const artRow3 = "  ╩═╝└─┘└─┘┴ ┴┴─┘  ╚═╝┴└─└─┘└┴┘";
+  // 256-color gradient: cyan(51) → teal(44) → blue(33) → magenta(165)
+  const gradientPalette = [51, 44, 38, 33, 99, 135, 165];
+  const applyGradient = (row: string): string => {
+    const chars = [...row];
+    return chars.map((ch, i) => {
+      if (ch === " ") return ch;
+      const color = gradientPalette[Math.floor((i / chars.length) * gradientPalette.length)];
+      return bold(fg256(color, ch));
+    }).join("");
+  };
+  const titleArt = applyGradient(artRow1);
+  const titleArt2 = applyGradient(artRow2);
+  const titleArt3 = applyGradient(artRow3);
 
   const statusDot = resourceCount > 0 ? dot("green") : dot("yellow");
   const resourceLabel = resourceCount === 1

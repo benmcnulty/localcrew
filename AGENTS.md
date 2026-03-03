@@ -50,6 +50,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `voices.ts` | Voice preset definitions and defaults |
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
 | `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion, status bar |
+| `daily-work.ts` | Daily Work briefing document: staleness detection, load/save, API snapshot |
 
 Storage layout: `external-memory/` is committed seed data; `.localcrew/` is ignored local runtime state. Never commit `.localcrew/`, `.env`, or `.env.local`.
 

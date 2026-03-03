@@ -112,6 +112,13 @@ function normalizeTask(value: unknown): AutoQueueTask | null {
     ...(typeof candidate.sourceDocumentName === "string" &&
     candidate.sourceDocumentName.trim() !== ""
       ? { sourceDocumentName: candidate.sourceDocumentName }
+      : {}),
+    ...(typeof candidate.retryCount === "number" && candidate.retryCount > 0
+      ? { retryCount: candidate.retryCount }
+      : {}),
+    ...(typeof candidate.lastFailedResource === "string" &&
+    candidate.lastFailedResource.trim() !== ""
+      ? { lastFailedResource: candidate.lastFailedResource }
       : {})
   };
 }

@@ -1346,7 +1346,8 @@ describe("LocalCrewApp", () => {
                   priority: "high",
                   createdAt: "2026-03-01T00:00:00.000Z",
                   createdBy: "orchestrator:auto-fill",
-                  status: "queued"
+                  status: "queued",
+                  retryCount: 1
                 }
               ],
               completed: []
@@ -1640,6 +1641,8 @@ describe("AutoQueueTask timing", () => {
 
       await app.execute(parseCommand("/auto"));
       await app.execute(parseCommand("Analyze all the things."));
+      // First attempt retries; second attempt (via idle cycle) quarantines.
+      await app.runIdleCycle();
       const state = await loadSystemState(rootDir);
       const failed = state.auto.completed[0];
 
@@ -1650,6 +1653,67 @@ describe("AutoQueueTask timing", () => {
       expect(typeof failed.startedAt).toBe("string");
       expect(typeof failed.completedAt).toBe("string");
       expect(typeof failed.durationMs).toBe("number");
+    });
+  });
+
+  test("retries a failed task before quarantining", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 1,
+              pending: [
+                {
+                  id: 1,
+                  content: "Analyze routing drift.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                }
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => {
+          throw new Error("network error");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      // First idle cycle: task fails and is retried (re-queued with retryCount 1).
+      const firstResult = await app.runIdleCycle();
+      const stateAfterRetry = await loadSystemState(rootDir);
+
+      // Task should be re-queued, not quarantined.
+      expect(stateAfterRetry.auto.completed).toHaveLength(0);
+      expect(stateAfterRetry.auto.pending).toHaveLength(1);
+      expect(stateAfterRetry.auto.pending[0].retryCount).toBe(1);
+      expect(firstResult.errors).toHaveLength(0);
+
+      // Second idle cycle: task fails again and is quarantined (retries exhausted).
+      const secondResult = await app.runIdleCycle();
+      const stateAfterQuarantine = await loadSystemState(rootDir);
+
+      expect(stateAfterQuarantine.auto.completed).toHaveLength(1);
+      expect(stateAfterQuarantine.auto.completed[0].result).toContain("FAILED:");
+      // A safe mode recovery task should be queued.
+      expect(stateAfterQuarantine.auto.pending).toHaveLength(1);
+      expect(stateAfterQuarantine.auto.pending[0].createdBy).toBe("orchestrator:safe-mode");
     });
   });
 });

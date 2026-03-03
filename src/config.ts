@@ -314,7 +314,7 @@ function normalizePreferences(raw: unknown): UserPreferences | undefined {
 }
 
 export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
-  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled", "modelProfile"];
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled", "modelProfile", "dailyWorkIntervalHours", "dailyWorkDirective"];
   if (!validKeys.includes(key as keyof UserPreferences)) {
     throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
   }

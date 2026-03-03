@@ -169,7 +169,7 @@ async function buildApiResponse(
   const requiredToken = getApiToken();
   if (requiredToken) {
     // Skip auth for static UI assets and health check
-    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display"];
+    const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work"];
     if (!publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
@@ -203,6 +203,10 @@ async function buildApiResponse(
 
   if (request.method === "GET" && request.url.pathname === "/api/status") {
     return jsonResponse(200, await app.getStatusSnapshot());
+  }
+
+  if (request.method === "GET" && request.url.pathname === "/api/daily-work") {
+    return jsonResponse(200, await app.getDailyWorkSnapshot());
   }
 
   if (request.method === "GET" && request.url.pathname === "/api/hud") {
