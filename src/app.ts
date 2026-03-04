@@ -871,6 +871,8 @@ export class LocalCrewApp {
   private readonly networkFailureTimes = new Map<string, number>();
   /** Cooldown period (ms) during which a network-failed resource gets a routing penalty. */
   private static readonly NETWORK_FAILURE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+  /** Date slug (YYYY-MM-DD) of the last successfully queued daily-work task, prevents re-queuing loop. */
+  private lastDailyWorkQueuedDate: string | null = null;
 
   private constructor(
     config: AppConfig,
@@ -1063,7 +1065,7 @@ export class LocalCrewApp {
       auto: {
         enabled: auto.enabled,
         pendingCount: auto.pending.length,
-        completedCount: auto.completed.length,
+        completedCount: auto.totalCompletedCount ?? auto.completed.length,
         failedCount: auto.completed.filter((task) => task.status === "failed").length,
         busy: this.autoCyclePromise !== null,
         nextTask: auto.pending[0]
@@ -1312,7 +1314,7 @@ export class LocalCrewApp {
         intervalMs: this.getAutoPulseIntervalMs(),
         defaultPriority: this.systemState.auto.defaultPriority,
         pendingCount: this.systemState.auto.pending.length,
-        completedCount: this.systemState.auto.completed.length,
+        completedCount: this.systemState.auto.totalCompletedCount ?? this.systemState.auto.completed.length,
         failedCount: this.systemState.auto.completed.filter((task) => task.status === "failed").length
       },
       nextTask: this.sortPendingTasks(this.systemState.auto.pending)[0],
@@ -3643,7 +3645,8 @@ export class LocalCrewApp {
       auto: {
         ...this.systemState.auto,
         pending: this.sortPendingTasks(options.remaining),
-        completed: [...this.systemState.auto.completed, failedTask].slice(-AUTO_COMPLETED_TASK_LIMIT)
+        completed: [...this.systemState.auto.completed, failedTask].slice(-AUTO_COMPLETED_TASK_LIMIT),
+        totalCompletedCount: (this.systemState.auto.totalCompletedCount ?? 0) + 1
       }
     };
     await this.persistSystemState();
@@ -5075,7 +5078,8 @@ export class LocalCrewApp {
         pending: remaining,
         completed: [...this.systemState.auto.completed, completedTask].slice(
           -AUTO_COMPLETED_TASK_LIMIT
-        )
+        ),
+        totalCompletedCount: (this.systemState.auto.totalCompletedCount ?? 0) + 1
       }
     };
 
@@ -5094,6 +5098,27 @@ export class LocalCrewApp {
     }
 
     await this.persistSystemState();
+
+    // Auto-save daily work result: when a daily-work task completes successfully
+    // and the model didn't emit a proper WRITE[internal][daily-work.md] block,
+    // save the result directly to daily-work.md to prevent re-queuing loop.
+    if (
+      completedTask.createdBy === "orchestrator:daily-work" &&
+      completedTask.status === "completed" &&
+      completedTask.result
+    ) {
+      const alreadyWrote = writeDetails.some(
+        (w) => w.path === "daily-work.md" || w.path.endsWith("/daily-work.md")
+      );
+      if (!alreadyWrote) {
+        try {
+          await saveDailyWork(completedTask.result, this.rootDir);
+        } catch {
+          // Non-fatal — the staleness dedup will still prevent loops.
+        }
+      }
+    }
+
     const queuedResult = verification.passed
       ? await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed", {
           parentTaskId: completedTask.id,
@@ -5204,19 +5229,24 @@ export class LocalCrewApp {
         if (this.systemState.auto.pending.length === 0 && dailyWorkEnabled) {
           const intervalMs = parseDailyWorkIntervalMs(this.config.preferences?.dailyWorkIntervalHours);
           const stale = await isDailyWorkStale(this.rootDir, intervalMs);
-          if (stale) {
-            const dateSlug = new Date().toISOString().slice(0, 10);
+          const dateSlug = new Date().toISOString().slice(0, 10);
+          if (stale && this.lastDailyWorkQueuedDate !== dateSlug) {
             const taskContent = buildDailyWorkTaskContent(dateSlug);
-            // Check if we already have a daily-work task queued to avoid duplicates.
+            // Check if we already have a daily-work task in pending or recently completed.
             const alreadyQueued = this.systemState.auto.pending.some(
               (t) => t.content.includes("Daily Work briefing")
             );
-            if (!alreadyQueued) {
+            const recentlyCompleted = this.systemState.auto.completed.some(
+              (t) => t.createdBy === "orchestrator:daily-work" && t.status === "completed"
+                && t.completedAt && t.completedAt.startsWith(dateSlug)
+            );
+            if (!alreadyQueued && !recentlyCompleted) {
               const queued = await this.queueParsedTasks(
                 [{ priority: "high", content: taskContent, requestedResource: undefined }],
                 "orchestrator:daily-work"
               );
               if (queued.tasks.length > 0) {
+                this.lastDailyWorkQueuedDate = dateSlug;
                 return {
                   lines: [
                     `Daily work document is stale — queued high-priority refresh task #${queued.tasks[0].id}.`,
