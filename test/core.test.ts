@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { getDefaultInstruction, loadConfig, saveConfig } from "../src/config.ts";
+import { pingResource } from "../src/resource-discovery.ts";
 import {
   buildAgentChatMessages,
   buildAutoTaskMessages,
@@ -378,6 +379,32 @@ describe("resource routing", () => {
     });
   });
 
+  test("offline health status scores zero", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const resources = Object.values(getResourceProfilesByTier(rootDir)).flat();
+      const resource = resources[0];
+      const telemetry: ResourceTelemetry = {
+        queueDepth: 0,
+        ramUsagePct: 0,
+        tokensPerSecond: 20,
+        activeModel: "llama3.1:8b",
+        avgQueueWaitMs: 100,
+        successRate: 1,
+        failureCount: 0
+      };
+      const task = classifyTask("Analyze the quarterly report.");
+      const normalScore = computeResourceScore(resource, telemetry, task);
+      const offlineScore = computeResourceScore(resource, telemetry, task, "offline");
+      const degradedScore = computeResourceScore(resource, telemetry, task, "degraded");
+      const onlineScore = computeResourceScore(resource, telemetry, task, "online");
+      expect(offlineScore).toBe(0);
+      expect(degradedScore).toBeLessThan(normalScore);
+      expect(degradedScore).toBeGreaterThan(0);
+      expect(onlineScore).toBe(normalScore);
+    });
+  });
+
   test("routes tasks to highest scored resource", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
@@ -703,7 +730,7 @@ describe("message assembly", () => {
     ).toEqual({
       role: "system",
       content:
-        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet. Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. Do not draft external application, API, UI, script, or source-code implementation work into the autonomous queue; those belong in outbox feature request tickets instead. Each task must be self-contained and explicit enough to execute without guessing. Reject placeholder verbs with no object or outcome. This draft will be critiqued by the standing secondary reviewer before any tasks are finalized. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Local Crew diagnostics. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
+        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet. Choose from a DIVERSE range of valuable work areas: routing quality, user-facing features, content generation, knowledge enrichment, system health, documentation, and user-benefit tasks. NEVER repeat or rephrase a task topic that was recently completed — always propose genuinely new work. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. Do not draft external application, API, UI, script, or source-code implementation work into the autonomous queue; those belong in outbox feature request tickets instead. Each task must be self-contained and explicit enough to execute without guessing. Reject placeholder verbs with no object or outcome. This draft will be critiqued by the standing secondary reviewer before any tasks are finalized. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Local Crew diagnostics. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
     });
 
     expect(
@@ -1220,5 +1247,49 @@ describe("network topology", () => {
 
       expect(selection.delegateToOrchestrator).toBeUndefined();
     });
+  });
+});
+
+describe("pingResource", () => {
+  test("returns online for a healthy endpoint", async () => {
+    const mockFetch = (() =>
+      Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") })) as unknown as typeof fetch;
+    const result = await pingResource("http://localhost:11434", "ollama", mockFetch);
+    expect(result.status).toBe("online");
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.checkedAt).toBeGreaterThan(0);
+  });
+
+  test("returns degraded for HTTP error responses", async () => {
+    const mockFetch = (() =>
+      Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve("") })) as unknown as typeof fetch;
+    const result = await pingResource("http://localhost:11434", "ollama", mockFetch);
+    expect(result.status).toBe("degraded");
+  });
+
+  test("returns offline on network error", async () => {
+    const mockFetch = (() =>
+      Promise.reject(new Error("fetch failed"))) as unknown as typeof fetch;
+    const result = await pingResource("http://localhost:11434", "ollama", mockFetch);
+    expect(result.status).toBe("offline");
+  });
+
+  test("returns offline on abort/timeout", async () => {
+    const mockFetch = (() =>
+      Promise.reject(new DOMException("The operation was aborted", "AbortError"))) as unknown as typeof fetch;
+    const result = await pingResource("http://localhost:11434", "ollama", mockFetch);
+    expect(result.status).toBe("offline");
+  });
+
+  test("uses correct URL for ollama vs openai style", async () => {
+    const urls: string[] = [];
+    const mockFetch = ((url: string) => {
+      urls.push(url);
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+    }) as unknown as typeof fetch;
+    await pingResource("http://localhost:11434", "ollama", mockFetch);
+    await pingResource("http://api.example.com", "openai", mockFetch);
+    expect(urls[0]).toBe("http://localhost:11434/api/tags");
+    expect(urls[1]).toBe("http://api.example.com/v1/models");
   });
 });

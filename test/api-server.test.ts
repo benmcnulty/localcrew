@@ -205,7 +205,7 @@ describe("API server", () => {
           body: JSON.stringify({
             alias: "studio",
             label: "LM Studio",
-            baseUrl: "http://192.168.1.50:1234",
+            baseUrl: "http://10.0.0.50:1234",
             apiStyle: "openai",
             apiKeyEnv: "OPENAI_API_KEY",
             deviceId: "studio-device-1",

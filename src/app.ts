@@ -72,7 +72,8 @@ import {
   buildTaskPreflightMessages
 } from "./messages.ts";
 import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
-import { probeResourceModels } from "./resource-discovery.ts";
+import { pingResource, probeResourceModels } from "./resource-discovery.ts";
+import type { ResourceHealthResult, ResourceHealthStatus } from "./resource-discovery.ts";
 import {
   addResource,
   chooseResourceForTask,
@@ -154,6 +155,14 @@ import {
 import { fetchBenLive } from "./benlive.ts";
 import { fetchWebsite } from "./website.ts";
 import { formatCurrentDateTime, isNetworkError, titleCase } from "./utils.ts";
+import {
+  parseScriptRequests,
+  staticAnalyze,
+  executeScript,
+  ScriptSessionTracker,
+  type ScriptRequest,
+  type ScriptExecutionResult,
+} from "./sandbox.ts";
 
 const AUTO_COMPACT_MESSAGE_LIMIT = 12;
 const AUTO_COMPLETED_TASK_LIMIT = 50;
@@ -390,6 +399,7 @@ function parseQueuedTasks(content: string): {
     filename: string;
     content: string;
   }>;
+  scriptRequests: ScriptRequest[];
 } {
   const replyLines: string[] = [];
   const queuedTasks: Array<{
@@ -405,18 +415,22 @@ function parseQueuedTasks(content: string): {
     content: string;
   }> = [];
 
+  // Extract SCRIPT_REQUEST blocks before other parsing
+  const scriptRequests = parseScriptRequests(content);
+  const scriptPattern =
+    /(?:^|\n)SCRIPT_REQUEST\[[a-z0-9-]+\]\n[\s\S]*?\nENDSCRIPT(?=\n|$)/gi;
+  let workingContent = content.replace(scriptPattern, "\n");
+
   const writePattern =
     /(?:^|\n)WRITE\[(active|outbox|internal)\]\[([^\]\n]+)\]\n([\s\S]*?)\nENDWRITE(?=\n|$)/gi;
-  let workingContent = content;
-  let writeMatch: RegExpExecArray | null;
-  while ((writeMatch = writePattern.exec(content)) !== null) {
+  for (const writeMatch of workingContent.matchAll(writePattern)) {
     fileWrites.push({
       stage: writeMatch[1].toLowerCase() as "active" | "outbox" | "internal",
       filename: writeMatch[2].trim(),
       content: writeMatch[3].trimEnd()
     });
-    workingContent = workingContent.replace(writeMatch[0], "\n");
   }
+  workingContent = workingContent.replace(writePattern, "\n");
 
   for (const line of workingContent.split("\n")) {
     const match = line
@@ -446,7 +460,8 @@ function parseQueuedTasks(content: string): {
   return {
     replyText: replyLines.join("\n").trim(),
     queuedTasks,
-    fileWrites
+    fileWrites,
+    scriptRequests,
   };
 }
 
@@ -759,6 +774,69 @@ function isLowInformationAutonomousTask(content: string): boolean {
   return words.length <= 2;
 }
 
+/**
+ * Extract significant keywords from a task string for overlap comparison.
+ * Strips common low-information words so we match on substantive topics.
+ */
+function extractTaskKeywords(content: string): Set<string> {
+  const stopWords = new Set([
+    "the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "is", "are", "was",
+    "with", "by", "from", "at", "that", "this", "it", "be", "as", "has", "have", "had",
+    "not", "but", "if", "its", "all", "into", "our", "their", "can", "will", "do", "does",
+    "more", "most", "each", "every", "any", "no", "been", "would", "should", "could",
+    "than", "also", "only", "how", "what", "when", "where", "which", "who", "that",
+    "review", "update", "improve", "enhance", "optimize", "implement", "add", "create",
+    "ensure", "check", "verify", "analyze", "generate", "build", "make", "use",
+    "system", "current", "existing", "new", "based", "local", "crew",
+  ]);
+  const words = content.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  return new Set(words.filter((w) => w.length > 2 && !stopWords.has(w)));
+}
+
+/**
+ * Check if a proposed task is too similar to an existing one based on keyword overlap.
+ * Returns true if >= 60% of the proposed task's keywords match an existing task.
+ */
+function isTaskDuplicate(
+  proposed: string,
+  existingTasks: ReadonlyArray<{ content: string }>
+): boolean {
+  const proposedKeywords = extractTaskKeywords(proposed);
+  if (proposedKeywords.size === 0) return false;
+
+  for (const existing of existingTasks) {
+    const existingKeywords = extractTaskKeywords(existing.content);
+    if (existingKeywords.size === 0) continue;
+    let overlap = 0;
+    for (const word of proposedKeywords) {
+      if (existingKeywords.has(word)) overlap++;
+    }
+    const overlapRatio = overlap / proposedKeywords.size;
+    if (overlapRatio >= 0.6) return true;
+  }
+  return false;
+}
+
+/** Rotating pool of diverse fallback tasks when the model fails to produce parseable output. */
+const FALLBACK_TASK_POOL: Array<{ priority: "medium" | "low"; content: string }> = [
+  { priority: "medium", content: "Compile a concise briefing on recent industry AI engineering developments relevant to local inference." },
+  { priority: "low", content: "Audit memory and index files for stale or redundant context that can be pruned." },
+  { priority: "medium", content: "Review the orchestrator changelog and summarize the three most impactful recent improvements." },
+  { priority: "low", content: "Draft a short status report on network resource utilization patterns from recent telemetry." },
+  { priority: "medium", content: "Research one actionable optimization for the current hardware configuration using web search." },
+  { priority: "low", content: "Organize the focus todo list by removing completed or obsolete items." },
+  { priority: "medium", content: "Generate a user-facing daily briefing with weather, news highlights, and system status." },
+  { priority: "low", content: "Search Wikipedia for a topic related to the user profile interests and write a brief summary." },
+];
+let fallbackRotation = 0;
+
+function pickFallbackTasks(): Array<{ priority: "medium" | "low"; content: string }> {
+  const pick1 = FALLBACK_TASK_POOL[fallbackRotation % FALLBACK_TASK_POOL.length];
+  const pick2 = FALLBACK_TASK_POOL[(fallbackRotation + 1) % FALLBACK_TASK_POOL.length];
+  fallbackRotation = (fallbackRotation + 2) % FALLBACK_TASK_POOL.length;
+  return [pick1, pick2];
+}
+
 function summarizeRecentAutoTasks(
   completed: AutoQueueTask[],
   limit = 100
@@ -873,6 +951,14 @@ export class LocalCrewApp {
   private static readonly NETWORK_FAILURE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
   /** Date slug (YYYY-MM-DD) of the last successfully queued daily-work task, prevents re-queuing loop. */
   private lastDailyWorkQueuedDate: string | null = null;
+  /** Background health status per resource alias. */
+  private readonly resourceHealth = new Map<string, ResourceHealthResult>();
+  /** Timestamp of last health poll cycle. */
+  private lastHealthPollAt = 0;
+  /** Interval between background health polls (5 minutes). */
+  private static readonly HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
+  /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
+  private readonly scriptTracker = new ScriptSessionTracker();
 
   private constructor(
     config: AppConfig,
@@ -999,6 +1085,64 @@ export class LocalCrewApp {
     return penalties;
   }
 
+  /**
+   * Ping all registered resources in parallel to update their health status.
+   * Called from runIdleCycle on a 5-minute interval during auto mode.
+   */
+  async runHealthPoll(): Promise<void> {
+    const resources = listResources(this.rootDir);
+    if (resources.length === 0) return;
+
+    const results = await Promise.allSettled(
+      resources.map(async (resource) => {
+        const result = await pingResource(
+          resource.baseUrl,
+          resource.apiStyle ?? "ollama",
+          this.fetchFn,
+          resource.apiKeyEnv
+        );
+        this.resourceHealth.set(resource.alias, result);
+        // If a previously-offline resource is back, clear network failure cooldown
+        if (result.status === "online") {
+          this.networkFailureTimes.delete(resource.alias);
+        }
+        return { alias: resource.alias, ...result };
+      })
+    );
+
+    // Push updated health state to GUI
+    this.pushDisplayState();
+
+    const statusCounts = { online: 0, degraded: 0, offline: 0 };
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        statusCounts[r.value.status]++;
+      }
+    }
+    this.lastHealthPollAt = Date.now();
+    this.warn(
+      `Health poll: ${statusCounts.online} online, ${statusCounts.degraded} degraded, ${statusCounts.offline} offline`
+    );
+  }
+
+  /**
+   * Get the health status of a resource by alias. Returns undefined if never polled.
+   */
+  getResourceHealth(alias: string): ResourceHealthResult | undefined {
+    return this.resourceHealth.get(alias);
+  }
+
+  /**
+   * Get health status for all resources as a plain object.
+   */
+  getResourceHealthMap(): Record<string, { status: ResourceHealthStatus; latencyMs: number; checkedAt: number }> {
+    const result: Record<string, { status: ResourceHealthStatus; latencyMs: number; checkedAt: number }> = {};
+    for (const [alias, health] of this.resourceHealth) {
+      result[alias] = { status: health.status, latencyMs: health.latencyMs, checkedAt: health.checkedAt };
+    }
+    return result;
+  }
+
   private getSystemTps(): number {
     let total = 0;
     for (const telemetry of this.resourceTelemetry.values()) {
@@ -1007,22 +1151,38 @@ export class LocalCrewApp {
     return Math.round(total);
   }
 
+  /**
+   * Get a deduped list of recent completed task content strings (last 20)
+   * for injecting into queue fill prompts to prevent repetition.
+   */
+  private getRecentCompletedTopics(): string[] {
+    const completed = this.systemState.auto.completed;
+    const recent = completed.slice(-20);
+    return recent
+      .filter((task) => task.status === "completed" && task.content)
+      .map((task) => task.content.slice(0, 120));
+  }
+
   private getActiveResourceSummaries(): Array<{
     alias: string;
     activeModel: string | null;
     tokensPerSecond: number;
     queueDepth: number;
     successRate: number;
+    health?: ResourceHealthStatus;
+    healthLatencyMs?: number;
   }> {
     const aliases = listResources(this.rootDir).map((resource) => resource.alias);
     return aliases.map((alias) => {
       const telemetry = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
+      const health = this.resourceHealth.get(alias);
       return {
         alias,
         activeModel: telemetry.activeModel,
         tokensPerSecond: Math.round(telemetry.tokensPerSecond),
         queueDepth: telemetry.queueDepth,
-        successRate: Number(telemetry.successRate.toFixed(2))
+        successRate: Number(telemetry.successRate.toFixed(2)),
+        ...(health ? { health: health.status, healthLatencyMs: health.latencyMs } : {})
       };
     });
   }
@@ -1082,6 +1242,7 @@ export class LocalCrewApp {
       systemTps: this.getSystemTps(),
       modelProfile: getModelProfile(),
       activeResources: this.getActiveResourceSummaries(),
+      resourceHealth: this.getResourceHealthMap(),
       preferences: prefs ?? {}
     });
   }
@@ -1294,6 +1455,7 @@ export class LocalCrewApp {
     systemTps: number;
     modelProfile: ReturnType<typeof getModelProfile>;
     activeResources: ReturnType<LocalCrewApp["getActiveResourceSummaries"]>;
+    resourceHealth: ReturnType<LocalCrewApp["getResourceHealthMap"]>;
   }> {
     const [agents, docs, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
@@ -1328,7 +1490,8 @@ export class LocalCrewApp {
       resourceTelemetry: Object.fromEntries(this.resourceTelemetry),
       systemTps: this.getSystemTps(),
       modelProfile: getModelProfile(),
-      activeResources: this.getActiveResourceSummaries()
+      activeResources: this.getActiveResourceSummaries(),
+      resourceHealth: this.getResourceHealthMap()
     };
   }
 
@@ -3996,12 +4159,28 @@ export class LocalCrewApp {
     const addedTasks: AutoQueueTask[] = [];
     const notes: string[] = [];
 
+    // Build dedup comparison pool: pending tasks + last 20 completed tasks
+    const dedupPool: Array<{ content: string }> = [
+      ...this.systemState.auto.pending,
+      ...this.systemState.auto.completed.slice(-20),
+    ];
+
     for (const task of queuedTasks) {
       if (!task.content.trim()) {
         continue;
       }
 
       const normalizedTask = this.normalizeQueuedTaskRouting(task);
+
+      // Structural dedup: reject tasks too similar to recent work
+      if (
+        this.isAutonomousTaskSource(createdBy) &&
+        isTaskDuplicate(normalizedTask.content, dedupPool)
+      ) {
+        notes.push(`Skipped duplicate task: ${normalizedTask.content.slice(0, 80)}`);
+        continue;
+      }
+
       if (this.shouldConvertAutonomousTaskToFeatureRequest(normalizedTask.content, createdBy)) {
         const ticketPath = await this.writeFeatureRequestTicket({
           title: normalizedTask.content,
@@ -4197,6 +4376,139 @@ export class LocalCrewApp {
       lines: writtenLines,
       writes
     };
+  }
+
+  /**
+   * Process SCRIPT_REQUEST blocks from auto task or agent output.
+   * Performs static analysis, logs audit events, and executes approved scripts.
+   */
+  private async handleScriptRequests(
+    scriptRequests: ScriptRequest[],
+    options: { createdBy?: string; taskId?: number } = {}
+  ): Promise<{ lines: string[]; results: ScriptExecutionResult[] }> {
+    const lines: string[] = [];
+    const results: ScriptExecutionResult[] = [];
+
+    for (const request of scriptRequests) {
+      request.requestedBy = options.createdBy ?? "orchestrator";
+
+      // Check session-level blocking
+      if (this.scriptTracker.isBlocked(request.purposeSlug)) {
+        lines.push(
+          `Script [${request.purposeSlug}] blocked — exceeded ${this.scriptTracker.maxRejectionsPerSlug} rejections this session.`
+        );
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "script.blocked",
+            summary: `Script ${request.purposeSlug} blocked for session after repeated rejections.`,
+            success: false,
+            actor: request.requestedBy,
+            target: request.purposeSlug,
+          },
+          this.rootDir
+        );
+        continue;
+      }
+
+      // Log proposal
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "script.proposed",
+          summary: `Script proposed: ${request.purposeSlug} (${request.language}) — ${request.purpose}`,
+          success: true,
+          actor: request.requestedBy,
+          target: request.purposeSlug,
+          metadata: { language: request.language, purpose: request.purpose },
+        },
+        this.rootDir
+      );
+
+      // Static analysis
+      const review = staticAnalyze(request);
+
+      if (review.verdict === "rejected") {
+        this.scriptTracker.recordRejection(request.purposeSlug);
+        lines.push(
+          `Script [${request.purposeSlug}] rejected: ${review.reason}`,
+          ...review.violations.map((v) => `  - ${v}`)
+        );
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "script.rejected",
+            summary: `Script ${request.purposeSlug} rejected: ${review.reason}`,
+            success: false,
+            actor: "orchestrator",
+            target: request.purposeSlug,
+            metadata: { violations: review.violations },
+          },
+          this.rootDir
+        );
+        continue;
+      }
+
+      // Execute approved script
+      lines.push(`Script [${request.purposeSlug}] approved — executing ${request.language} sandbox...`);
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "script.approved",
+          summary: `Script ${request.purposeSlug} approved for execution.`,
+          success: true,
+          actor: "orchestrator",
+          target: request.purposeSlug,
+        },
+        this.rootDir
+      );
+
+      const result = await executeScript(request, this.rootDir);
+      results.push(result);
+
+      if (result.success) {
+        const outputPreview = result.stdout.length > 500
+          ? result.stdout.slice(0, 500) + "..."
+          : result.stdout;
+        lines.push(
+          `Script [${request.purposeSlug}] completed (${result.durationMs}ms):`,
+          outputPreview || "(no output)"
+        );
+      } else {
+        lines.push(
+          `Script [${request.purposeSlug}] failed (exit ${result.exitCode}${result.timedOut ? ", timed out" : ""}):`,
+          result.stderr || "(no error output)"
+        );
+      }
+
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: result.success ? "script.executed" : "script.failed",
+          summary: result.success
+            ? `Script ${request.purposeSlug} executed successfully (${result.durationMs}ms).`
+            : `Script ${request.purposeSlug} failed: ${result.stderr.slice(0, 200)}`,
+          success: result.success,
+          actor: "orchestrator",
+          target: request.purposeSlug,
+          metadata: {
+            durationMs: result.durationMs,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            stdoutLength: result.stdout.length,
+            stderrLength: result.stderr.length,
+          },
+        },
+        this.rootDir
+      );
+    }
+
+    return { lines, results };
   }
 
   private async getAutoTaskExtraContext(task: AutoQueueTask): Promise<string[]> {
@@ -4471,6 +4783,18 @@ export class LocalCrewApp {
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
+    // Process any script requests from the agent
+    let scriptLines: string[] = [];
+    if (parsed.scriptRequests.length > 0) {
+      try {
+        const scriptResult = await this.handleScriptRequests(parsed.scriptRequests, {
+          createdBy: `agent:${agent.slug}`,
+        });
+        scriptLines = scriptResult.lines;
+      } catch (error) {
+        postProcessErrors.push(`Script execution warning: ${(error as Error).message}`);
+      }
+    }
     await appendChangelogEntry(
       `Agent @${agent.slug} replied via ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
@@ -4480,6 +4804,7 @@ export class LocalCrewApp {
       lines: [
         `@${agent.slug}: ${replyText}`,
         ...writtenFiles,
+        ...scriptLines,
         ...queuedResult.notes,
         ...queued.map(
           (task) =>
@@ -4519,7 +4844,8 @@ export class LocalCrewApp {
       orchestratorName: this.getOrchestratorName(),
       agents: agents.map((agent) => `@${agent.slug}`),
       resourceRoster,
-      currentDateTime: fillDateTime
+      currentDateTime: fillDateTime,
+      recentCompletedTopics: this.getRecentCompletedTopics()
     });
 
     let draftReply: string;
@@ -4716,16 +5042,7 @@ export class LocalCrewApp {
     const tasks =
       parsedTasks.length > 0
         ? parsedTasks
-        : [
-            {
-              priority: "medium" as const,
-              content: "Review orchestrator guidance and tighten how resources are selected for queued tasks."
-            },
-            {
-              priority: "low" as const,
-              content: "Audit memory and index files for stale or redundant context."
-            }
-          ];
+        : pickFallbackTasks();
 
     const queuedResult = await this.queueParsedTasks(tasks, "orchestrator:auto-fill");
     if (queuedResult.tasks.length > 0 || queuedResult.notes.length > 0) {
@@ -5046,6 +5363,19 @@ export class LocalCrewApp {
     } catch (error) {
       postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
     }
+    // Process any script requests from the auto task
+    let scriptLines: string[] = [];
+    if (parsed.scriptRequests.length > 0) {
+      try {
+        const scriptResult = await this.handleScriptRequests(parsed.scriptRequests, {
+          createdBy: task.createdBy,
+          taskId: task.id,
+        });
+        scriptLines = scriptResult.lines;
+      } catch (error) {
+        postProcessErrors.push(`Script execution warning: ${(error as Error).message}`);
+      }
+    }
     const verifiedWriteCount = writtenFiles.length;
     const verification = verifyTaskOutput({
       task,
@@ -5193,6 +5523,7 @@ export class LocalCrewApp {
         ...(verification.passed ? [] : [`Verification: ${verification.reason}`]),
         ...(routingFallbackWarning ? [routingFallbackWarning] : []),
         ...writtenFiles,
+        ...scriptLines,
         ...queuedResult.notes,
         ...(movedSourceLine ? [movedSourceLine] : []),
         ...queued.map(
@@ -5215,6 +5546,15 @@ export class LocalCrewApp {
         errors: [],
         shouldExit: false
       };
+    }
+
+    // Background health poll — check resource liveness on a 5-minute timer.
+    if (Date.now() - this.lastHealthPollAt >= LocalCrewApp.HEALTH_POLL_INTERVAL_MS) {
+      try {
+        await this.runHealthPoll();
+      } catch {
+        // Health poll is best-effort, never block task processing.
+      }
     }
 
     try {

@@ -738,8 +738,12 @@ function capabilityMatchScore(resource: ResourceProfile, task: TaskMetadata): nu
 export function computeResourceScore(
   resource: ResourceProfile,
   telemetry: ResourceTelemetry,
-  task: TaskMetadata
+  task: TaskMetadata,
+  healthStatus?: "online" | "offline" | "degraded"
 ): number {
+  // Offline resources score zero — never route work to a dead endpoint.
+  if (healthStatus === "offline") return 0;
+
   const availability = clamp01(1 - telemetry.queueDepth / MAX_QUEUE_DEPTH);
   const memoryHeadroom = clamp01(1 - telemetry.ramUsagePct / 100);
   const capabilityMatch = capabilityMatchScore(resource, task);
@@ -749,19 +753,24 @@ export function computeResourceScore(
     ? clamp01(telemetry.tokensPerSecond / 50)
     : 0.5;
 
-  return (
+  let score =
     SCORE_WEIGHTS.availability * availability +
     SCORE_WEIGHTS.memoryHeadroom * memoryHeadroom +
     SCORE_WEIGHTS.capabilityMatch * capabilityMatch +
     SCORE_WEIGHTS.reliability * reliability +
-    SCORE_WEIGHTS.throughput * throughput
-  );
+    SCORE_WEIGHTS.throughput * throughput;
+
+  // Degraded resources get a 50% penalty — prefer healthy alternatives.
+  if (healthStatus === "degraded") score *= 0.5;
+
+  return score;
 }
 
 export function routeTask(
   task: TaskMetadata,
   resources: ResourceProfile[],
-  telemetry: Record<string, ResourceTelemetry>
+  telemetry: Record<string, ResourceTelemetry>,
+  healthStatuses?: Record<string, "online" | "offline" | "degraded">
 ): { resource: ResourceProfile; score: number; rationale: string } {
   if (resources.length === 0) {
     throw new Error("No resources are configured.");
@@ -777,7 +786,7 @@ export function routeTask(
       successRate: 1,
       failureCount: 0
     };
-    const score = computeResourceScore(resource, metrics, task);
+    const score = computeResourceScore(resource, metrics, task, healthStatuses?.[resource.alias]);
     return { resource, score };
   });
 

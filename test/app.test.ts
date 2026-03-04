@@ -776,7 +776,7 @@ describe("LocalCrewApp", () => {
       const first = await app.syncResourceReport({
         alias: "studio-a",
         label: "Studio A",
-        baseUrl: "http://192.168.1.50:1234",
+        baseUrl: "http://10.0.0.50:1234",
         apiStyle: "openai",
         deviceId: "machine-1",
         hostName: "workstation",
@@ -787,7 +787,7 @@ describe("LocalCrewApp", () => {
       const second = await app.syncResourceReport({
         alias: "studio-b",
         label: "Studio B",
-        baseUrl: "http://192.168.1.50:1234",
+        baseUrl: "http://10.0.0.50:1234",
         apiStyle: "openai",
         deviceId: "machine-1",
         hostName: "workstation",

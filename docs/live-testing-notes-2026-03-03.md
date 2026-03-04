@@ -99,11 +99,11 @@ lsof -t -i :4310 | xargs kill
 
 ## Setup Session Log
 
-- **Orchestrator device:** Bens-MacBook-Air.local (192.168.1.223), macOS, 10 CPU threads, 32 GB RAM
+- **Orchestrator device:** orchestrator-host.local (<orchestrator-ip>), macOS, 10 CPU threads, 32 GB RAM
 - **Orchestrator name:** Cap
-- **First agent:** @zora / Vic (192.168.1.175, top tier), synced successfully on second attempt after port conflict resolved
-- **Second agent:** @mac-hsd1-fl-comcast-net / Min (192.168.1.190, mid tier), model: granite4:3b
-- **Third agent:** @desktop-m01slkb / Pav (192.168.1.108, mid tier), model: llama3.2:latest
+- **First agent:** @zora / Vic (<agent-1-ip>, top tier), synced successfully on second attempt after port conflict resolved
+- **Second agent:** @min / Min (<agent-2-ip>, mid tier), model: granite4:3b
+- **Third agent:** @pav / Pav (<agent-3-ip>, mid tier), model: llama3.2:latest
 - **Total resources online:** 4 (1 top orchestrator, 1 top agent, 2 mid agents)
 
 ## Marathon Session — 2026-03-03 overnight
@@ -119,4 +119,4 @@ lsof -t -i :4310 | xargs kill
 - After killing stale process and restarting, agent synced successfully
 - All agent devices required manual `ollama serve` in a separate terminal before setup-agent would succeed (issue #3)
 - Network test script added at `scripts/network-test.js` for future port/connectivity diagnosis
-- The portal team's Firebase emulator is running at `http://192.168.1.223:5003` with crew API endpoints ready for integration testing
+- The portal team's Firebase emulator is running at `http://<orchestrator-ip>:5003` with crew API endpoints ready for integration testing
