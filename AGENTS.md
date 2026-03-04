@@ -51,6 +51,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
 | `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion, status bar |
 | `daily-work.ts` | Daily Work briefing document: staleness detection, load/save, API snapshot |
+| `sandbox.ts` | Sandboxed Python/JS script execution: static analysis, deny-lists, resource limits |
 
 Storage layout: `external-memory/` is committed seed data; `.localcrew/` is ignored local runtime state. Never commit `.localcrew/`, `.env`, or `.env.local`.
 
@@ -100,6 +101,7 @@ Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Ever
 - `loadSeedFile()` validates the resolved path stays within the external-memory directory
 - Agents receive only their own spec and memory in prompts — not the full orchestrator state
 - Autonomous writes are redirected away from external dropbox by `shouldPreferInternalWrite()`
+- Sandboxed script execution (`sandbox.ts`) enforces static analysis deny-lists (forbidden imports, builtins, globals), CPU time limits (30s), memory limits (512MB), output caps (64KB), and temp-file cleanup. Scripts run as child processes with no network access. Session tracking blocks agents after repeated rejections.
 
 ## File Access Layers
 
@@ -113,6 +115,7 @@ Autonomous agents interact with the file system through a layered architecture w
 | Dropbox workflow | `dropbox.ts` | inbox → active → outbox file lifecycle | Yes — `ensureSafeRelativePath()` |
 | Autonomous writes | `app.ts` | WRITE[internal], WRITE[active], WRITE[outbox] blocks | Yes — `ensureSafeGeneratedRelativePath()` |
 | API explore | `api-server.ts` | `/api/explore/tree`, `/api/explore/file`, `/api/explore/search` | Yes — delegates to `readInternalFile()` / `searchInternalFiles()` |
+| Script execution | `sandbox.ts` | Run agent-authored Python/JS in isolated child processes | Yes — static analysis, resource limits, temp cleanup |
 
 ### Search Capability
 

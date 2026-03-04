@@ -69,6 +69,7 @@ Key local state files:
 |---|---|
 | `commands.ts` | Parse slash-command input → typed `Command` union |
 | `types.ts` | All shared TypeScript types |
+| `utils.ts` | Pure helper functions, no I/O |
 | `config.ts` | Load/save participant config from `.localcrew/config.json` |
 | `resources.ts` | Resource CRUD, tier-based routing, capacity summary, network topology |
 | `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
@@ -78,11 +79,26 @@ Key local state files:
 | `api-server.ts` | Fork `api-worker.js` as a child process; proxy HTTP ↔ IPC |
 | `telemetry.ts` | Append audit events, index into telemetry summary |
 | `dropbox.ts` | inbox → active → outbox file workflow |
+| `env.ts` | Environment variable loading from `.env` / `.env.local` |
 | `wikipedia.ts` | Constrained Wikipedia search + chunking for grounding |
+| `reddit.ts` | Reddit search tool |
+| `web-search.ts` | DuckDuckGo web search (topic-gated) |
+| `page-fetcher.ts` | HTML fetch, strip, and chunking shared by web tools |
+| `weather.ts` | Open-Meteo weather forecast tool |
+| `benlive.ts` | Ben Live content tool via llms.txt discovery |
+| `website.ts` | Personal website content tool |
 | `compact.ts` | Conversation compaction (summarize old messages) |
 | `storage.ts` | Low-level file read/write helpers for `.localcrew/` |
 | `session-store.ts` | Load/save shared conversation transcript |
+| `orchestrator-identity.ts` | Orchestrator name/alias from config + env |
+| `external-memory.ts` | Read committed seed documents from `external-memory/` |
+| `internal-files.ts` | Read + search internal orchestrator memory files |
+| `speech.ts` | macOS `say` voice playback |
+| `voices.ts` | Voice preset definitions and defaults |
 | `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
+| `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion |
+| `daily-work.ts` | Daily Work briefing document: staleness, load/save, API |
+| `sandbox.ts` | Sandboxed Python/JS script execution with static analysis |
 
 ### API Server Architecture
 
@@ -97,5 +113,5 @@ In `/auto`, the orchestrator processes queued tasks by tier-routing to resources
 - TypeScript with ESM imports using explicit `.ts` suffixes (`import { foo } from "./bar.ts"`)
 - `"module": "NodeNext"`, `"moduleResolution": "NodeNext"`, strict mode
 - 2-space indent, double quotes, semicolons
-- Tests use `bun:test` (`import { describe, it, expect } from "bun:test"`)
+- Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`)
 - Test files: `test/*.test.ts`, isolated with temp directories — never write to real `.localcrew/`

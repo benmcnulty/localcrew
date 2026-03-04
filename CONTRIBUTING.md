@@ -137,11 +137,14 @@ Open a GitHub issue with:
 | `src/app.ts` | Core orchestration class — mode state, chat dispatch, tool resolution |
 | `src/commands.ts` | Parse slash-command input → typed `Command` union |
 | `src/types.ts` | All shared TypeScript types and interfaces |
+| `src/utils.ts` | Pure helper functions, no I/O |
 | `src/config.ts` | Load/save participant config and user preferences |
 | `src/resources.ts` | Resource CRUD, tier routing, capacity summary |
 | `src/messages.ts` | Build prompt message arrays for all chat/auto/agent contexts |
 | `src/ollama.ts` | HTTP calls to inference endpoints (ollama, openai, anthropic) |
+| `src/resource-discovery.ts` | Probe resource endpoints for available models |
 | `src/telemetry.ts` | Append audit events, index into telemetry summary |
+| `src/env.ts` | Environment variable loading from `.env` / `.env.local` |
 | `src/wikipedia.ts` | Wikipedia search + chunking |
 | `src/reddit.ts` | Reddit search (technical subreddit allowlist) |
 | `src/page-fetcher.ts` | Shared HTML-to-text stripping and chunking utility |
@@ -150,11 +153,19 @@ Open a GitHub issue with:
 | `src/benlive.ts` | benlive.tv content fetcher with llms.txt discovery |
 | `src/website.ts` | Configurable personal website content fetcher |
 | `src/orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
+| `src/orchestrator-identity.ts` | Orchestrator name/alias from config + env |
 | `src/dropbox.ts` | inbox → active → outbox file workflow |
 | `src/api-server.ts` | Fork `api-worker.js` as child process; proxy HTTP ↔ IPC |
 | `src/gui.ts` | Inline browser dashboard HTML/CSS/JS (served via API) |
+| `src/terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion |
 | `src/storage.ts` | Low-level file read/write helpers for `.localcrew/` |
 | `src/session-store.ts` | Load/save shared conversation transcript |
 | `src/compact.ts` | Conversation compaction (summarize old messages) |
+| `src/external-memory.ts` | Read committed seed documents from `external-memory/` |
+| `src/internal-files.ts` | Read + search internal orchestrator memory files |
+| `src/speech.ts` | macOS `say` voice playback |
+| `src/voices.ts` | Voice preset definitions and defaults |
+| `src/daily-work.ts` | Daily Work briefing document: staleness, load/save, API |
+| `src/sandbox.ts` | Sandboxed Python/JS script execution with static analysis |
 
 See [CLAUDE.md](./CLAUDE.md) and [docs/architecture.md](./docs/architecture.md) for a deeper architectural overview.
