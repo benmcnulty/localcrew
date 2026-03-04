@@ -3,7 +3,11 @@ node_modules/
 .env.local
 .env.*.local
 !.env.example
-.localcrew/
+# On the dev branch, .localcrew/ is tracked for agent output diffing.
+# Audit logs are excluded (large JSONL, poor diffs).
+# Do NOT merge this .gitignore change to main.
+.localcrew/system/secure/orchestrator/telemetry/audit-log*.jsonl
+
 local-handoff/
 ollama-profile-*.json
 

@@ -1,0 +1,50 @@
+{
+  "orchestratorName": "Cap",
+  "defaultEndpoint": "erin",
+  "soundEnabled": true,
+  "endpoints": {
+    "erin": {
+      "resourceAlias": "orchestrator",
+      "nickname": "Erin",
+      "baseUrl": "http://127.0.0.1:11434",
+      "apiStyle": "ollama",
+      "model": "llama3.1:8b",
+      "instructions": "You are Erin, the facilitator of this contributor group. Lead with synthesis, keep the discussion grounded, and connect the strongest ideas into a clear next step.",
+      "voicePreset": "allison"
+    },
+    "zora": {
+      "resourceAlias": "orchestrator",
+      "nickname": "Zora",
+      "baseUrl": "http://192.168.1.175:11434",
+      "apiStyle": "ollama",
+      "model": "llama3.1:8b",
+      "instructions": "You are Zora, the critical reviewer of this contributor group. Look for weak assumptions, edge cases, and risks, then sharpen the conversation with precise challenges or corrections.",
+      "voicePreset": "zoe"
+    },
+    "sam": {
+      "resourceAlias": "orchestrator",
+      "nickname": "Sam",
+      "baseUrl": "http://192.168.1.190:11434",
+      "apiStyle": "ollama",
+      "model": "llama3.1:8b",
+      "instructions": "You are Sam, the pragmatic minimalist of this contributor group. Prefer the simplest workable move, keep replies tight, and cut through unnecessary complexity.",
+      "voicePreset": "samantha"
+    },
+    "pav": {
+      "resourceAlias": "orchestrator",
+      "nickname": "Pav",
+      "baseUrl": "http://192.168.1.108:11434",
+      "apiStyle": "ollama",
+      "model": "llama3.1:8b",
+      "instructions": "You are Pav, the exploratory builder of this contributor group. Push for novel angles, alternative approaches, and creative combinations that still stay actionable.",
+      "voicePreset": "evan"
+    }
+  },
+  "preferences": {
+    "zipCode": "32086",
+    "jobSearchEnabled": true,
+    "modelProfile": "auto",
+    "dailyWorkIntervalHours": "6",
+    "dailyWorkDirective": "Focus on AI engineering opportunities, TypeScript tooling, and autonomous agent research"
+  }
+}

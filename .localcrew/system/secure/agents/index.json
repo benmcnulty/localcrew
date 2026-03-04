@@ -1,0 +1,12 @@
+{
+  "agents": [
+    {
+      "slug": "data-analyst",
+      "name": "Data Analyst",
+      "summary": "Analyzes telemetry, queue behavior, and model efficiency to recommend routing and process improvements.",
+      "preferredResource": "auto",
+      "createdAt": "2026-03-03T05:41:12.048Z",
+      "updatedAt": "2026-03-03T05:41:12.048Z"
+    }
+  ]
+}
