@@ -862,8 +862,47 @@ function startOllamaServe(rootDir) {
   child.on("close", () => {
     logStream.end();
   });
+  child.on("error", (err) => {
+    try { logStream.write(`${prefix} Process error: ${err.message}\n`); } catch { /* ignored */ }
+    logStream.end();
+  });
 
   return child;
+}
+
+/** Tracks the active Ollama child so signal handlers can clean up. */
+let _activeOllamaChild = null;
+let _activeGateway = null;
+let _shuttingDown = false;
+
+function installGracefulShutdown(rootDir) {
+  const cleanup = async (signal) => {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
+    console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+    try {
+      if (_activeOllamaChild && _activeOllamaChild.exitCode === null) {
+        console.log("Stopping managed Ollama process...");
+        _activeOllamaChild.kill("SIGTERM");
+        // Give it 3 seconds, then force-kill
+        await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            try { _activeOllamaChild.kill("SIGKILL"); } catch { /* already dead */ }
+            resolve();
+          }, 3000);
+          _activeOllamaChild.on("close", () => { clearTimeout(timer); resolve(); });
+        });
+      }
+      if (_activeGateway?.httpServer) {
+        _activeGateway.httpServer.close();
+      }
+      await logMonitorLine(rootDir, `Agent monitor stopped (${signal}).`);
+    } catch { /* best effort */ }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => cleanup("SIGINT"));
+  process.on("SIGTERM", () => cleanup("SIGTERM"));
 }
 
 async function runAgentMonitor(context) {
@@ -886,6 +925,10 @@ async function runAgentMonitor(context) {
   let previousHealthy = false;
   let lastModelDiscoveryAt = 0;
   let cachedDiscoveredModels;
+  let ollamaRestartCount = 0;
+  let lastOllamaRestartAt = 0;
+  const maxOllamaRestarts = 5;
+  const ollamaBackoffResetMs = 10 * 60 * 1000; // 10 min without crash resets counter
   const healthCheckIntervalMs = apiStyle === "ollama" ? 30000 : 45000;
   const modelDiscoveryIntervalMs = apiStyle === "ollama" ? 5 * 60 * 1000 : 3 * 60 * 1000;
   const monitorLoopIntervalMs = 15000;
@@ -898,6 +941,8 @@ async function runAgentMonitor(context) {
     allowedHost,
     gatewayPort
   });
+  _activeGateway = gateway;
+  installGracefulShutdown(rootDir);
 
   await logMonitorLine(
     rootDir,
@@ -928,17 +973,30 @@ async function runAgentMonitor(context) {
     };
 
     if (!healthy && apiStyle === "ollama" && !localServerProcess) {
-      try {
-        await logMonitorLine(rootDir, `Local Ollama is not responding at ${localEndpoint}; starting \`ollama serve\`.`);
-        localServerProcess = startOllamaServe(rootDir);
-      } catch (error) {
-        await logMonitorLine(rootDir, `Failed to start local Ollama: ${error.message}`);
+      // Exponential backoff: stop restarting after maxOllamaRestarts rapid failures
+      const timeSinceLastRestart = now - lastOllamaRestartAt;
+      if (timeSinceLastRestart > ollamaBackoffResetMs) {
+        ollamaRestartCount = 0; // reset if stable for 10 min
+      }
+      if (ollamaRestartCount >= maxOllamaRestarts) {
+        await logMonitorLine(rootDir, `Ollama crashed ${ollamaRestartCount} times in a row. Backing off — manual restart required.`);
+      } else {
+        try {
+          await logMonitorLine(rootDir, `Local Ollama is not responding at ${localEndpoint}; starting \`ollama serve\` (attempt ${ollamaRestartCount + 1}/${maxOllamaRestarts}).`);
+          localServerProcess = startOllamaServe(rootDir);
+          _activeOllamaChild = localServerProcess;
+          ollamaRestartCount++;
+          lastOllamaRestartAt = now;
+        } catch (error) {
+          await logMonitorLine(rootDir, `Failed to start local Ollama: ${error.message}`);
+        }
       }
     }
 
     if (localServerProcess && localServerProcess.exitCode !== null) {
       await logMonitorLine(rootDir, `Local Ollama monitor process exited with code ${localServerProcess.exitCode}.`);
       localServerProcess = undefined;
+      _activeOllamaChild = null;
     }
 
     if (healthy && orchestratorUrl) {
@@ -1131,11 +1189,9 @@ async function main() {
   }
 
   if (options.once) {
-    if (options.once) {
-      console.log(
-        `One-shot setup complete. For secure persistent access, rerun without --once so the agent gateway can stay online at ${advertisedBaseUrl}.`
-      );
-    }
+    console.log(
+      `One-shot setup complete. For secure persistent access, rerun without --once so the agent gateway can stay online at ${advertisedBaseUrl}.`
+    );
     return;
   }
 

@@ -334,7 +334,7 @@ The HTTP API runs on port 4310 (configurable) and serves the browser UI, billboa
 ```bash
 LOCALCREW_API_ENABLED=true              # enable the HTTP API (default: true)
 LOCALCREW_API_BIND_HOST=0.0.0.0         # listen address
-LOCALCREW_API_PUBLIC_HOST=192.168.1.100 # advertised LAN address
+LOCALCREW_API_PUBLIC_HOST=<your-lan-ip>  # advertised LAN address
 LOCALCREW_API_PORT=4310                 # listen port
 LOCALCREW_API_TOKEN=your-secret         # optional Bearer token for auth
 LOCALCREW_API_CORS_ORIGIN=http://...    # allowed CORS origin
@@ -363,8 +363,8 @@ Run from any device to verify port connectivity and HTTP endpoint health across 
 
 ```bash
 node scripts/network-test.js                          # local only
-node scripts/network-test.js 192.168.1.100            # local + orchestrator
-node scripts/network-test.js 192.168.1.100 192.168.1.50  # local + multiple targets
+node scripts/network-test.js <orchestrator-ip>            # local + orchestrator
+node scripts/network-test.js <orchestrator-ip> <agent-ip>  # local + multiple targets
 ```
 
 Tests TCP ports (Ollama 11434, Crew API 4310, Agent Gateway 4311) and HTTP endpoints with actionable diagnostic output.

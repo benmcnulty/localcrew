@@ -425,6 +425,9 @@ export function getGuiHtml(): string {
             <div class="card-title">New Agent</div>
             <div id="workflow-intro"></div>
             <form id="workflow-form"></form>
+            <div class="modal-actions">
+              <button type="button" id="workflow-cancel" class="btn-ghost">Cancel</button>
+            </div>
           </section>
         </div>
       </div>
@@ -583,6 +586,10 @@ section {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+section[hidden] {
+  display: none;
 }
 
 /* ── Cards ── */
@@ -899,6 +906,10 @@ pre {
   padding: 24px;
 }
 
+.modal-overlay[hidden] {
+  display: none;
+}
+
 .modal-card {
   background: #141720;
   border: 1px solid #2a2d3e;
@@ -933,6 +944,87 @@ pre {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .modal-card {
+    padding: 16px;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  #topbar {
+    padding: 0 12px;
+    gap: 8px;
+    font-size: 14px;
+  }
+
+  #content {
+    padding: 12px;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-title {
+    font-size: 16px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+  }
+
+  .modal-card {
+    padding: 14px;
+    border-radius: 8px;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .item-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .item-actions button {
+    width: 100%;
+  }
+}
+
+@media (min-width: 1200px) {
+  #sidebar {
+    width: 260px;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .modal-card {
+    max-width: 780px;
+  }
+}
+
+@media (min-width: 1920px) {
+  #sidebar {
+    width: 300px;
+  }
+
+  #content {
+    padding: 32px;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+
+  .section-title {
+    font-size: 22px;
+    margin-bottom: 18px;
   }
 }
 `;
@@ -1089,13 +1181,19 @@ function renderResult(payload) {
   if (els.resultOutput) els.resultOutput.textContent = lines.join("\\n") || "(no output)";
 }
 
+function updateModalOverlay() {
+  const anyOpen = state.pendingEdit || state.pendingWorkflow;
+  if (els.modalOverlay) els.modalOverlay.hidden = !anyOpen;
+  document.body.style.overflow = anyOpen ? "hidden" : "";
+}
+
 function renderWorkflow(request) {
   state.pendingWorkflow = request || null;
   if (els.workflowPanel) els.workflowPanel.hidden = !request;
-  if (els.editPanel) els.editPanel.hidden = true;
-  if (els.modalOverlay) els.modalOverlay.hidden = !request;
+  if (request && els.editPanel) els.editPanel.hidden = true;
   if (els.workflowForm) els.workflowForm.replaceChildren();
   if (els.workflowIntro) els.workflowIntro.replaceChildren();
+  updateModalOverlay();
 
   if (!request) return;
 
@@ -1129,8 +1227,8 @@ function renderWorkflow(request) {
 function renderEdit(request) {
   state.pendingEdit = request || null;
   if (els.editPanel) els.editPanel.hidden = !request;
-  if (els.workflowPanel) els.workflowPanel.hidden = true;
-  if (els.modalOverlay) els.modalOverlay.hidden = !request;
+  if (request && els.workflowPanel) els.workflowPanel.hidden = true;
+  updateModalOverlay();
   if (!request) {
     if (els.editTarget) els.editTarget.textContent = "";
     if (els.editText) els.editText.value = "";
@@ -1631,6 +1729,35 @@ if (editCancelBtn) {
   });
 }
 
+// Workflow cancel
+const workflowCancelBtn = document.getElementById("workflow-cancel");
+if (workflowCancelBtn) {
+  workflowCancelBtn.addEventListener("click", () => {
+    renderWorkflow(null);
+    renderEdit(null);
+  });
+}
+
+// Close modal on Escape key
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (state.pendingEdit || state.pendingWorkflow) {
+      renderEdit(null);
+      renderWorkflow(null);
+    }
+  }
+});
+
+// Close modal on backdrop click (outside .modal-card)
+if (els.modalOverlay) {
+  els.modalOverlay.addEventListener("click", (event) => {
+    if (event.target === els.modalOverlay) {
+      renderEdit(null);
+      renderWorkflow(null);
+    }
+  });
+}
+
 // Workflow form
 els.workflowForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1869,6 +1996,17 @@ export function getDisplayHtml(): string {
         --fs-task:clamp(3.5rem,4vw,8rem);
       }
     }
+    /* 5K Billboard */
+    @media (min-width: 5120px) {
+      html { font-size: 30px; }
+      :root {
+        --topbar-h:160px;--logbar-h:100px;--gap:56px;--pad:64px;--radius:22px;
+        --fs-xs:2.2rem;--fs-sm:2.8rem;--fs-base:3.2rem;--fs-md:4rem;
+        --fs-lg:5rem;--fs-xl:7.5rem;
+        --fs-metric:clamp(10rem,10vw,20rem);
+        --fs-task:clamp(4.5rem,5vw,10rem);
+      }
+    }
 
     /* ── Base — glowing grid background ─────────────────────────────────── */
     html, body {
@@ -1892,7 +2030,7 @@ export function getDisplayHtml(): string {
         rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 4px
       );
       pointer-events: none;
-      z-index: 9999;
+      z-index: 50;
     }
 
     /* ── App shell ────────────────────────────────────────────────────────── */
@@ -2009,6 +2147,7 @@ export function getDisplayHtml(): string {
     }
     @media (min-width: 1920px) { #dpnet { flex: 0 0 280px; } #dpmet { flex: 0 0 clamp(260px, 16vw, 340px); max-width: 340px; } }
     @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; max-width: 540px; } }
+    @media (min-width: 5120px) { #dpnet { flex: 0 0 640px; } #dpmet { flex: 0 0 700px; max-width: 700px; } }
 
     /* ── Panel base ───────────────────────────────────────────────────────── */
     .dpanel {
@@ -2095,6 +2234,7 @@ export function getDisplayHtml(): string {
     .dtrack { height: 16px; background: rgba(0,212,255,0.08); border-radius: 8px; overflow: hidden; position: relative; }
     @media (min-width: 1920px) { .dtrack { height: 24px; border-radius: 12px; } }
     @media (min-width: 3840px) { .dtrack { height: 40px; border-radius: 20px; } }
+    @media (min-width: 5120px) { .dtrack { height: 52px; border-radius: 26px; } }
     .dqpct {
       position: absolute; right: 8px; top: 50%; transform: translateY(-50%); z-index: 1;
       font-size: var(--fs-xs); font-family: "SF Mono",ui-monospace,monospace;
@@ -2119,6 +2259,7 @@ export function getDisplayHtml(): string {
     }
     @media (min-width: 1920px) { #dqlist { max-height: 230px; } }
     @media (min-width: 3840px) { #dqlist { max-height: 420px; } }
+    @media (min-width: 5120px) { #dqlist { max-height: 560px; } }
     .dqitem {
       display: flex; align-items: flex-start; gap: 0.5em;
       font-size: var(--fs-sm); color: rgba(224,232,248,0.6); line-height: 1.4;
@@ -2164,6 +2305,7 @@ export function getDisplayHtml(): string {
     .dbar-track { height: 4px; background: rgba(180,79,255,0.1); border-radius: 2px; overflow: hidden; }
     @media (min-width: 1920px) { .dbar-track { height: 7px; } }
     @media (min-width: 3840px) { .dbar-track { height: 12px; } }
+    @media (min-width: 5120px) { .dbar-track { height: 16px; } }
     .dbar-fill {
       height: 100%; border-radius: inherit;
       background: linear-gradient(90deg, var(--n-purple), var(--n-blue));
@@ -2198,6 +2340,7 @@ export function getDisplayHtml(): string {
       animation: tickerPulse 2s ease-in-out infinite; box-shadow: 0 0 6px #00ff7f; }
     @media (min-width:1920px){.dticker-dot{width:10px;height:10px}}
     @media (min-width:3840px){.dticker-dot{width:16px;height:16px}}
+    @media (min-width:5120px){.dticker-dot{width:20px;height:20px}}
     #dlogfeed {
       display: flex; align-items: center; gap: 1.5em;
       overflow: hidden; flex: 1; min-width: 0;
@@ -2354,6 +2497,15 @@ export function getDisplayHtml(): string {
       .mx-col[data-depth="5"]{--mx-size:4rem}
       .mx-col[data-depth="6"]{--mx-size:4.8rem}
     }
+    @media(min-width:5120px){
+      .mx-col[data-depth="0"]{--mx-size:2rem}
+      .mx-col[data-depth="1"]{--mx-size:2.4rem}
+      .mx-col[data-depth="2"]{--mx-size:2.9rem}
+      .mx-col[data-depth="3"]{--mx-size:3.5rem}
+      .mx-col[data-depth="4"]{--mx-size:4.2rem}
+      .mx-col[data-depth="5"]{--mx-size:5rem}
+      .mx-col[data-depth="6"]{--mx-size:6rem}
+    }
 
     /* Glass close button — translucent with blocked depth shading */
     .mx-close {
@@ -2388,6 +2540,7 @@ export function getDisplayHtml(): string {
     }
     @media(min-width:1920px){.mx-close{width:46px;height:46px;font-size:22px;top:24px;right:24px;border-radius:8px}}
     @media(min-width:3840px){.mx-close{width:68px;height:68px;font-size:32px;top:40px;right:40px;border-radius:12px}}
+    @media(min-width:5120px){.mx-close{width:86px;height:86px;font-size:40px;top:52px;right:52px;border-radius:16px}}
 
     /* Enter Matrix topbar button */
     .dmatrix-btn {
@@ -2472,6 +2625,7 @@ export function getDisplayHtml(): string {
     }
     @media(min-width:1920px){.daily-close{width:46px;height:46px;font-size:22px;top:24px;right:24px}}
     @media(min-width:3840px){.daily-close{width:68px;height:68px;font-size:32px;top:40px;right:40px}}
+    @media(min-width:5120px){.daily-close{width:86px;height:86px;font-size:40px;top:52px;right:52px}}
 
     .daily-content {
       position: relative; z-index: 2;
@@ -2531,6 +2685,11 @@ export function getDisplayHtml(): string {
       .daily-content{max-width:2000px;padding:120px 100px 160px}
       .daily-header h1{font-size:4.8rem}
       .daily-body{font-size:1.5rem}
+    }
+    @media(min-width:5120px){
+      .daily-content{max-width:2800px;padding:160px 140px 200px}
+      .daily-header h1{font-size:6rem}
+      .daily-body{font-size:1.9rem}
     }
   </style>
 </head>
@@ -2632,7 +2791,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <script>
-  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[],busyResources:{},activeAliases:{}};
+  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[],busyResources:{},activeAliases:{},resourceHealth:{}};
   var clockEl=document.getElementById('dclock');
   function tickClock(){
     clockEl.textContent=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -2712,8 +2871,12 @@ export function getDisplayHtml(): string {
         var ar=data.activeResources[ai];
         ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
       }
-      refreshResourceDots();
     }
+    // Update health data from polling
+    if(data.resourceHealth && typeof data.resourceHealth==='object'){
+      ST.resourceHealth=data.resourceHealth;
+    }
+    refreshResourceDots();
   }
 
   // Queue
@@ -2733,6 +2896,13 @@ export function getDisplayHtml(): string {
   // Resources
   function getResourceDotClass(alias){
     if(ST.busyResources[alias])return'ddot-amber';
+    // Health poll data takes precedence over activity-based detection
+    var h=ST.resourceHealth[alias];
+    if(h){
+      if(h.status==='offline')return'ddot-red';
+      if(h.status==='degraded')return'ddot-amber';
+      return'ddot-green';
+    }
     if(ST.activeAliases[alias])return'ddot-green';
     return'ddot-red';
   }
@@ -2885,8 +3055,12 @@ export function getDisplayHtml(): string {
         var ar=d.activeResources[ai];
         ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
       }
-      refreshResourceDots();
     }
+    // Update health data from SSE
+    if(d.resourceHealth && typeof d.resourceHealth==='object'){
+      ST.resourceHealth=d.resourceHealth;
+    }
+    refreshResourceDots();
 
     if(typeof d.systemTps==='number'){
       var tpm=Math.max(0,Math.round(d.systemTps*60));
@@ -3235,6 +3409,7 @@ export function getDisplayHtml(): string {
 
   function mxStart(){
     if(MX.on)return;
+    if(DAILY.on)dailyClose();
     MX.on=true;
     MX.overlay.classList.add('active');
     var vw=window.innerWidth;
@@ -3344,6 +3519,7 @@ export function getDisplayHtml(): string {
 
   function dailyOpen(){
     if(DAILY.on)return;
+    if(MX.on)mxStop();
     DAILY.on=true;
     DAILY.overlay.classList.add('active');
     dailyFetch();
@@ -3357,6 +3533,21 @@ export function getDisplayHtml(): string {
   var dailyBtn=document.getElementById('ddaily-btn');
   if(dailyBtn)dailyBtn.addEventListener('click',dailyOpen);
   if(DAILY.closeEl)DAILY.closeEl.addEventListener('click',dailyClose);
+
+  // Close Daily overlay on backdrop click (click on overlay outside content)
+  if(DAILY.overlay){
+    DAILY.overlay.addEventListener('click',function(e){
+      if(e.target===DAILY.overlay)dailyClose();
+    });
+  }
+
+  // Escape key closes active overlays (Daily first, then Matrix)
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){
+      if(DAILY.on){dailyClose();return;}
+      if(MX.on){mxStop();return;}
+    }
+  });
 
   updateActivityControls();
   syncActivityState();

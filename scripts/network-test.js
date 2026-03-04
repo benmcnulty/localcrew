@@ -5,8 +5,8 @@
  *
  * Usage:
  *   node scripts/network-test.js                          # test local ports only
- *   node scripts/network-test.js 192.168.1.223            # test orchestrator at IP
- *   node scripts/network-test.js 192.168.1.223 192.168.1.50  # test orchestrator + agent devices
+ *   node scripts/network-test.js <orchestrator-ip>        # test orchestrator at IP
+ *   node scripts/network-test.js <orchestrator-ip> <agent-ip>  # test orchestrator + agent devices
  *
  * Tests:
  *   - Local Ollama (127.0.0.1:11434)
@@ -140,7 +140,7 @@ async function main() {
   if (targets.length === 0) {
     console.log("── No remote targets specified ──────────────────");
     console.log("  Pass IP addresses as arguments to test remote devices:");
-    console.log("  node scripts/network-test.js 192.168.1.223 192.168.1.50");
+    console.log("  node scripts/network-test.js <orchestrator-ip> <agent-ip>");
     console.log("");
     summarize(localResults, []);
     return;
