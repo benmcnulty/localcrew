@@ -817,6 +817,45 @@ function getResourceLoad(alias: string, resourceLoad: Record<string, number>): n
   return resourceLoad[alias] ?? 0;
 }
 
+function hashStringSeed(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function pickLeastLoadedSeeded(
+  resources: ResourceProfile[],
+  resourceLoad: Record<string, number>,
+  seed: string,
+  predicate?: (profile: ResourceProfile) => boolean
+): ResourceProfile | undefined {
+  const matches = predicate ? resources.filter(predicate) : [...resources];
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  let minimumLoad = Number.POSITIVE_INFINITY;
+  for (const resource of matches) {
+    const load = getResourceLoad(resource.alias, resourceLoad);
+    if (load < minimumLoad) {
+      minimumLoad = load;
+    }
+  }
+
+  const leastLoaded = matches
+    .filter((resource) => getResourceLoad(resource.alias, resourceLoad) === minimumLoad)
+    .sort((left, right) => left.alias.localeCompare(right.alias));
+
+  if (leastLoaded.length === 1) {
+    return leastLoaded[0];
+  }
+
+  const seededIndex = hashStringSeed(seed) % leastLoaded.length;
+  return leastLoaded[seededIndex];
+}
+
 function pickLeastLoaded(
   resources: ResourceProfile[],
   resourceLoad: Record<string, number>,
@@ -969,12 +1008,15 @@ export function chooseResourceForTask(
       normalizedTask
     )
   ) {
-    const selected = topAgent ?? orchestrator;
+    const selected =
+      pickLeastLoadedSeeded(top, resourceLoad, normalizedTask) ??
+      topAgent ??
+      orchestrator;
     return {
       alias: selected.alias,
       tier: selected.tier,
       purpose: "default",
-      rationale: `Selected ${selected.alias} as the strongest available drafting resource without blocking the primary orchestrator unnecessarily, while preferring the least-loaded suitable top-tier node.`
+      rationale: `Selected ${selected.alias} for drafting/review work by balancing across least-loaded top-tier nodes while preserving orchestration headroom.`
     };
   }
 

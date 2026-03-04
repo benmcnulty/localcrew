@@ -282,12 +282,52 @@ describe("resource routing", () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
 
-      expect(chooseResourceForTask("Draft a detailed delegation plan for the queue.", "auto", rootDir)).toEqual(
+      const draftSelection = chooseResourceForTask(
+        "Draft a detailed delegation plan for the queue.",
+        "auto",
+        rootDir
+      );
+      expect(draftSelection.tier).toBe("top");
+      expect(["orchestrator", "workhorse"]).toContain(draftSelection.alias);
+
+      expect(
+        chooseResourceForTask(
+          "Draft a detailed delegation plan for the queue.",
+          "auto",
+          rootDir,
+          {
+            resourceLoad: {
+              orchestrator: 3,
+              workhorse: 0
+            }
+          }
+        )
+      ).toEqual(
         expect.objectContaining({
           alias: "workhorse",
           tier: "top"
         })
       );
+
+      expect(
+        chooseResourceForTask(
+          "Draft a detailed delegation plan for the queue.",
+          "auto",
+          rootDir,
+          {
+            resourceLoad: {
+              orchestrator: 0,
+              workhorse: 4
+            }
+          }
+        )
+      ).toEqual(
+        expect.objectContaining({
+          alias: "orchestrator",
+          tier: "top"
+        })
+      );
+
       expect(chooseResourceForTask("Update the memory index metadata as JSON.", "auto", rootDir)).toEqual(
         expect.objectContaining({
           alias: "helper",

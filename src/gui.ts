@@ -2133,19 +2133,20 @@ export function getDisplayHtml(): string {
       display: flex; flex: 1; overflow: hidden;
       gap: var(--gap); padding: var(--gap); padding-bottom: 0;
     }
+    #dbody > * { min-width: 0; }
     @media (max-width: 767px) { #dbody { flex-direction: column; overflow-y: auto; } }
     @media (min-width: 768px) and (max-width: 1199px) {
       #dbody { flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
-      #dpnet  { flex: 0 0 calc(42% - var(--gap) / 2); }
+      #dpnet  { flex: 0 0 min(320px, calc(42% - var(--gap) / 2)); }
       #dpmain { flex: 1; min-width: 0; }
-      #dpmet  { flex: 0 0 100%; flex-direction: row; gap: var(--gap); }
+      #dpmet  { flex: 0 0 100%; flex-direction: row; gap: var(--gap); min-width: 0; }
     }
     @media (min-width: 1200px) {
-      #dpnet  { flex: 0 0 215px; }
+      #dpnet  { flex: 0 0 clamp(205px, 16vw, 240px); }
       #dpmain { flex: 1; min-width: 0; }
-      #dpmet  { flex: 0 0 260px; max-width: 260px; }
+      #dpmet  { flex: 0 0 clamp(220px, 18vw, 300px); max-width: clamp(220px, 18vw, 300px); min-width: 0; }
     }
-    @media (min-width: 1920px) { #dpnet { flex: 0 0 280px; } #dpmet { flex: 0 0 clamp(260px, 16vw, 340px); max-width: 340px; } }
+    @media (min-width: 1920px) { #dpnet { flex: 0 0 clamp(240px, 15vw, 300px); } #dpmet { flex: 0 0 clamp(240px, 15vw, 340px); max-width: clamp(240px, 15vw, 340px); } }
     @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; max-width: 540px; } }
     @media (min-width: 5120px) { #dpnet { flex: 0 0 640px; } #dpmet { flex: 0 0 700px; max-width: 700px; } }
 
@@ -2277,8 +2278,9 @@ export function getDisplayHtml(): string {
     #dsparkline { display: block; width: 100%; flex: 1; min-height: 60px; }
 
     /* ── Metrics panel ────────────────────────────────────────────────────── */
-    .dmet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); flex-shrink: 0; }
-    @media (min-width: 768px) and (max-width: 1199px) { .dmet-grid { grid-template-columns: repeat(4,1fr); } }
+    .dmet-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: var(--gap); flex-shrink: 0; width: 100%; min-width: 0; }
+    @media (min-width: 768px) and (max-width: 1199px) { .dmet-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+    @media (min-width: 3840px) { .dmet-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
     .dmet-tile {
       background: rgba(255,45,120,0.04);
       border: 1px solid rgba(255,45,120,0.18);
@@ -2288,6 +2290,7 @@ export function getDisplayHtml(): string {
     .dmet-val {
       font-size: var(--fs-metric); font-weight: 800;
       font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: 0.03em;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
     }
     .mv-tpm    { color: var(--n-blue);   text-shadow: 0 0 8px var(--n-blue),  0 0 24px rgba(0,212,255,0.4); }
     .mv-done   { color: #00ff7f;         text-shadow: 0 0 8px #00ff7f,        0 0 24px rgba(0,255,127,0.4); }
@@ -2437,7 +2440,8 @@ export function getDisplayHtml(): string {
       font-family: "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace;
       line-height: 1.15; pointer-events: none;
       will-change: transform;
-      animation: mxFall var(--mx-dur) var(--mx-ease, cubic-bezier(0.12, 0, 0.39, 0)) forwards;
+      transform: translateY(calc(-1 * var(--mx-height)));
+      animation: mxFall var(--mx-dur) var(--mx-ease, cubic-bezier(0.16, 0, 0.34, 1)) both;
       font-size: var(--mx-size); opacity: var(--mx-opacity); filter: blur(var(--mx-blur));
       /* Trail gradient mask — fade top, bright head at bottom */
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.06) 4%, rgba(0,0,0,0.25) 18%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 75%, white 95%);
@@ -3338,22 +3342,19 @@ export function getDisplayHtml(): string {
   function mxSpawn(){
     if(!MX.on||MX.cols.size>=MX.maxCols)return;
     var depth=Math.floor(Math.random()*7);
-    // Varied segment lengths: 3-35 chars for a more organic, less uniform look
-    var count=Math.floor(3+Math.random()*32);
-    var x=Math.random()*92+4;
-    // Per-column speed variation: faster overall with gravity-like curve
-    // Base duration shorter than before (6-9s), plus depth offset and random jitter
-    var dur=6-depth*0.4+Math.random()*3;
-    // Random easing variation: some columns accelerate more aggressively
-    var easings=['cubic-bezier(0.12,0,0.39,0)','cubic-bezier(0.22,0,0.36,0)','cubic-bezier(0.08,0,0.50,0)','cubic-bezier(0.33,0,0.25,0)'];
-    var easing=easings[Math.floor(Math.random()*easings.length)];
+    // Keep columns long enough to read as real top-down streams (avoid pop-in flicker)
+    var count=Math.floor(8+Math.random()*21);
+    var x=Math.random()*96+2;
+    // Narrowed duration variance to avoid abrupt fast/slow outliers
+    var dur=7.2-depth*0.28+Math.random()*2.4;
+    var easing='cubic-bezier(0.16,0,0.34,1)';
     var chars=mxPull(count);
     var col=document.createElement('div');
     col.className='mx-col';
     col.setAttribute('data-depth',String(depth));
     col.style.left=x+'%';
     col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
-    col.style.setProperty('--mx-height',(count*1.2)+'em');
+    col.style.setProperty('--mx-height',(count*1.15).toFixed(2)+'em');
     col.style.setProperty('--mx-ease',easing);
     for(var i=0;i<chars.length;i++){
       var sp=document.createElement('span');
@@ -3376,22 +3377,21 @@ export function getDisplayHtml(): string {
     for(var g=0;g<groupSize;g++){
       if(MX.cols.size>=MX.maxCols)break;
       var depth=Math.floor(Math.random()*7);
-      var count=Math.floor(3+Math.random()*32);
+      var count=Math.floor(8+Math.random()*21);
       var x=baseX+g*(1.5+Math.random()*2); // each column slightly offset
       if(x>96)x=96;
-      var dur=6-depth*0.4+Math.random()*3;
-      var easings=['cubic-bezier(0.12,0,0.39,0)','cubic-bezier(0.22,0,0.36,0)','cubic-bezier(0.08,0,0.50,0)'];
-      var easing=easings[Math.floor(Math.random()*easings.length)];
+      var dur=7.2-depth*0.28+Math.random()*2.4;
+      var easing='cubic-bezier(0.16,0,0.34,1)';
       var chars=mxPull(count);
       var col=document.createElement('div');
       col.className='mx-col';
       col.setAttribute('data-depth',String(depth));
       col.style.left=x+'%';
       col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
-      col.style.setProperty('--mx-height',(count*1.2)+'em');
+      col.style.setProperty('--mx-height',(count*1.15).toFixed(2)+'em');
       col.style.setProperty('--mx-ease',easing);
       // Stagger start within group for natural feel
-      col.style.animationDelay=(g*0.08+Math.random()*0.15).toFixed(2)+'s';
+      col.style.animationDelay=(g*0.04+Math.random()*0.08).toFixed(2)+'s';
       for(var ci=0;ci<chars.length;ci++){
         var sp=document.createElement('span');
         sp.className='mx-ch';
@@ -3413,13 +3413,13 @@ export function getDisplayHtml(): string {
     MX.on=true;
     MX.overlay.classList.add('active');
     var vw=window.innerWidth;
-    var rate=vw>=3840?60:vw>=1920?100:vw>=1200?140:200;
-    MX.maxCols=vw>=3840?70:vw>=1920?55:vw>=1200?40:26;
-    var burst=Math.floor(MX.maxCols*0.55);
+    var rate=vw>=3840?90:vw>=1920?130:vw>=1200?170:220;
+    MX.maxCols=vw>=3840?54:vw>=1920?40:vw>=1200?30:20;
+    var burst=Math.floor(MX.maxCols*0.45);
     for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*30);
     // Mix individual spawns with group spawns for chunked panel effect
     MX.timer=setInterval(function(){
-      if(Math.random()<0.3){mxSpawnGroup();}else{mxSpawn();}
+      if(Math.random()<0.2){mxSpawnGroup();}else{mxSpawn();}
     },rate);
   }
 
