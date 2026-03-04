@@ -389,6 +389,7 @@ export function buildQueueFillMessages(options: {
   agents: ReadonlyArray<string>;
   resourceRoster?: string;
   currentDateTime?: string;
+  recentCompletedTopics?: ReadonlyArray<string>;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -402,7 +403,8 @@ export function buildQueueFillMessages(options: {
         "The queue is currently empty.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
         "Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
-        "Prefer the highest-value next steps for this specific installation: better routing, hardware-aware configuration, context budgeting, observability, and delegation quality.",
+        "Choose from a DIVERSE range of valuable work areas: routing quality, user-facing features, content generation, knowledge enrichment, system health, documentation, and user-benefit tasks.",
+        "NEVER repeat or rephrase a task topic that was recently completed — always propose genuinely new work.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
         "Do not draft external application, API, UI, script, or source-code implementation work into the autonomous queue; those belong in outbox feature request tickets instead.",
         "Each task must be self-contained and explicit enough to execute without guessing. Reject placeholder verbs with no object or outcome.",
@@ -453,6 +455,13 @@ export function buildQueueFillMessages(options: {
       content: `Resource inventory:\n${options.inventory.trim()}`
     }
   );
+
+  if (options.recentCompletedTopics && options.recentCompletedTopics.length > 0) {
+    outgoing.push({
+      role: "system",
+      content: `RECENTLY COMPLETED WORK (do NOT propose tasks that duplicate or rephrase these):\n${options.recentCompletedTopics.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
+    });
+  }
 
   if (options.currentDateTime) {
     outgoing.push({
