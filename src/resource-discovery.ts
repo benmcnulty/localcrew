@@ -184,3 +184,45 @@ export async function probeResourceModels(
     models
   };
 }
+
+export type ResourceHealthStatus = "online" | "offline" | "degraded";
+
+export interface ResourceHealthResult {
+  status: ResourceHealthStatus;
+  latencyMs: number;
+  checkedAt: number;
+}
+
+/**
+ * Lightweight health ping — verifies an endpoint is reachable with a short timeout.
+ * Returns status + round-trip latency. Does not fetch full model lists.
+ */
+export async function pingResource(
+  baseUrl: string,
+  apiStyle: EndpointApiStyle = "ollama",
+  fetchFn: FetchFn = fetch,
+  apiKeyEnv?: string,
+  timeoutMs = 5000
+): Promise<ResourceHealthResult> {
+  const url = apiStyle === "ollama"
+    ? `${trimTrailingSlash(baseUrl)}/api/tags`
+    : `${trimTrailingSlash(baseUrl)}/v1/models`;
+  const headers = getAuthHeadersForStyle(apiStyle, apiKeyEnv);
+  const start = Date.now();
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetchFn(url, { headers, signal: controller.signal });
+    clearTimeout(timer);
+    const latencyMs = Date.now() - start;
+
+    if (response.ok) {
+      return { status: "online", latencyMs, checkedAt: Date.now() };
+    }
+    // HTTP errors (500, 503, etc.) — reachable but unhealthy
+    return { status: "degraded", latencyMs, checkedAt: Date.now() };
+  } catch {
+    return { status: "offline", latencyMs: Date.now() - start, checkedAt: Date.now() };
+  }
+}
