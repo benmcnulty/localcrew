@@ -171,6 +171,8 @@ Use the script output to decide the device tier:
 - `/topology assign <alias> <role>`
 - `/topology delegate <orchestrator> <agent>`
 - `/topology undelegate <orchestrator> <agent>`
+- `/daily` / `/daily start` / `/daily finish`
+- `/preferences` / `/preferences set <key> <value>`
 - `/clear`
 
 ## Billboard Display Lifecycle
