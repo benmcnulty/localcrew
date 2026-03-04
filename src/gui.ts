@@ -2005,10 +2005,10 @@ export function getDisplayHtml(): string {
     @media (min-width: 1200px) {
       #dpnet  { flex: 0 0 215px; }
       #dpmain { flex: 1; min-width: 0; }
-      #dpmet  { flex: 0 0 260px; }
+      #dpmet  { flex: 0 0 260px; max-width: 260px; }
     }
-    @media (min-width: 1920px) { #dpnet { flex: 0 0 280px; } #dpmet { flex: 0 0 290px; } }
-    @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; } }
+    @media (min-width: 1920px) { #dpnet { flex: 0 0 280px; } #dpmet { flex: 0 0 clamp(260px, 16vw, 340px); max-width: 340px; } }
+    @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; max-width: 540px; } }
 
     /* ── Panel base ───────────────────────────────────────────────────────── */
     .dpanel {
@@ -2051,7 +2051,11 @@ export function getDisplayHtml(): string {
     }
     .dres-name {
       font-size: var(--fs-sm); font-weight: 600;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+    }
+    @media (min-width: 1920px) {
+      .dres-name { white-space: normal; word-break: break-word; -webkit-line-clamp: 2;
+        display: -webkit-box; -webkit-box-orient: vertical; }
     }
     .dtier {
       font-size: var(--fs-xs); font-weight: 800; padding: 0.1em 0.55em;
@@ -2290,7 +2294,7 @@ export function getDisplayHtml(): string {
       font-family: "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace;
       line-height: 1.15; pointer-events: none;
       will-change: transform;
-      animation: mxFall var(--mx-dur) linear forwards;
+      animation: mxFall var(--mx-dur) var(--mx-ease, cubic-bezier(0.12, 0, 0.39, 0)) forwards;
       font-size: var(--mx-size); opacity: var(--mx-opacity); filter: blur(var(--mx-blur));
       /* Trail gradient mask — fade top, bright head at bottom */
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.06) 4%, rgba(0,0,0,0.25) 18%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 75%, white 95%);
@@ -2566,8 +2570,8 @@ export function getDisplayHtml(): string {
       <div id="dtask">Connecting&hellip;</div>
       <div>
         <div class="dqueue-hdr">
-          <span class="dsub">Queue Progress</span>
-          <span id="dqfrac">0 / 0</span>
+          <span class="dsub">Queue</span>
+          <span id="dqfrac">0 pending &middot; 0 done</span>
         </div>
         <div class="dtrack" style="margin-top:7px"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
         <div id="dqlist" style="margin-top:9px"></div>
@@ -2628,7 +2632,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <script>
-  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[],busyResources:{}};
+  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[],busyResources:{},activeAliases:{}};
   var clockEl=document.getElementById('dclock');
   function tickClock(){
     clockEl.textContent=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -2683,10 +2687,12 @@ export function getDisplayHtml(): string {
       taskEl.textContent='Auto mode \u2014 scanning queue\u2026';taskEl.style.color='var(--muted2)';
     } else{taskEl.textContent='Idle \u2014 '+mode+' mode';taskEl.style.color='var(--muted)';}
 
-    var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0,total=pending+completed;
-    el('dqfrac').textContent=completed+' / '+total;
-    el('dqfill').style.width=(total>0?(completed/total*100):0)+'%';
-    var pctEl=el('dqpct');if(pctEl)pctEl.textContent=total>0?Math.round(completed/total*100)+'%':'';
+    var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0;
+    el('dqfrac').textContent=pending+' pending \u00b7 '+fmt(completed)+' done';
+    // Bar shows pending queue depth: wider = more backlog. Fades out when idle.
+    var barPct=pending>0?Math.min(100,pending*10):0;
+    el('dqfill').style.width=barPct+'%';
+    var pctEl=el('dqpct');if(pctEl)pctEl.textContent=pending>0?pending+' queued':'';
     setVal('dpending',fmt(pending));setVal('ddone',fmt(completed));setVal('dtasksdone',fmt(completed));
 
     var tel=data.telemetry;
@@ -2699,6 +2705,15 @@ export function getDisplayHtml(): string {
     }
     var cap=data.capacity;
     if(cap)setVal('drescnt',String(cap.resourceCount||0));
+    // Update active aliases from polling data
+    if(Array.isArray(data.activeResources)){
+      ST.activeAliases={};
+      for(var ai=0;ai<data.activeResources.length;ai++){
+        var ar=data.activeResources[ai];
+        ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
+      }
+      refreshResourceDots();
+    }
   }
 
   // Queue
@@ -2716,6 +2731,20 @@ export function getDisplayHtml(): string {
   }
 
   // Resources
+  function getResourceDotClass(alias){
+    if(ST.busyResources[alias])return'ddot-amber';
+    if(ST.activeAliases[alias])return'ddot-green';
+    return'ddot-red';
+  }
+  function refreshResourceDots(){
+    var cards=document.querySelectorAll('.dres-card');
+    for(var i=0;i<cards.length;i++){
+      var a=cards[i].getAttribute('data-alias');if(!a)continue;
+      var dot=cards[i].querySelector('.ddot');if(!dot)continue;
+      dot.className='ddot '+getResourceDotClass(a);
+      if(ST.busyResources[a]){cards[i].classList.add('busy');}else{cards[i].classList.remove('busy');}
+    }
+  }
   async function loadResources(){
     var data=await fetchJ('/api/resources');
     if(!Array.isArray(data))return;
@@ -2724,8 +2753,9 @@ export function getDisplayHtml(): string {
     var html='';
     for(var i=0;i<data.length;i++){
       var r=data[i],tier=r.tier||'low',label=esc(r.label||r.alias);
+      var dotCls=getResourceDotClass(r.alias);
       var busyCls=ST.busyResources[r.alias]?' busy':'';
-      html+='<div class="dres-card'+busyCls+'" data-alias="'+esc(r.alias)+'"><span class="ddot ddot-green"></span>';
+      html+='<div class="dres-card'+busyCls+'" data-alias="'+esc(r.alias)+'"><span class="ddot '+dotCls+'"></span>';
       html+='<span class="dres-name" title="'+label+'">'+label+'</span>';
       html+='<span class="dtier dtier-'+tier+'">'+tier+'</span></div>';
     }
@@ -2838,16 +2868,24 @@ export function getDisplayHtml(): string {
       taskEl.style.color='var(--muted)';
     }
 
-    var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),total=pending+completed;
-    el('dqfrac').textContent=completed+' / '+total;
-    el('dqfill').style.width=(total>0?(completed/total*100):0)+'%';
-    var pctEl2=el('dqpct');if(pctEl2)pctEl2.textContent=total>0?Math.round(completed/total*100)+'%':'';
+    var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0);
+    el('dqfrac').textContent=pending+' pending \u00b7 '+fmt(completed)+' done';
+    var barPct2=pending>0?Math.min(100,pending*10):0;
+    el('dqfill').style.width=barPct2+'%';
+    var pctEl2=el('dqpct');if(pctEl2)pctEl2.textContent=pending>0?pending+' queued':'';
     setVal('dpending',fmt(pending));
     setVal('ddone',fmt(completed));
     setVal('dtasksdone',fmt(completed));
 
     if(Array.isArray(d.activeResources)){
       setVal('drescnt',String(d.activeResources.length));
+      // Track which aliases are active (have telemetry) for dot coloring
+      ST.activeAliases={};
+      for(var ai=0;ai<d.activeResources.length;ai++){
+        var ar=d.activeResources[ai];
+        ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
+      }
+      refreshResourceDots();
     }
 
     if(typeof d.systemTps==='number'){
@@ -3017,12 +3055,12 @@ export function getDisplayHtml(): string {
         return;
       }
       if(msg.type==='task-start'){
-        if(msg.resourceAlias){ST.busyResources[msg.resourceAlias]=true;mxMarkBusy(msg.resourceAlias,true);}
+        if(msg.resourceAlias){ST.busyResources[msg.resourceAlias]=true;mxMarkBusy(msg.resourceAlias,true);refreshResourceDots();}
         pushDisplayLog('system','Task #'+msg.taskId+' started on @'+msg.resourceAlias+': '+(msg.taskContent||''),true);
         return;
       }
       if(msg.type==='task-complete'){
-        if(msg.resourceAlias){delete ST.busyResources[msg.resourceAlias];mxMarkBusy(msg.resourceAlias,false);}
+        if(msg.resourceAlias){delete ST.busyResources[msg.resourceAlias];mxMarkBusy(msg.resourceAlias,false);refreshResourceDots();}
         var ok=msg.status==='completed';
         pushDisplayLog('system','Task #'+msg.taskId+' '+(ok?'completed':'failed')+' on @'+msg.resourceAlias+' ('+Math.round((msg.durationMs||0)/1000)+'s, '+fmt(msg.tokenCount||0)+' tok)',ok);
         return;
@@ -3126,9 +3164,15 @@ export function getDisplayHtml(): string {
   function mxSpawn(){
     if(!MX.on||MX.cols.size>=MX.maxCols)return;
     var depth=Math.floor(Math.random()*7);
-    var count=Math.floor(10+Math.random()*20);
+    // Varied segment lengths: 3-35 chars for a more organic, less uniform look
+    var count=Math.floor(3+Math.random()*32);
     var x=Math.random()*92+4;
-    var dur=13-depth*1.15+Math.random()*2.5;
+    // Per-column speed variation: faster overall with gravity-like curve
+    // Base duration shorter than before (6-9s), plus depth offset and random jitter
+    var dur=6-depth*0.4+Math.random()*3;
+    // Random easing variation: some columns accelerate more aggressively
+    var easings=['cubic-bezier(0.12,0,0.39,0)','cubic-bezier(0.22,0,0.36,0)','cubic-bezier(0.08,0,0.50,0)','cubic-bezier(0.33,0,0.25,0)'];
+    var easing=easings[Math.floor(Math.random()*easings.length)];
     var chars=mxPull(count);
     var col=document.createElement('div');
     col.className='mx-col';
@@ -3136,6 +3180,7 @@ export function getDisplayHtml(): string {
     col.style.left=x+'%';
     col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
     col.style.setProperty('--mx-height',(count*1.2)+'em');
+    col.style.setProperty('--mx-ease',easing);
     for(var i=0;i<chars.length;i++){
       var sp=document.createElement('span');
       sp.className='mx-ch';
@@ -3150,16 +3195,57 @@ export function getDisplayHtml(): string {
     });
   }
 
+  // Spawn a group of nearby columns for a "panel" effect
+  function mxSpawnGroup(){
+    var groupSize=Math.floor(2+Math.random()*4); // 2-5 columns
+    var baseX=Math.random()*80+5;
+    for(var g=0;g<groupSize;g++){
+      if(MX.cols.size>=MX.maxCols)break;
+      var depth=Math.floor(Math.random()*7);
+      var count=Math.floor(3+Math.random()*32);
+      var x=baseX+g*(1.5+Math.random()*2); // each column slightly offset
+      if(x>96)x=96;
+      var dur=6-depth*0.4+Math.random()*3;
+      var easings=['cubic-bezier(0.12,0,0.39,0)','cubic-bezier(0.22,0,0.36,0)','cubic-bezier(0.08,0,0.50,0)'];
+      var easing=easings[Math.floor(Math.random()*easings.length)];
+      var chars=mxPull(count);
+      var col=document.createElement('div');
+      col.className='mx-col';
+      col.setAttribute('data-depth',String(depth));
+      col.style.left=x+'%';
+      col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
+      col.style.setProperty('--mx-height',(count*1.2)+'em');
+      col.style.setProperty('--mx-ease',easing);
+      // Stagger start within group for natural feel
+      col.style.animationDelay=(g*0.08+Math.random()*0.15).toFixed(2)+'s';
+      for(var ci=0;ci<chars.length;ci++){
+        var sp=document.createElement('span');
+        sp.className='mx-ch';
+        sp.textContent=chars[ci];
+        col.appendChild(sp);
+      }
+      MX.cvs.appendChild(col);
+      MX.cols.add(col);
+      col.addEventListener('animationend',function(){
+        var c=this;if(c.parentNode)c.parentNode.removeChild(c);
+        MX.cols.delete(c);
+      });
+    }
+  }
+
   function mxStart(){
     if(MX.on)return;
     MX.on=true;
     MX.overlay.classList.add('active');
     var vw=window.innerWidth;
-    var rate=vw>=3840?90:vw>=1920?150:vw>=1200?200:280;
-    MX.maxCols=vw>=3840?55:vw>=1920?42:vw>=1200?32:22;
+    var rate=vw>=3840?60:vw>=1920?100:vw>=1200?140:200;
+    MX.maxCols=vw>=3840?70:vw>=1920?55:vw>=1200?40:26;
     var burst=Math.floor(MX.maxCols*0.55);
-    for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*45);
-    MX.timer=setInterval(mxSpawn,rate);
+    for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*30);
+    // Mix individual spawns with group spawns for chunked panel effect
+    MX.timer=setInterval(function(){
+      if(Math.random()<0.3){mxSpawnGroup();}else{mxSpawn();}
+    },rate);
   }
 
   function mxStop(){
@@ -3232,7 +3318,19 @@ export function getDisplayHtml(): string {
           DAILY.staleEl.style.display='none';
           return;
         }
-        DAILY.bodyEl.innerHTML=mdToHtml(d.content);
+        // Detect if content is guidance/template rather than real generated data.
+        // The guidance template contains instructional language, not actual briefing content.
+        var c=d.content||'';
+        var isGuidance=c.indexOf('Generate a comprehensive Daily Work markdown document')!==-1
+          ||c.indexOf('Output ONLY the markdown document')!==-1
+          ||c.indexOf('This is a high-priority system task')!==-1;
+        if(isGuidance){
+          DAILY.bodyEl.innerHTML='<div class="daily-empty"><div class="daily-empty-icon">&#x1F4CB;</div>Daily briefing document is pending generation.<br>The system will produce it during the next auto cycle.</div>';
+          DAILY.updatedEl.textContent='';
+          DAILY.staleEl.style.display='none';
+          return;
+        }
+        DAILY.bodyEl.innerHTML=mdToHtml(c);
         if(d.updatedAt){
           var dt=new Date(d.updatedAt);
           DAILY.updatedEl.textContent='Updated '+dt.toLocaleString();

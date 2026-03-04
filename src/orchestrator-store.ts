@@ -34,6 +34,7 @@ function getDefaultSystemState(): SystemState {
       enabled: false,
       defaultPriority: "high",
       lastTaskId: 0,
+      totalCompletedCount: 0,
       pending: [],
       completed: []
     }
@@ -168,6 +169,10 @@ function normalizeSystemState(raw: unknown): SystemState {
       defaultPriority: normalizePriority(auto.defaultPriority),
       lastTaskId:
         typeof auto.lastTaskId === "number" && auto.lastTaskId >= 0 ? auto.lastTaskId : 0,
+      totalCompletedCount:
+        typeof auto.totalCompletedCount === "number" && auto.totalCompletedCount >= 0
+          ? auto.totalCompletedCount
+          : completed.length,
       pending,
       completed,
       ...(auto.dailySession && typeof auto.dailySession === "object"

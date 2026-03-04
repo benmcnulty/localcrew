@@ -134,6 +134,8 @@ export interface AutoState {
   enabled: boolean;
   defaultPriority: TaskPriority;
   lastTaskId: number;
+  /** Monotonically increasing count of all tasks ever completed (not capped by completed array limit). */
+  totalCompletedCount: number;
   pending: AutoQueueTask[];
   completed: AutoQueueTask[];
   dailySession?: DailyWorkSession;
