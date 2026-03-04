@@ -388,9 +388,9 @@ describe("LocalCrewApp", () => {
         const systemState = await loadSystemState(rootDir);
 
         expect(result.lines[0]).toBe("Queued #1 [high]: Design a routing policy.");
-        expect(result.lines[1]).toContain("Aster completed #1 [high] via orchestrator/");
+        expect(result.lines[1]).toContain("Aster completed #1 [high] via @orchestrator/");
         expect(result.lines[3]).toBe(
-          "Queued #2 [low] -> overflow/llama3.2:3b: sanity check the result"
+          "Queued #2 [low] -> @overflow/llama3.2:3b: sanity check the result"
         );
         expect(systemState.auto.pending).toEqual([
           expect.objectContaining({
@@ -650,7 +650,7 @@ describe("LocalCrewApp", () => {
       ]);
       expect(reply.lines[0]).toBe("@reviewer: I would test the plan against the queue.");
       expect(reply.lines[1]).toBe(
-        "Queued #1 [medium] -> workhorse/llama3.1:8b from @reviewer: compare two routing strategies"
+        "Queued #1 [medium] -> @workhorse/llama3.1:8b from @reviewer: compare two routing strategies"
       );
       expect(systemState.auto.pending).toEqual([
         expect.objectContaining({
@@ -1495,7 +1495,7 @@ describe("LocalCrewApp", () => {
       const state = await loadSystemState(rootDir);
 
       expect(reply.lines[1]).toBe(
-        "Queued #1 [medium] {reviewer} -> workhorse/llama3.1:8b from @reviewer: critique the routing plan"
+        "Queued #1 [medium] {reviewer} -> @workhorse/llama3.1:8b from @reviewer: critique the routing plan"
       );
       expect(state.auto.pending[0]).toEqual(
         expect.objectContaining({

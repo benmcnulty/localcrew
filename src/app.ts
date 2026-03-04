@@ -1397,18 +1397,18 @@ export class LocalCrewApp {
       `Next task: ${
         nextTask
           ? `#${nextTask.id} [${nextTask.priority}]${nextTask.delegationRole ? ` {${nextTask.delegationRole}}` : ""}${
-              nextTask.requestedResource ? ` -> ${nextTask.requestedResource}` : ""
+              this.formatRequestedResource(nextTask.requestedResource)
             }${nextTask.requestedModel ? `/${nextTask.requestedModel}` : ""} ${nextTask.content}`
           : "(none queued)"
       }`,
       `Last completed: ${
         lastCompleted
-          ? `#${lastCompleted.id}${lastCompleted.delegationRole ? ` {${lastCompleted.delegationRole}}` : ""} via ${lastCompleted.assignedResource ?? "?"}/${lastCompleted.assignedModel ?? "?"}`
+          ? `#${lastCompleted.id}${lastCompleted.delegationRole ? ` {${lastCompleted.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(lastCompleted.assignedResource, lastCompleted.assignedModel)}`
           : "(none yet)"
       }`,
-      `Top tier: ${tiers.top.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
-      `Mid tier: ${tiers.mid.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
-      `Low tier: ${tiers.low.map((profile) => `@${profile.alias}`).join(", ") || "(none)"}`,
+      `Top tier: ${tiers.top.map((profile) => `@${this.toDisplayResourceAlias(profile.alias)}`).join(", ") || "(none)"}`,
+      `Mid tier: ${tiers.mid.map((profile) => `@${this.toDisplayResourceAlias(profile.alias)}`).join(", ") || "(none)"}`,
+      `Low tier: ${tiers.low.map((profile) => `@${this.toDisplayResourceAlias(profile.alias)}`).join(", ") || "(none)"}`,
       `Resources: ${resources.length}`,
       ...(resources.length <= 1
         ? [
@@ -2107,7 +2107,7 @@ export class LocalCrewApp {
       .sort((left, right) => right[1].calls - left[1].calls)
       .map(([key, bucket]) => {
         const averageDuration = bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0;
-        return `@${key} | calls ${bucket.calls} | errors ${bucket.errors} | avg ${averageDuration}ms | eval ${bucket.evalCount}`;
+        return `@${this.toDisplayResourceAlias(key)} | calls ${bucket.calls} | errors ${bucket.errors} | avg ${averageDuration}ms | eval ${bucket.evalCount}`;
       });
 
     const tabs = [
@@ -2147,7 +2147,7 @@ export class LocalCrewApp {
         ...(pending.length > 0
           ? pending.map(
               (task) =>
-                `#${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""} ${task.content}`
+                `#${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${this.formatRequestedResource(task.requestedResource)}${task.requestedModel ? `/${task.requestedModel}` : ""} ${task.content}`
             )
           : ["(none pending)"]),
         "",
@@ -2155,7 +2155,7 @@ export class LocalCrewApp {
         ...(completed.length > 0
           ? completed.map(
               (task) =>
-                `#${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"} ${task.content}`
+                `#${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(task.assignedResource, task.assignedModel)} ${task.content}`
             )
           : ["(none completed yet)"]),
         "",
@@ -2211,7 +2211,7 @@ export class LocalCrewApp {
       .sort((left, right) => right[1].calls - left[1].calls)
       .map(
         ([key, bucket]) =>
-          `@${key}: ${bucket.calls} call(s), ${bucket.errors} error(s), avg ${bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0}ms`
+          `@${this.toDisplayResourceAlias(key)}: ${bucket.calls} call(s), ${bucket.errors} error(s), avg ${bucket.calls > 0 ? Math.round(bucket.totalDurationMs / bucket.calls) : 0}ms`
       );
     const capacity = getResourceCapacitySummary(this.rootDir);
 
@@ -2231,13 +2231,13 @@ export class LocalCrewApp {
         ...(pending.length > 0
           ? pending.map(
               (task) =>
-                `- Pending #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${task.requestedResource ? ` -> ${task.requestedResource}` : ""}${task.requestedModel ? `/${task.requestedModel}` : ""}: ${task.content}`
+                `- Pending #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${this.formatRequestedResource(task.requestedResource)}${task.requestedModel ? `/${task.requestedModel}` : ""}: ${task.content}`
             )
           : ["- Pending: (none)"]),
         ...(completed.length > 0
           ? completed.map(
               (task) =>
-                `- Completed #${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${task.assignedResource ?? "?"}/${task.assignedModel ?? "?"}: ${task.content}`
+                `- Completed #${task.id}${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(task.assignedResource, task.assignedModel)}: ${task.content}`
             )
           : ["- Completed: (none recent)"])
       ].join("\n"),
@@ -2631,6 +2631,56 @@ export class LocalCrewApp {
 
   private resolveOrchestratorAlias(): string {
     return this.config.orchestratorResourceAlias ?? getOrchestratorResourceAlias(this.rootDir);
+  }
+
+  private toDisplayResourceAlias(resourceAlias: string | null | undefined): string {
+    if (!resourceAlias) {
+      return "?";
+    }
+
+    if (resourceAlias === this.resolveOrchestratorAlias()) {
+      return resourceAlias;
+    }
+
+    if (this.config.endpoints[resourceAlias]) {
+      return resourceAlias;
+    }
+
+    const looksHostStyle =
+      resourceAlias.includes(".") ||
+      /^(desktop-|laptop-|mac-|macbook-|imac-|windows-|win-|host-|node-)/i.test(resourceAlias) ||
+      (resourceAlias.split("-").length >= 3 && /\d/.test(resourceAlias));
+    if (!looksHostStyle) {
+      return resourceAlias;
+    }
+
+    try {
+      const profile = getResourceProfile(resourceAlias, this.rootDir);
+      const labelAlias = profile.label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      if (labelAlias && isValidAlias(labelAlias)) {
+        return labelAlias;
+      }
+    } catch {
+      // Fall through to the original alias when profile lookup fails.
+    }
+
+    return resourceAlias;
+  }
+
+  private formatResourceRoutingTarget(
+    resourceAlias: string | null | undefined,
+    model: string | null | undefined
+  ): string {
+    const displayAlias = this.toDisplayResourceAlias(resourceAlias);
+    return `@${displayAlias}/${model?.trim() ? model : "(default)"}`;
+  }
+
+  private formatRequestedResource(resourceAlias?: string): string {
+    return resourceAlias ? ` -> @${this.toDisplayResourceAlias(resourceAlias)}` : "";
   }
 
   private async persistConfig(): Promise<void> {
@@ -4740,7 +4790,7 @@ export class LocalCrewApp {
       return {
         lines: [],
         errors: [
-          `Agent chat failed for @${agent.slug} via ${selection.alias} (${endpoint.baseUrl}): ${(error as Error).message}`
+          `Agent chat failed for @${agent.slug} via ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)} (${endpoint.baseUrl}): ${(error as Error).message}`
         ],
         shouldExit: false
       };
@@ -4796,7 +4846,7 @@ export class LocalCrewApp {
       }
     }
     await appendChangelogEntry(
-      `Agent @${agent.slug} replied via ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
+      `Agent @${agent.slug} replied via ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
     );
 
@@ -4809,7 +4859,7 @@ export class LocalCrewApp {
         ...queued.map(
           (task) =>
             `Queued #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""}${
-              task.requestedResource ? ` -> ${task.requestedResource}` : ""
+              this.formatRequestedResource(task.requestedResource)
             }${task.requestedModel ? `/${task.requestedModel}` : ""} from @${agent.slug}: ${task.content}`
         )
       ],
@@ -5117,7 +5167,7 @@ export class LocalCrewApp {
         telemetrySummary
       });
       task.requestedResource = undefined;
-      routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${selection.alias}.`;
+      routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${this.toDisplayResourceAlias(selection.alias)}.`;
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -5152,7 +5202,7 @@ export class LocalCrewApp {
       });
       if (recovery.retried) {
         return {
-          lines: [`Auto task #${task.id} failed on ${selection.alias} (no model). Retrying on another resource.`],
+          lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (no model). Retrying on another resource.`],
           errors: [],
           shouldExit: false
         };
@@ -5164,7 +5214,7 @@ export class LocalCrewApp {
             ]
           : [`Quarantined failed safe mode recovery task #${task.id}.`],
         errors: [
-          `Auto task #${task.id} could not resolve a model for ${selection.alias} (${endpoint.baseUrl}).`
+          `Auto task #${task.id} could not resolve a model for @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}).`
         ],
         shouldExit: false
       };
@@ -5331,7 +5381,7 @@ export class LocalCrewApp {
       });
       if (recovery.retried) {
         return {
-          lines: [`Auto task #${task.id} failed on ${selection.alias}: ${errorMessage}. Retrying on another resource.`],
+          lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)}: ${errorMessage}. Retrying on another resource.`],
           errors: [],
           shouldExit: false
         };
@@ -5342,7 +5392,7 @@ export class LocalCrewApp {
               `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
             ]
           : [`Quarantined failed safe mode recovery task #${task.id}.`],
-        errors: [`Auto task #${task.id} failed on ${selection.alias} (${endpoint.baseUrl}): ${errorMessage}`],
+        errors: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}): ${errorMessage}`],
         shouldExit: false
       };
     }
@@ -5496,7 +5546,7 @@ export class LocalCrewApp {
       }
     }
     await appendChangelogEntry(
-      `${verification.passed ? "Completed" : "Failed"} auto task #${task.id} on ${selection.alias}/${endpoint.model}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
+      `${verification.passed ? "Completed" : "Failed"} auto task #${task.id} on ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
       this.rootDir
     );
 
@@ -5518,7 +5568,7 @@ export class LocalCrewApp {
 
     return {
       lines: [
-        `${this.getOrchestratorName()} ${verification.passed ? "completed" : "failed"} #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${selection.alias}/${endpoint.model}.`,
+        `${this.getOrchestratorName()} ${verification.passed ? "completed" : "failed"} #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}.`,
         replyText,
         ...(verification.passed ? [] : [`Verification: ${verification.reason}`]),
         ...(routingFallbackWarning ? [routingFallbackWarning] : []),
@@ -5529,7 +5579,7 @@ export class LocalCrewApp {
         ...queued.map(
           (queuedTask) =>
             `Queued #${queuedTask.id} [${queuedTask.priority}]${queuedTask.delegationRole ? ` {${queuedTask.delegationRole}}` : ""}${
-              queuedTask.requestedResource ? ` -> ${queuedTask.requestedResource}` : ""
+              this.formatRequestedResource(queuedTask.requestedResource)
             }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
         ),
         ...(dailyDigestLine ? [dailyDigestLine] : [])

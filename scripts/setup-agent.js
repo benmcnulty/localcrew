@@ -1062,11 +1062,25 @@ async function main() {
   const advertisedBaseUrl = getAdvertisedBaseUrl(machine, gatewayPort, localEndpoint);
   const discovered = discovery.discovered;
   const nickname = prompted.nickname || titleCase(machine.hostName);
+  const hostAlias = normalizeAlias(machine.hostName);
+  const nicknameAlias = normalizeAlias(nickname);
+  const existingAlias =
+    existingReport && typeof existingReport.alias === "string" && existingReport.alias.trim() !== ""
+      ? normalizeAlias(existingReport.alias)
+      : undefined;
   const alias =
     options.alias ??
-    (existingReport && typeof existingReport.alias === "string" && existingReport.alias.trim() !== ""
-      ? normalizeAlias(existingReport.alias)
-      : normalizeAlias(machine.hostName));
+    (existingAlias
+      ? existingAlias === hostAlias && nicknameAlias !== hostAlias
+        ? nicknameAlias
+        : existingAlias
+      : nicknameAlias);
+  const aliasMigratedFromHost = Boolean(
+    !options.alias &&
+      existingAlias &&
+      existingAlias === hostAlias &&
+      alias !== existingAlias
+  );
   const tier = options.tier ?? autoTier(machine);
   const deviceId = await getStableDeviceId(options.rootDir, machine);
 
@@ -1125,6 +1139,9 @@ async function main() {
   console.log(`Local report: ${reportPath}`);
   console.log(`Device nickname: ${nickname}`);
   console.log(`Agent alias: @${alias}`);
+  if (aliasMigratedFromHost) {
+    console.log(`Alias migration: switched from host-style @${hostAlias} to nickname-based @${alias}`);
+  }
   console.log(`Device ID: ${deviceId}`);
   console.log(`Local endpoint: ${localEndpoint}`);
   console.log(`Advertised endpoint: ${advertisedBaseUrl}`);
