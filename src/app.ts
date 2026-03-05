@@ -966,6 +966,10 @@ export class LocalCrewApp {
   private static readonly HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
   /** Start generating a new backlog when pending queue drops to this depth — prevents idle gaps. */
   private static readonly QUEUE_REFILL_THRESHOLD = 4;
+  /** Cooldown (ms) after a queue fill failure before retrying — prevents fill-fail loops. */
+  private static readonly FILL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  /** Timestamp of the last failed queue fill attempt (used for cooldown). */
+  private lastFillFailedAt = 0;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
   private readonly scriptTracker = new ScriptSessionTracker();
 
@@ -4890,13 +4894,28 @@ export class LocalCrewApp {
       };
     }
 
+    // Circuit breaker: if a recent fill attempt failed, respect the cooldown
+    // window so the system processes existing tasks instead of looping.
+    if (Date.now() - this.lastFillFailedAt < LocalCrewApp.FILL_COOLDOWN_MS) {
+      return { queued: [], notes: [] };
+    }
+
+    // Prevent duplicate fallback accumulation: if previous fill failures
+    // already queued diagnostic tasks, process those first.
+    const hasFallbackTasks = this.systemState.auto.pending.some(
+      (t) => t.createdBy === "orchestrator:auto-fill-fallback"
+    );
+    if (hasFallbackTasks) {
+      return { queued: [], notes: [] };
+    }
+
     const [documents, agents] = await Promise.all([
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
     const orchestratorAlias = this.resolveOrchestratorAlias();
     const resourceRoster = this.getResourceRosterText();
-    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "default", this.rootDir);
     const fillDateTime = formatCurrentDateTime();
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
@@ -4935,6 +4954,7 @@ export class LocalCrewApp {
         rawReply: draftReply
       });
     } catch (error) {
+      this.lastFillFailedAt = Date.now();
       return {
         queued: [
           await this.enqueueAutoTask(
@@ -5079,6 +5099,7 @@ export class LocalCrewApp {
         rawReply: finalReply
       });
     } catch (error) {
+      this.lastFillFailedAt = Date.now();
       return {
         queued: [
           await this.enqueueAutoTask(
