@@ -447,7 +447,7 @@ export function buildQueueFillMessages(options: {
         "RESEARCH (2 tasks): User career context. Surface job opportunities and industry signals aligned with the user profile. End each RESEARCH task line with a SEARCH[jobs]: or SEARCH[news]: grounding request. Target: autonomous agents, LLM infrastructure, TypeScript/Bun backend, developer tooling roles.",
         "KNOWLEDGE (2 tasks): Learning content enrichment. Synthesize documentation, produce skill notes, or build reference material from trusted AI/engineering sources. Use WIKIPEDIA:, SEARCH[software-engineering]:, or SEARCH[ai-engineering]: as appropriate.",
         "SYNTHESIS (1-2 tasks): Review the most recent 10-20 completed tasks. Extract recurring patterns, failure modes, and improvement opportunities. Write distilled insights to orchestrator memory or agent identity notes.",
-        "IDENTITY (1-2 tasks): Develop a domain-specific agent identity. Update researcher, synthesizer, curator, or strategist knowledge. Summarize relevant recent findings into the agent notes file.",
+        "IDENTITY (1-2 tasks): Develop a domain-specific agent identity. Update research, synthesis, knowledge, or identity agent specs. Summarize relevant recent findings into the agent notes file.",
         "Distribute requestedResource assignments explicitly so every resource alias in the inventory receives at least one task. Include at least one high-priority task.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")

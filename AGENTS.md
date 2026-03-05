@@ -25,8 +25,8 @@ Module boundaries (each has a single job; do not mix concerns):
 | `storage.ts` | File read/write primitives + `getStoragePaths()` |
 | `commands.ts` | Parse slash-command input → typed `Command` union |
 | `ollama.ts` | HTTP calls to inference endpoints (ollama, openai, anthropic) |
-| `messages.ts` | Build prompt message arrays — no I/O |
-| `resources.ts` | Resource CRUD, tier routing, capacity summary, network topology |
+| `messages.ts` | Build prompt message arrays, domain classification (`parseTaskDomain`), agent identity injection (`buildAgentIdentityBlock`) — no I/O |
+| `resources.ts` | Resource CRUD, tier routing, capacity summary, network topology, live device metrics, fairness scoring |
 | `config.ts` | Load/save participant config from `.localcrew/config.json` |
 | `session-store.ts` | Load/save shared conversation transcript |
 | `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
@@ -48,7 +48,7 @@ Module boundaries (each has a single job; do not mix concerns):
 | `internal-files.ts` | Read + search internal orchestrator memory files |
 | `speech.ts` | macOS `say` voice playback |
 | `voices.ts` | Voice preset definitions and defaults |
-| `gui.ts` | Inline browser UI HTML/CSS/JS (served via API) |
+| `gui.ts` | Inline browser UI HTML/CSS/JS (served via API); neon palette, matrix animation, SVG gauge, XSS-safe markdown rendering |
 | `terminal.ts` | ANSI colors, OSC 8 links, styled prompts, tab completion, status bar |
 | `daily-work.ts` | Daily Work briefing document: staleness detection, load/save, API snapshot |
 | `sandbox.ts` | Sandboxed Python/JS script execution: static analysis, deny-lists, resource limits |
@@ -102,6 +102,8 @@ Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Ever
 - Agents receive only their own spec and memory in prompts — not the full orchestrator state
 - Autonomous writes are redirected away from external dropbox by `shouldPreferInternalWrite()`
 - Sandboxed script execution (`sandbox.ts`) enforces static analysis deny-lists (forbidden imports, builtins, globals), CPU time limits (30s), memory limits (512MB), output caps (64KB), and temp-file cleanup. Scripts run as child processes with no network access. Session tracking blocks agents after repeated rejections.
+- Display UI markdown rendering validates URL protocols (only `http:`, `https:`, `mailto:`) to prevent `javascript:` XSS in generated content
+- Display page lifecycle (`pagehide`) cleans up SSE connections and overlay timers to prevent resource leaks
 
 ## File Access Layers
 
