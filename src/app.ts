@@ -947,6 +947,8 @@ export class LocalCrewApp {
   private readonly resourceTelemetry = new Map<string, ResourceTelemetry>();
   /** Tracks when each resource last had a network-level failure (e.g. "fetch failed"). */
   private readonly networkFailureTimes = new Map<string, number>();
+  /** ISO epoch ms of when each resource alias last received a task assignment — used for fairness scoring. */
+  private readonly resourceLastAssignedAt = new Map<string, number>();
   /** Cooldown period (ms) during which a network-failed resource gets a routing penalty. */
   private static readonly NETWORK_FAILURE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
   /** Date slug (YYYY-MM-DD) of the last successfully queued daily-work task, prevents re-queuing loop. */
@@ -957,6 +959,8 @@ export class LocalCrewApp {
   private lastHealthPollAt = 0;
   /** Interval between background health polls (5 minutes). */
   private static readonly HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
+  /** Start generating a new backlog when pending queue drops to this depth — prevents idle gaps. */
+  private static readonly QUEUE_REFILL_THRESHOLD = 4;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
   private readonly scriptTracker = new ScriptSessionTracker();
 
@@ -4869,7 +4873,7 @@ export class LocalCrewApp {
   }
 
   private async fillAutoQueue(): Promise<{ queued: AutoQueueTask[]; notes: string[] }> {
-    if (this.systemState.auto.pending.length > 0) {
+    if (this.systemState.auto.pending.length > LocalCrewApp.QUEUE_REFILL_THRESHOLD) {
       return {
         queued: [],
         notes: []
@@ -5157,14 +5161,16 @@ export class LocalCrewApp {
       selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
         resourceLoad,
         primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
-        telemetrySummary
+        telemetrySummary,
+        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt)
       });
     } catch (error) {
       const invalidRequestedResource = task.requestedResource;
       selection = chooseResourceForTask(task.content, "auto", this.rootDir, {
         resourceLoad,
         primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
-        telemetrySummary
+        telemetrySummary,
+        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt)
       });
       task.requestedResource = undefined;
       routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${this.toDisplayResourceAlias(selection.alias)}.`;
@@ -5186,6 +5192,8 @@ export class LocalCrewApp {
         this.rootDir
       );
     }
+    // Record assignment time for fairness scoring in future routing decisions.
+    this.resourceLastAssignedAt.set(selection.alias, Date.now());
     const endpoint = this.getAutoTaskEndpoint(selection);
     if (task.requestedModel) {
       endpoint.model = task.requestedModel;
@@ -5650,7 +5658,7 @@ export class LocalCrewApp {
           }
         }
 
-        if (this.systemState.auto.pending.length === 0) {
+        if (this.systemState.auto.pending.length <= LocalCrewApp.QUEUE_REFILL_THRESHOLD) {
           const ingested = await this.ingestNextInboxDocumentTask();
           if (ingested) {
             const processed = await this.processNextAutoTask();
