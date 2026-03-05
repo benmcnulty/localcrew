@@ -1,14 +1,29 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, test } from "bun:test";
 
 import {
   buildAgentChatMessages,
+  buildAgentIdentityBlock,
   buildAutoTaskMessages,
   buildQueueFillFinalizeMessages,
   buildQueueFillMessages,
   buildQueueFillReviewMessages,
-  buildTaskPreflightMessages
+  buildTaskPreflightMessages,
+  parseTaskDomain
 } from "../src/messages.ts";
 import { formatCurrentDateTime } from "../src/utils.ts";
+
+async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
+  const rootDir = await mkdtemp(join(tmpdir(), "localcrew-msg-"));
+  try {
+    await run(rootDir);
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // formatCurrentDateTime
@@ -224,5 +239,111 @@ describe("buildTaskPreflightMessages", () => {
     const messages = buildTaskPreflightMessages({ ...BASE_PREFLIGHT, directives: longDirectives });
     const directivesMessage = messages.find((m) => m.content.startsWith("Core directives summary:"));
     expect(directivesMessage?.content.length).toBeLessThan(1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseTaskDomain
+// ---------------------------------------------------------------------------
+
+describe("parseTaskDomain", () => {
+  test("parses uppercase domain tag from task content", () => {
+    expect(parseTaskDomain("{domain:RESEARCH} Find AI jobs")).toBe("research");
+  });
+
+  test("parses lowercase domain tag", () => {
+    expect(parseTaskDomain("{domain:system} Update routing docs")).toBe("system");
+  });
+
+  test("parses mixed-case domain tag", () => {
+    expect(parseTaskDomain("{domain:Knowledge} Synthesize findings")).toBe("knowledge");
+  });
+
+  test("returns null when no domain tag present", () => {
+    expect(parseTaskDomain("A plain task without domain")).toBeNull();
+  });
+
+  test("returns null for domain tag not at start of string", () => {
+    expect(parseTaskDomain("Some text {domain:RESEARCH} more text")).toBeNull();
+  });
+
+  test("returns null for empty string", () => {
+    expect(parseTaskDomain("")).toBeNull();
+  });
+
+  test("handles domain tag followed by no space", () => {
+    expect(parseTaskDomain("{domain:IDENTITY}Develop agent")).toBe("identity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildAgentIdentityBlock
+// ---------------------------------------------------------------------------
+
+describe("buildAgentIdentityBlock", () => {
+  test("reads agent identity file from external-memory/agents/{domain}.md", async () => {
+    await withTempDir(async (rootDir) => {
+      const agentsDir = join(rootDir, "external-memory", "agents");
+      await mkdir(agentsDir, { recursive: true });
+      await writeFile(join(agentsDir, "research.md"), "You are a research specialist.\n");
+
+      const block = await buildAgentIdentityBlock("research", rootDir);
+      expect(block).toBe("You are a research specialist.");
+    });
+  });
+
+  test("returns empty string when domain file does not exist", async () => {
+    await withTempDir(async (rootDir) => {
+      const block = await buildAgentIdentityBlock("nonexistent", rootDir);
+      expect(block).toBe("");
+    });
+  });
+
+  test("trims whitespace from the spec content", async () => {
+    await withTempDir(async (rootDir) => {
+      const agentsDir = join(rootDir, "external-memory", "agents");
+      await mkdir(agentsDir, { recursive: true });
+      await writeFile(join(agentsDir, "knowledge.md"), "  Knowledge organization specialist.\n\n");
+
+      const block = await buildAgentIdentityBlock("knowledge", rootDir);
+      expect(block).toBe("Knowledge organization specialist.");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildQueueFillMessages – domain-tagged generation
+// ---------------------------------------------------------------------------
+
+describe("buildQueueFillMessages – domain tags", () => {
+  test("system prompt instructs generation of domain-tagged tasks", () => {
+    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
+    const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
+    expect(allSystem).toContain("{domain:");
+    expect(allSystem).toContain("SYSTEM");
+    expect(allSystem).toContain("RESEARCH");
+    expect(allSystem).toContain("KNOWLEDGE");
+    expect(allSystem).toContain("SYNTHESIS");
+    expect(allSystem).toContain("IDENTITY");
+  });
+
+  test("requests 10-12 tasks across five domains", () => {
+    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
+    const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
+    expect(allSystem).toContain("10-12 tasks");
+    expect(allSystem).toContain("five domains");
+  });
+});
+
+describe("buildQueueFillFinalizeMessages – domain tags", () => {
+  test("finalize prompt preserves domain distribution instruction", () => {
+    const messages = buildQueueFillFinalizeMessages({
+      ...BASE_FILL_OPTIONS,
+      draftTasks: "{domain:SYSTEM} [medium] tighten routing docs",
+      reviewFeedback: "VERDICT: approve"
+    });
+    const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
+    expect(allSystem).toContain("domain");
+    expect(allSystem).toContain("6-8 tasks");
   });
 });
