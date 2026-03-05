@@ -155,8 +155,9 @@ export function renderBanner(options: BannerOptions): string[] {
   const artRow1 = "  ╦  ┌─┐┌─┐┌─┐┬    ╔═╗┬─┐┌─┐┬ ┬";
   const artRow2 = "  ║  │ ││  ├─┤│    ║  ├┬┘├┤ │││";
   const artRow3 = "  ╩═╝└─┘└─┘┴ ┴┴─┘  ╚═╝┴└─└─┘└┴┘";
-  // 256-color gradient: cyan(51) → teal(44) → blue(33) → magenta(165)
-  const gradientPalette = [51, 44, 38, 33, 99, 135, 165];
+  // 256-color gradient: cyan(51) → spring-green(48) → bright-green(83) → purple(135)
+  // Matches GUI neon palette: --n-blue #00d4ff → --n-green #00ff7f → --n-purple #b44fff
+  const gradientPalette = [51, 51, 44, 48, 83, 135, 135];
   const applyGradient = (row: string): string => {
     const chars = [...row];
     return chars.map((ch, i) => {
