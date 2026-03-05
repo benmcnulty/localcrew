@@ -162,13 +162,22 @@ export async function chatWithOllamaDetailed(
     };
   }
 
+  // Estimate prompt tokens and request a context window large enough to hold
+  // the full prompt plus a generous response buffer.  Ollama defaults to
+  // num_ctx=2048 which silently truncates large prompts and returns empty
+  // responses, so we always send an explicit value.
+  const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const estimatedPromptTokens = Math.ceil(promptChars / 3);
+  const numCtx = Math.max(4096, estimatedPromptTokens + 2048);
+
   const response = await fetchFn(`${trimTrailingSlash(endpoint.baseUrl)}/api/chat`, {
     method: "POST",
     headers,
     body: JSON.stringify({
       model: endpoint.model,
       messages,
-      stream: false
+      stream: false,
+      options: { num_ctx: numCtx }
     }),
     signal: makeFetchSignal()
   });
