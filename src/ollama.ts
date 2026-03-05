@@ -13,8 +13,8 @@ export function getFetchTimeoutMs(): number {
   return getEnvNumber("LOCALCREW_FETCH_TIMEOUT_MS", 120_000);
 }
 
-function makeFetchSignal(): AbortSignal | undefined {
-  const timeoutMs = getFetchTimeoutMs();
+function makeFetchSignal(overrideMs?: number): AbortSignal | undefined {
+  const timeoutMs = overrideMs ?? getFetchTimeoutMs();
   if (timeoutMs <= 0) return undefined;
   return AbortSignal.timeout(timeoutMs);
 }
@@ -37,7 +37,8 @@ function formatHttpError(status: number, bodyText: string): string {
 export async function chatWithOllamaDetailed(
   endpoint: EndpointConfig,
   messages: ChatMessage[],
-  fetchFn: FetchFn = fetch
+  fetchFn: FetchFn = fetch,
+  timeoutMs?: number
 ): Promise<OllamaChatResult> {
   const headers: Record<string, string> = {
     "content-type": "application/json"
@@ -61,7 +62,7 @@ export async function chatWithOllamaDetailed(
         messages,
         stream: false
       }),
-      signal: makeFetchSignal()
+      signal: makeFetchSignal(timeoutMs)
     });
 
     if (!response.ok) {
@@ -118,7 +119,7 @@ export async function chatWithOllamaDetailed(
         ...(systemText ? { system: systemText } : {}),
         messages: anthropicMessages
       }),
-      signal: makeFetchSignal()
+      signal: makeFetchSignal(timeoutMs)
     });
 
     if (!response.ok) {
@@ -179,7 +180,7 @@ export async function chatWithOllamaDetailed(
       stream: false,
       options: { num_ctx: numCtx }
     }),
-    signal: makeFetchSignal()
+    signal: makeFetchSignal(timeoutMs)
   });
 
   if (!response.ok) {
@@ -198,7 +199,10 @@ export async function chatWithOllamaDetailed(
   };
 
   if (typeof body.message?.content !== "string" || body.message.content.trim() === "") {
-    throw new Error("Ollama response was missing message.content.");
+    const evalInfo = `eval_count=${body.eval_count ?? "?"} done_reason=${body.done_reason ?? "?"}`;
+    throw new Error(
+      `Ollama response was missing message.content (model=${endpoint.model} num_ctx=${numCtx} promptChars=${promptChars} ${evalInfo})`
+    );
   }
 
   return {

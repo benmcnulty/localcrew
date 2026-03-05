@@ -968,6 +968,7 @@ export class LocalCrewApp {
   private static readonly QUEUE_REFILL_THRESHOLD = 4;
   /** Cooldown (ms) after a queue fill failure before retrying — prevents fill-fail loops. */
   private static readonly FILL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly QUEUE_FILL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — queue fill prompts are large
   /** Timestamp of the last failed queue fill attempt (used for cooldown). */
   private lastFillFailedAt = 0;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
@@ -2738,11 +2739,12 @@ export class LocalCrewApp {
     messages: ChatMessage[];
     summary: string;
     target?: string;
+    timeoutMs?: number;
   }): Promise<OllamaChatResult> {
     const started = Date.now();
 
     try {
-      const result = await chatWithOllamaDetailed(options.endpoint, options.messages, this.fetchFn);
+      const result = await chatWithOllamaDetailed(options.endpoint, options.messages, this.fetchFn, options.timeoutMs);
       const durationMs =
         typeof result.totalDuration === "number"
           ? Math.round(result.totalDuration / 1_000_000)
@@ -4915,7 +4917,7 @@ export class LocalCrewApp {
     ]);
     const orchestratorAlias = this.resolveOrchestratorAlias();
     const resourceRoster = this.getResourceRosterText();
-    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "default", this.rootDir);
+    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
     const fillDateTime = formatCurrentDateTime();
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
@@ -4941,7 +4943,8 @@ export class LocalCrewApp {
           resourceAlias: orchestratorAlias,
           target: this.getOrchestratorName(),
           messages: draftMessages,
-          summary: "Drafting the auto queue backlog."
+          summary: "Drafting the auto queue backlog.",
+          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS
         })
       ).text;
       draftReply = await this.resolveExternalTools({
@@ -5086,7 +5089,8 @@ export class LocalCrewApp {
           messages: finalizeMessages,
           summary: reviewerResource
             ? `Finalizing the auto queue backlog after critique from @${reviewerResource.alias}.`
-            : "Finalizing the auto queue backlog without a secondary reviewer."
+            : "Finalizing the auto queue backlog without a secondary reviewer.",
+          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS
         })
       ).text;
       finalReply = await this.resolveExternalTools({

@@ -560,9 +560,9 @@ describe("LocalCrewApp", () => {
           "medium:Tighten the queue routing rubric.",
           "low:Audit stale memory summaries."
         ]);
-        // Queue fill uses "default" purpose (not "reasoning") to avoid
-        // overloading the orchestrator with its heaviest model.
-        expect(seenModels).toEqual(["llama3.1:8b", "llama3.1:8b", "llama3.1:8b"]);
+        // Queue fill uses "reasoning" purpose for draft/finalize (planning
+        // needs a stronger model), while review uses the reviewer's "default".
+        expect(seenModels).toEqual(["gpt-oss:20b", "llama3.1:8b", "gpt-oss:20b"]);
       } finally {
         if (previousName === undefined) {
           delete process.env.LOCALCREW_ORCHESTRATOR_NAME;
