@@ -487,9 +487,13 @@ html, body {
 
 .logo {
   font-size: 17px;
-  font-weight: 700;
-  color: #4f8ef7;
+  font-weight: 900;
   letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #00d4ff 0%, #00ff7f 52%, #b44fff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 6px rgba(0,212,255,0.3));
 }
 
 .topbar-center {
@@ -1009,8 +1013,15 @@ pre {
 }
 
 @media (min-width: 1920px) {
+  html { font-size: 18px; }
+
   #sidebar {
     width: 300px;
+  }
+
+  #topbar {
+    height: 64px;
+    padding: 0 32px;
   }
 
   #content {
@@ -1026,6 +1037,48 @@ pre {
     font-size: 22px;
     margin-bottom: 18px;
   }
+}
+
+@media (min-width: 3840px) {
+  html { font-size: 24px; }
+}
+
+@media (max-width: 767px) {
+  #layout { flex-direction: column; }
+
+  #sidebar {
+    display: flex;
+    flex-direction: row;
+    height: auto;
+    width: 100%;
+    border-right: none;
+    border-top: 1px solid #2a2d3e;
+    order: 2;
+    overflow-x: auto;
+    padding: 0;
+  }
+
+  .nav-item {
+    flex-direction: column;
+    padding: 8px 12px;
+    font-size: 11px;
+    min-width: 60px;
+    border-left: none;
+    border-top: 2px solid transparent;
+    text-align: center;
+  }
+
+  .nav-item.active {
+    border-left-color: transparent;
+    border-top-color: #4f8ef7;
+  }
+
+  #content { order: 1; }
+}
+
+@media (max-width: 1024px) {
+  .nav-item { min-height: 44px; }
+  button, .btn { min-height: 44px; min-width: 44px; }
 }
 `;
 }
@@ -1958,12 +2011,30 @@ export function getDisplayHtml(): string {
       --fs-metric: 2.2rem;
       --fs-task:   1.02rem;
     }
+    @media (max-width: 374px) {
+      :root {
+        --topbar-h:42px;--logbar-h:30px;--gap:5px;--pad:8px;--radius:4px;
+        --fs-xs:0.56rem;--fs-sm:0.66rem;--fs-base:0.76rem;--fs-md:0.86rem;
+        --fs-xl:1.4rem;--fs-metric:1.7rem;--fs-task:0.85rem;
+      }
+    }
+    @media (min-width: 375px) and (max-width: 767px) {
+      :root {
+        --topbar-h:46px;--logbar-h:33px;--gap:7px;--pad:10px;--radius:5px;
+        --fs-xs:0.60rem;--fs-sm:0.70rem;--fs-base:0.80rem;--fs-md:0.92rem;
+        --fs-xl:1.6rem;--fs-metric:2.0rem;--fs-task:0.92rem;
+      }
+    }
     @media (min-width: 768px) {
       :root {
         --topbar-h:56px;--logbar-h:40px;--gap:12px;--pad:16px;
         --fs-sm:0.78rem;--fs-base:0.88rem;--fs-md:1.05rem;
         --fs-xl:2.1rem;--fs-metric:3rem;--fs-task:1.1rem;
       }
+    }
+    @media (min-width: 1024px) and (max-width: 1199px) {
+      #dpnet { flex: 0 0 clamp(180px,22vw,220px); }
+      #dpmet { flex: 0 0 clamp(200px,22vw,260px); }
     }
     @media (min-width: 1200px) {
       :root {
@@ -2049,9 +2120,11 @@ export function getDisplayHtml(): string {
       padding: 0 var(--pad); gap: var(--gap); flex-shrink: 0;
     }
     .dlogo {
-      font-size: var(--fs-lg); font-weight: 800;
-      color: var(--n-blue); letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0;
-      text-shadow: 0 0 8px var(--n-blue), 0 0 20px var(--n-blue), 0 0 50px rgba(0,212,255,0.4);
+      font-size: var(--fs-lg); font-weight: 900;
+      letter-spacing: -0.01em; white-space: nowrap; flex-shrink: 0;
+      background: linear-gradient(120deg, var(--n-blue) 0%, var(--n-green) 52%, var(--n-purple) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      filter: drop-shadow(0 0 10px rgba(0,212,255,0.4)) drop-shadow(0 0 22px rgba(0,255,127,0.18));
     }
     .dtop-center {
       display: flex; align-items: center; gap: 0.65em;
@@ -2219,10 +2292,23 @@ export function getDisplayHtml(): string {
     .dmini-lbl { font-size: var(--fs-xs); color: rgba(0,255,127,0.5); text-transform: uppercase; letter-spacing: 0.07em; }
 
     /* ── Main panel ───────────────────────────────────────────────────────── */
+    .dtask-card {
+      background: rgba(0,212,255,0.04);
+      border: 1px solid rgba(0,212,255,0.14);
+      border-left: 3px solid rgba(0,212,255,0.5);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 0.75em 1em;
+      flex-shrink: 0;
+    }
+    .dtask-label {
+      font-size: var(--fs-xs); font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.1em; color: rgba(0,212,255,0.45);
+      margin-bottom: 0.45em; display: flex; align-items: center; gap: 0.5em;
+    }
     #dtask {
       font-size: var(--fs-task); font-weight: 600; line-height: 1.45;
       display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
-      overflow: hidden; flex-shrink: 0; transition: color 0.5s;
+      overflow: hidden; transition: color 0.5s;
     }
     @media (min-width: 1920px) { #dtask { -webkit-line-clamp: 5; } }
 
@@ -2254,51 +2340,85 @@ export function getDisplayHtml(): string {
       box-shadow: 0 0 10px rgba(0,212,255,0.6), 0 0 24px rgba(0,255,127,0.3);
       transition: width 0.8s ease;
     }
+    /* ── Center panel layout: task card → side-by-side row ──────────────── */
+    .dpmain-row {
+      display: flex; flex: 1; min-height: 0; gap: var(--gap);
+    }
+    .dpmain-queue {
+      flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; overflow: hidden;
+    }
+    .dpmain-gauge {
+      flex: 0 0 clamp(130px, 36%, 240px); min-width: 0;
+      display: flex; flex-direction: column; gap: 4px;
+      border-left: 1px solid rgba(0,212,255,0.1);
+      padding-left: var(--gap);
+    }
     #dqlist {
       display: flex; flex-direction: column; gap: 5px;
-      overflow-y: auto; max-height: 115px; flex-shrink: 0;
+      flex: 1; overflow-y: auto; min-height: 0;
     }
-    @media (min-width: 1920px) { #dqlist { max-height: 230px; } }
-    @media (min-width: 3840px) { #dqlist { max-height: 420px; } }
-    @media (min-width: 5120px) { #dqlist { max-height: 560px; } }
     .dqitem {
-      display: flex; align-items: flex-start; gap: 0.5em;
-      font-size: var(--fs-sm); color: rgba(224,232,248,0.6); line-height: 1.4;
+      display: flex; align-items: flex-start; gap: 0.6em;
+      padding: 0.45em 0.65em;
+      background: rgba(0,212,255,0.035);
+      border: 1px solid rgba(0,212,255,0.1);
+      border-left: 2px solid rgba(0,212,255,0.35);
+      border-radius: 0 4px 4px 0;
+      font-size: var(--fs-sm); color: rgba(224,232,248,0.65); line-height: 1.4;
     }
-    .dqnum { font-family: "SF Mono",ui-monospace,monospace; color: var(--muted2); flex-shrink: 0; min-width: 1.6em; }
+    .dqnum {
+      font-family: "SF Mono",ui-monospace,monospace; font-size: var(--fs-xs); font-weight: 800;
+      color: rgba(0,212,255,0.55); flex-shrink: 0;
+      background: rgba(0,212,255,0.1); padding: 0.1em 0.35em;
+      border-radius: 3px; min-width: 1.4em; text-align: center;
+    }
     .dqtext { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
-    /* Sparkline */
-    .dspark-wrap { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
-    .dspark-hdr { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-    #dtpmlbl {
-      font-size: var(--fs-sm); font-family: "SF Mono",ui-monospace,monospace; font-weight: 700;
-      color: var(--n-blue); text-shadow: 0 0 8px var(--n-blue), 0 0 18px rgba(0,212,255,0.5);
+    /* Radial gauge — compact within right column of .dpmain-row */
+    .dgauge-wrap { display: flex; flex-direction: column; gap: 4px; flex: 1; min-height: 0; }
+    .dgauge-hdr { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; gap: 2px; }
+    .dgauge-cur {
+      font-size: var(--fs-xl); font-family: "SF Mono",ui-monospace,monospace; font-weight: 800;
+      color: var(--n-blue); text-shadow: 0 0 10px var(--n-blue), 0 0 24px rgba(0,212,255,0.35);
+      font-variant-numeric: tabular-nums; line-height: 1;
     }
-    #dsparkline { display: block; width: 100%; flex: 1; min-height: 60px; }
+    .dgauge-sublbl {
+      font-size: var(--fs-xs); color: rgba(0,212,255,0.4); text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    #dtpmlbl { display: none; } /* value displayed via .dgauge-cur directly */
+    .dgauge-container { flex: 1; min-height: 0; max-height: clamp(160px, 50vh, 300px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #dgauge { width: 100%; height: 100%; display: block; }
+    .dgauge-val-text {
+      font-size: 22px; font-weight: 800; fill: var(--n-blue);
+      font-family: "SF Mono","Fira Code",ui-monospace,monospace;
+      filter: drop-shadow(0 0 5px var(--n-blue));
+    }
+    .dgauge-lbl-text {
+      font-size: 7px; fill: rgba(0,212,255,0.35); text-transform: uppercase;
+      letter-spacing: 0.14em; font-family: system-ui,sans-serif;
+    }
 
-    /* ── Metrics panel ────────────────────────────────────────────────────── */
-    .dmet-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: var(--gap); flex-shrink: 0; width: 100%; min-width: 0; }
-    @media (min-width: 768px) and (max-width: 1199px) { .dmet-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-    @media (min-width: 3840px) { .dmet-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-    .dmet-tile {
-      background: rgba(255,45,120,0.04);
-      border: 1px solid rgba(255,45,120,0.18);
-      border-radius: 6px; padding: 0.8em 0.5em;
-      display: flex; flex-direction: column; align-items: center; gap: 0.22em;
+    /* ── Metrics panel — horizontal stat rows ────────────────────────────── */
+    .dstat-group { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+    .dstat-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.55em 0.75em; border-radius: var(--radius);
+      border-left: 3px solid; gap: 0.5em;
     }
-    .dmet-val {
-      font-size: var(--fs-metric); font-weight: 800;
-      font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: 0.03em;
-      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+    .dstat-row-done   { border-left-color: #00ff7f;         background: rgba(0,255,127,0.04); }
+    .dstat-row-events { border-left-color: var(--n-purple); background: rgba(180,79,255,0.04); }
+    .dstat-row-tokens { border-left-color: var(--n-amber);  background: rgba(255,204,0,0.04); }
+    .dstat-val {
+      font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums;
+      line-height: 1; letter-spacing: 0.02em; flex-shrink: 0;
     }
-    .mv-tpm    { color: var(--n-blue);   text-shadow: 0 0 8px var(--n-blue),  0 0 24px rgba(0,212,255,0.4); }
-    .mv-done   { color: #00ff7f;         text-shadow: 0 0 8px #00ff7f,        0 0 24px rgba(0,255,127,0.4); }
-    .mv-events { color: var(--n-purple); text-shadow: 0 0 8px var(--n-purple),0 0 24px rgba(180,79,255,0.4); }
-    .mv-tokens { color: var(--n-amber);  text-shadow: 0 0 8px var(--n-amber), 0 0 24px rgba(255,204,0,0.4); }
-    .dmet-lbl {
-      font-size: var(--fs-xs); color: rgba(255,45,120,0.5); text-transform: uppercase;
-      letter-spacing: 0.08em; text-align: center; line-height: 1.2;
+    .mv-done   { color: #00ff7f;         text-shadow: 0 0 8px #00ff7f,        0 0 20px rgba(0,255,127,0.35); }
+    .mv-events { color: var(--n-purple); text-shadow: 0 0 8px var(--n-purple),0 0 20px rgba(180,79,255,0.35); }
+    .mv-tokens { color: var(--n-amber);  text-shadow: 0 0 8px var(--n-amber), 0 0 20px rgba(255,204,0,0.35); }
+    .dstat-lbl {
+      font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em;
+      opacity: 0.45; text-align: right; line-height: 1.3;
     }
     .dmodels { display: flex; flex-direction: column; gap: 8px; flex: 1; overflow-y: auto; min-height: 0; }
     @media (min-width: 768px) and (max-width: 1199px) { .dmodels { display: none; } }
@@ -2730,36 +2850,75 @@ export function getDisplayHtml(): string {
 
     <section id="dpmain" class="dpanel">
       <h2 class="dpanel-title">&#x25cf; Current Focus</h2>
-      <div id="dtask">Connecting&hellip;</div>
-      <div>
-        <div class="dqueue-hdr">
-          <span class="dsub">Queue</span>
-          <span id="dqfrac">0 pending &middot; 0 done</span>
+      <div class="dtask-card">
+        <div class="dtask-label">
+          <span class="ddot ddot-blue" id="dtask-dot"></span>
+          Active Task
         </div>
-        <div class="dtrack" style="margin-top:7px"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
-        <div id="dqlist" style="margin-top:9px"></div>
+        <div id="dtask">Connecting&hellip;</div>
       </div>
-      <div class="dspark-wrap">
-        <div class="dspark-hdr">
-          <span class="dsub">Token Activity <span style="color:var(--muted);font-size:0.85em">(60s)</span></span>
-          <span id="dtpmlbl">&mdash; tok/min</span>
+      <div class="dpmain-row">
+        <div class="dpmain-queue">
+          <div class="dqueue-hdr">
+            <span class="dsub">Queue</span>
+            <span id="dqfrac">0 pending &middot; 0 done</span>
+          </div>
+          <div class="dtrack"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
+          <div id="dqlist"></div>
         </div>
-        <canvas id="dsparkline"></canvas>
+        <div class="dpmain-gauge">
+          <div class="dgauge-wrap">
+            <div class="dgauge-hdr">
+              <span id="dgauge-bigval" class="dgauge-cur">&mdash;</span>
+              <span class="dgauge-sublbl">tok&thinsp;/&thinsp;min</span>
+            </div>
+            <div class="dgauge-container">
+              <svg id="dgauge" viewBox="0 0 200 145" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <filter id="neon-glow" x="-40%" y="-40%" width="180%" height="180%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+                    <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                  </filter>
+                  <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#00d4ff"/>
+                    <stop offset="60%" stop-color="#00ff7f"/>
+                    <stop offset="100%" stop-color="#ffcc00"/>
+                  </linearGradient>
+                </defs>
+                <path id="dgauge-track" fill="none" stroke="rgba(0,212,255,0.1)" stroke-width="10" stroke-linecap="round"/>
+                <path id="dgauge-fill" fill="none" stroke="url(#gauge-grad)" stroke-width="10" stroke-linecap="round" pathLength="100" filter="url(#neon-glow)" style="transition:stroke-dashoffset 1.2s ease"/>
+                <g id="dgauge-ticks"></g>
+                <text id="dgauge-val" class="dgauge-val-text" x="100" y="95" text-anchor="middle">&mdash;</text>
+                <text class="dgauge-lbl-text" x="100" y="110" text-anchor="middle">tok / min</text>
+              </svg>
+            </div>
+            <span id="dtpmlbl" style="display:none"></span>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="dpmet" class="dpanel">
       <h2 class="dpanel-title">&#x25cf; Metrics</h2>
-      <div class="dmet-grid">
-        <div class="dmet-tile"><div id="dtpmbig" class="dmet-val mv-tpm">&mdash;</div><div class="dmet-lbl">tok / min</div></div>
-        <div class="dmet-tile"><div id="dtasksdone" class="dmet-val mv-done">&mdash;</div><div class="dmet-lbl">tasks done</div></div>
-        <div class="dmet-tile"><div id="devents" class="dmet-val mv-events">&mdash;</div><div class="dmet-lbl">events</div></div>
-        <div class="dmet-tile"><div id="dtokens" class="dmet-val mv-tokens">&mdash;</div><div class="dmet-lbl">tokens</div></div>
+      <div class="dstat-group">
+        <div class="dstat-row dstat-row-done">
+          <div id="dtasksdone" class="dstat-val mv-done">&mdash;</div>
+          <div class="dstat-lbl">Tasks<br>Done</div>
+        </div>
+        <div class="dstat-row dstat-row-events">
+          <div id="devents" class="dstat-val mv-events">&mdash;</div>
+          <div class="dstat-lbl">Audit<br>Events</div>
+        </div>
+        <div class="dstat-row dstat-row-tokens">
+          <div id="dtokens" class="dstat-val mv-tokens">&mdash;</div>
+          <div class="dstat-lbl">Total<br>Tokens</div>
+        </div>
       </div>
       <div class="dmodels">
         <div class="dsub" style="flex-shrink:0;color:rgba(180,79,255,0.5)">Model Activity</div>
         <div id="dmodelbars" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:9px;min-height:0"></div>
       </div>
+      <div style="display:none"><span id="dtpmbig"></span></div>
     </section>
   </div>
 
@@ -2795,7 +2954,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <script>
-  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,tokenWin:[],tpmHist:[],busyResources:{},activeAliases:{},resourceHealth:{}};
+  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,busyResources:{},activeAliases:{},resourceHealth:{},ema:{rate:0,lastT:0,timer:null,peak:10000}};
   var clockEl=document.getElementById('dclock');
   function tickClock(){
     clockEl.textContent=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -2837,9 +2996,14 @@ export function getDisplayHtml(): string {
     el('dorch').textContent=data.orchestratorName||'\u2014';
     var mode=data.mode||'command',modeEl=el('dmode');
     modeEl.textContent=mode.toUpperCase();modeEl.className='m-'+mode;
-    var busyEl=el('dbusy');
-    if(data.auto&&data.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
-    else{busyEl.style.display='none';}
+    var busyEl=el('dbusy');var taskDotPoll=el('dtask-dot');
+    if(data.auto&&data.auto.busy){
+      if(busyEl){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
+      if(taskDotPoll)taskDotPoll.className='ddot ddot-amber dpulse';
+    } else {
+      if(busyEl)busyEl.style.display='none';
+      if(taskDotPoll)taskDotPoll.className='ddot ddot-blue';
+    }
 
     var taskEl=el('dtask'),next=data.nextTask,last=data.lastCompleted;
     if(next&&next.content){
@@ -2950,30 +3114,45 @@ export function getDisplayHtml(): string {
   async function loadAudit(){
     var data=await fetchJ('/api/audit?limit=50');
     if(!Array.isArray(data))return;
-    var newEvs=[],i,ev;
+    var newEvs=[],i,ev,totalNew=0;
     for(i=0;i<data.length;i++){if(data[i].id>ST.lastId)newEvs.push(data[i]);}
     if(newEvs.length>0){
       for(i=0;i<newEvs.length;i++){
         ev=newEvs[i];
         if(ev.summary)mxFeedText(ev.summary);
-        if(ev.evalCount&&ev.evalCount>0)ST.tokenWin.push({t:new Date(ev.timestamp).getTime(),n:ev.evalCount});
+        if(ev.evalCount&&ev.evalCount>0)totalNew+=ev.evalCount;
         if(ev.id>ST.lastId)ST.lastId=ev.id;
       }
-      var cutoff=Date.now()-60000;
-      ST.tokenWin=ST.tokenWin.filter(function(p){return p.t>=cutoff;});
       ST.audit=data.slice(0,30);renderLog();
+      if(totalNew>0)updateTpmEma(totalNew);
     }
-    var tpm=calcTpm();
-    ST.tpmHist.push(tpm);if(ST.tpmHist.length>80)ST.tpmHist.shift();
-    setVal('dtpmlbl',fmt(tpm)+' tok/min');setVal('dtpmbig',fmt(tpm));
-    drawSpark();
+    if(MX.buf.length<200&&ST.audit.length>0){
+      for(var ri=0;ri<Math.min(ST.audit.length,10);ri++){
+        if(ST.audit[ri].summary)mxFeedText(ST.audit[ri].summary);
+      }
+    }
   }
-  function calcTpm(){
-    if(!ST.tokenWin.length)return 0;
-    var span=Math.min(60000,Date.now()-ST.tokenWin[0].t);
-    if(span<2000)return 0;
-    var total=0;for(var i=0;i<ST.tokenWin.length;i++)total+=ST.tokenWin[i].n;
-    return Math.round(total*60000/span);
+  function updateTpmEma(tokens){
+    var now=Date.now();
+    var elapsed=ST.ema.lastT?(now-ST.ema.lastT)/1000:30;
+    var instant=elapsed>0.3?(tokens/elapsed*60):ST.ema.rate;
+    ST.ema.rate=ST.ema.rate===0?instant:0.22*instant+0.78*ST.ema.rate;
+    ST.ema.lastT=now;
+    if(ST.ema.rate>ST.ema.peak)ST.ema.peak=ST.ema.rate*1.25;
+    clearTimeout(ST.ema.timer);
+    ST.ema.timer=setTimeout(decayTpm,6000);
+    applyTpm(Math.round(ST.ema.rate));
+  }
+  function decayTpm(){
+    ST.ema.rate*=0.65;
+    applyTpm(Math.round(ST.ema.rate));
+    if(ST.ema.rate>5){ST.ema.timer=setTimeout(decayTpm,2500);}
+    else{ST.ema.rate=0;applyTpm(0);}
+  }
+  function applyTpm(tpm){
+    setVal('dgauge-bigval',tpm>0?fmt(tpm):'—');
+    setVal('dtpmbig',fmt(tpm));
+    drawGauge(tpm,Math.max(ST.ema.peak,10000));
   }
   function renderLog(){
     var feed=el('dlogfeed');
@@ -3020,8 +3199,14 @@ export function getDisplayHtml(): string {
     }
 
     var busyEl=el('dbusy');
-    if(d.auto&&d.auto.busy){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
-    else if(busyEl){busyEl.style.display='none';}
+    var taskDot=el('dtask-dot');
+    if(d.auto&&d.auto.busy){
+      if(busyEl){busyEl.style.display='';busyEl.className='ddot ddot-amber dpulse';}
+      if(taskDot)taskDot.className='ddot ddot-amber dpulse';
+    } else {
+      if(busyEl){busyEl.style.display='none';}
+      if(taskDot)taskDot.className='ddot ddot-blue';
+    }
 
     var auto=d.auto||{};
     var nextTask=auto.nextTask||null;
@@ -3067,11 +3252,8 @@ export function getDisplayHtml(): string {
     refreshResourceDots();
 
     if(typeof d.systemTps==='number'){
-      var tpm=Math.max(0,Math.round(d.systemTps*60));
-      ST.tpmHist.push(tpm);if(ST.tpmHist.length>80)ST.tpmHist.shift();
-      setVal('dtpmlbl',fmt(tpm)+' tok/min');
-      setVal('dtpmbig',fmt(tpm));
-      drawSpark();
+      var instPeak=Math.round(d.systemTps*60);
+      if(instPeak>ST.ema.peak)ST.ema.peak=instPeak*1.25;
     }
   }
 
@@ -3094,62 +3276,40 @@ export function getDisplayHtml(): string {
     container.innerHTML=html;
   }
 
-  // Sparkline
-  var cvs=document.getElementById('dsparkline'),ctx=cvs.getContext('2d');
-  new ResizeObserver(function(){drawSpark();}).observe(cvs);
-  function drawSpark(){
-    var W=cvs.clientWidth,H=cvs.clientHeight;
-    if(W<4||H<4)return;
-    if(cvs.width!==W||cvs.height!==H){cvs.width=W;cvs.height=H;}
-    ctx.clearRect(0,0,W,H);
-    var data=ST.tpmHist;
-    if(data.length<2){
-      ctx.strokeStyle='rgba(0,212,255,0.08)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();return;
+  // Radial gauge
+  (function(){
+    var GCX=100,GCY=84,GR=60,G_S=135,G_E=45;
+    function gPt(deg){var r=deg*Math.PI/180;return{x:GCX+GR*Math.sin(r),y:GCY-GR*Math.cos(r)};}
+    function gPt2(deg,r2){var r=deg*Math.PI/180;return{x:GCX+r2*Math.sin(r),y:GCY-r2*Math.cos(r)};}
+    function gArc(){var s=gPt(G_S),e=gPt(G_E);return'M'+s.x.toFixed(2)+' '+s.y.toFixed(2)+'A'+GR+' '+GR+' 0 1 1 '+e.x.toFixed(2)+' '+e.y.toFixed(2);}
+    var arcD=gArc();
+    var trackEl=document.getElementById('dgauge-track');
+    var fillEl=document.getElementById('dgauge-fill');
+    var valEl=document.getElementById('dgauge-val');
+    var tickEl=document.getElementById('dgauge-ticks');
+    if(trackEl)trackEl.setAttribute('d',arcD);
+    if(fillEl){fillEl.setAttribute('d',arcD);fillEl.style.strokeDasharray='100';fillEl.style.strokeDashoffset='100';}
+    function drawTicks(maxV){
+      if(!tickEl)return;
+      var n=5,html='',i,pct,deg,pt,len,pt2,lPt;
+      for(i=0;i<=n;i++){
+        pct=i/n;deg=G_S+pct*270;pt=gPt(deg);
+        len=(i===0||i===n)?7:4;
+        pt2=gPt2(deg,GR-len);
+        html+='<line x1="'+pt.x.toFixed(1)+'" y1="'+pt.y.toFixed(1)+'" x2="'+pt2.x.toFixed(1)+'" y2="'+pt2.y.toFixed(1)+'" stroke="rgba(0,212,255,0.3)" stroke-width="1.5"/>';
+        lPt=gPt2(deg,GR-18);
+        html+='<text x="'+lPt.x.toFixed(1)+'" y="'+lPt.y.toFixed(1)+'" text-anchor="middle" dominant-baseline="middle" fill="rgba(0,212,255,0.35)" font-size="8" font-family="SF Mono,ui-monospace,monospace">'+fmt(maxV*i/n)+'</text>';
+      }
+      tickEl.innerHTML=html;
     }
-    var maxV=0,i,pts=[],p;
-    for(i=0;i<data.length;i++)if(data[i]>maxV)maxV=data[i];
-    if(maxV<1)maxV=1;
-    for(i=0;i<data.length;i++)pts.push({x:(i/(data.length-1))*W,y:H-(data[i]/maxV)*(H-8)-4});
-
-    // Gradient fill
-    var grad=ctx.createLinearGradient(0,0,0,H);
-    grad.addColorStop(0,'rgba(0,212,255,0.4)');
-    grad.addColorStop(0.5,'rgba(0,255,127,0.15)');
-    grad.addColorStop(1,'rgba(0,212,255,0.01)');
-    ctx.beginPath();ctx.moveTo(pts[0].x,H);
-    for(i=0;i<pts.length;i++){p=pts[i];ctx.lineTo(p.x,p.y);}
-    ctx.lineTo(pts[pts.length-1].x,H);ctx.closePath();
-    ctx.fillStyle=grad;ctx.fill();
-
-    // Glow line
-    ctx.save();
-    ctx.shadowColor='#00d4ff';ctx.shadowBlur=8;
-    ctx.beginPath();
-    for(i=0;i<pts.length;i++){p=pts[i];if(i===0)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);}
-    ctx.strokeStyle='#00d4ff';ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();
-    ctx.restore();
-
-    // Leading edge dot
-    var last=pts[pts.length-1];
-    ctx.save();
-    ctx.shadowColor='#00ff7f';ctx.shadowBlur=16;
-    ctx.beginPath();ctx.arc(last.x,last.y,3.5,0,Math.PI*2);
-    ctx.fillStyle='#00ff7f';ctx.fill();
-    ctx.restore();
-
-    // Grid lines
-    ctx.strokeStyle='rgba(0,212,255,0.06)';ctx.lineWidth=1;
-    for(i=1;i<4;i++){var gy=(i/4)*H;ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(W,gy);ctx.stroke();}
-
-    // Max label
-    if(maxV>0){
-      ctx.fillStyle='rgba(0,212,255,0.45)';
-      var fs=Math.max(9,Math.min(12,Math.floor(H*0.17)));
-      ctx.font=fs+'px "SF Mono",ui-monospace,monospace';
-      ctx.fillText(fmt(maxV)+' max',4,fs+2);
-    }
-  }
+    window.drawGauge=function(val,maxVal){
+      var pct=Math.min(1,Math.max(0,val/(maxVal||10000)));
+      if(fillEl){fillEl.style.strokeDashoffset=String((100-pct*100).toFixed(1));}
+      if(valEl)valEl.textContent=fmt(val)||'\u2014';
+      drawTicks(maxVal||10000);
+    };
+    window.drawGauge(0,10000);
+  })();
 
   // Initial load (one fetch to populate UI before stream lifecycle kicks in)
   async function pollFull(){await checkHealth();await Promise.all([loadStatus(),loadQueue(),loadAudit()]);}
@@ -3310,7 +3470,7 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine ────────────────────────────────────────────
-  var MX={on:false,buf:[],maxBuf:5000,timer:null,cols:new Set(),maxCols:30};
+  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,timer:null,cols:new Set(),maxCols:30};
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
   MX.closeEl=document.getElementById('mx-close');
@@ -3326,16 +3486,14 @@ export function getDisplayHtml(): string {
     if(MX.buf.length>MX.maxBuf)MX.buf.splice(0,MX.buf.length-MX.maxBuf);
   }
 
+  var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
+  function mxGetChar(){
+    if(MX.buf.length>0){var c=MX.buf[MX.bufIdx%MX.buf.length];MX.bufIdx++;return c;}
+    return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
+  }
   function mxPull(n){
-    var out=[],pool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
-    for(var i=0;i<n;i++){
-      if(MX.buf.length>30){
-        var idx=Math.floor(Math.random()*MX.buf.length);
-        out.push(MX.buf.splice(idx,1)[0]);
-      } else {
-        out.push(pool.charAt(Math.floor(Math.random()*pool.length)));
-      }
-    }
+    var out=[];
+    for(var i=0;i<n;i++)out.push(mxGetChar());
     return out;
   }
 
@@ -3413,11 +3571,11 @@ export function getDisplayHtml(): string {
     MX.on=true;
     MX.overlay.classList.add('active');
     var vw=window.innerWidth;
-    var rate=vw>=3840?90:vw>=1920?130:vw>=1200?170:220;
-    MX.maxCols=vw>=3840?54:vw>=1920?40:vw>=1200?30:20;
-    var burst=Math.floor(MX.maxCols*0.45);
-    for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*30);
-    // Mix individual spawns with group spawns for chunked panel effect
+    var rawCols=Math.floor(vw/28);
+    MX.maxCols=Math.max(8,Math.min(rawCols,80));
+    var rate=Math.max(60,Math.round(220-vw/30));
+    var burst=Math.floor(MX.maxCols*0.4);
+    for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*25);
     MX.timer=setInterval(function(){
       if(Math.random()<0.2){mxSpawnGroup();}else{mxSpawn();}
     },rate);
