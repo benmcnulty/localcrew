@@ -1,5 +1,31 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ChatMessage, ConversationMessage } from "./types.ts";
 import { budgetContextBlocks } from "./utils.ts";
+
+/**
+ * Extracts a domain tag from a task content prefix.
+ * Matches patterns like "{domain:RESEARCH}" → "research".
+ */
+export function parseTaskDomain(content: string): string | null {
+  const m = content.match(/^\{domain:([A-Z]+)\}\s*/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Reads the agent identity spec file for a given domain from
+ * external-memory/agents/{domain}.md and returns its contents as a
+ * system-prompt string. Returns empty string if the file is not found.
+ */
+export async function buildAgentIdentityBlock(domain: string, rootDir: string): Promise<string> {
+  try {
+    const filePath = join(rootDir, "external-memory", "agents", `${domain}.md`);
+    const content = await readFile(filePath, "utf8");
+    return content.trim();
+  } catch {
+    return "";
+  }
+}
 
 function formatConversationLine(message: ConversationMessage): string {
   if (message.speaker === "user") {
@@ -400,9 +426,9 @@ export function buildQueueFillMessages(options: {
       role: "system",
       content: [
         `You are ${options.orchestratorName}, the orchestrator identity.`,
-        "The queue is currently empty.",
+        "The queue is running low and needs a fresh batch of work.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
-        "Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
+        "Draft a provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
         "Choose from a DIVERSE range of valuable work areas: routing quality, user-facing features, content generation, knowledge enrichment, system health, documentation, and user-benefit tasks.",
         "NEVER repeat or rephrase a task topic that was recently completed — always propose genuinely new work.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
@@ -415,8 +441,14 @@ export function buildQueueFillMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only task lines in the exact format [medium] task or [low] task.",
-        "Prefer 2-3 tasks total with at least one medium and one low.",
+        "Output only task lines in the exact format [medium] task or [low] task. Prefix each task with its domain tag exactly as shown below.",
+        "Generate exactly 10-12 tasks distributed across these five domains (2-3 per domain). Prefix each task with its domain tag in this exact format: {domain:X}",
+        "SYSTEM (2-3 tasks): Routing quality, memory hygiene, telemetry accuracy, orchestrator self-improvement, queue management. Examples: update focus-todo with lessons from recent completed tasks, refine routing heuristics, improve an orchestrator memory document.",
+        "RESEARCH (2 tasks): User career context. Surface job opportunities and industry signals aligned with the user profile. End each RESEARCH task line with a SEARCH[jobs]: or SEARCH[news]: grounding request. Target: autonomous agents, LLM infrastructure, TypeScript/Bun backend, developer tooling roles.",
+        "KNOWLEDGE (2 tasks): Learning content enrichment. Synthesize documentation, produce skill notes, or build reference material from trusted AI/engineering sources. Use WIKIPEDIA:, SEARCH[software-engineering]:, or SEARCH[ai-engineering]: as appropriate.",
+        "SYNTHESIS (1-2 tasks): Review the most recent 10-20 completed tasks. Extract recurring patterns, failure modes, and improvement opportunities. Write distilled insights to orchestrator memory or agent identity notes.",
+        "IDENTITY (1-2 tasks): Develop a domain-specific agent identity. Update researcher, synthesizer, curator, or strategist knowledge. Summarize relevant recent findings into the agent notes file.",
+        "Distribute requestedResource assignments explicitly so every resource alias in the inventory receives at least one task. Include at least one high-priority task.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
@@ -571,11 +603,10 @@ export function buildQueueFillFinalizeMessages(options: {
       role: "system",
       content: [
         `You are ${options.orchestratorName}, the orchestrator identity.`,
-        "The queue is currently empty.",
+        "The queue is running low — finalize a substantive batch to keep all resources busy.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
         "You already drafted a provisional backlog and received a critique from the secondary reviewer.",
         "Finalize the queue only after applying that critique and tightening scope, ordering, and expected impact.",
-        "Apply a measure twice, cut once standard: prefer fewer, narrower, better-justified tasks over a larger speculative backlog.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
         "Do not finalize external application, API, UI, script, or source-code implementation work into the autonomous queue; that belongs in outbox feature request tickets instead.",
         "Only finalize self-contained tasks with a clear object and expected outcome; do not finalize placeholder verb tasks.",
@@ -585,8 +616,8 @@ export function buildQueueFillFinalizeMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only approved task lines in the exact format [medium] task or [low] task.",
-        "Prefer 1-3 tasks total with at least one medium task when meaningful.",
+        "Output only approved task lines in the exact format [high] task, [medium] task, or [low] task, with each task prefixed by its domain tag (e.g. {domain:SYSTEM}).",
+        "Finalize 6-8 tasks from the approved draft, preserving domain distribution across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY. Ensure every available resource receives at least one task. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },

@@ -120,6 +120,8 @@ export interface AutoQueueTask {
   retryCount?: number;
   /** Resource alias that failed on the previous attempt, used to avoid re-routing to the same resource. */
   lastFailedResource?: string;
+  /** Domain classification for agent identity injection (e.g. "research", "synthesis", "knowledge", "identity", "system"). */
+  domain?: string;
 }
 
 export interface DailyWorkSession {
@@ -302,6 +304,15 @@ export interface TelemetrySummary {
   recent: TelemetryRecentEvent[];
 }
 
+export interface LiveDeviceMetrics {
+  loadAvg1m: number;
+  loadAvg5m: number;
+  totalMemGb: number;
+  freeMemGb: number;
+  freePct: number;
+  timestamp: number;
+}
+
 export interface ResourceSyncReport {
   alias: string;
   label: string;
@@ -327,6 +338,7 @@ export interface ResourceSyncReport {
   endpointVersion?: string;
   capabilities?: string[];
   notes?: string[];
+  liveMetrics?: LiveDeviceMetrics;
 }
 
 export interface WikipediaSearchPage {

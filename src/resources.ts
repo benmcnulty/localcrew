@@ -9,7 +9,7 @@ import {
   loadLocalEnv
 } from "./env.ts";
 import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
-import type { EndpointApiStyle, EndpointConfig, ModelProfileMode, ModelPurpose, ResourceRole } from "./types.ts";
+import type { EndpointApiStyle, EndpointConfig, LiveDeviceMetrics, ModelProfileMode, ModelPurpose, ResourceRole } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
 export type ResourceApiStyle = EndpointApiStyle;
@@ -609,13 +609,17 @@ export interface ResourceTelemetry {
 export function buildResourceTelemetry(
   alias: string,
   queueDepth: number,
-  telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> }
+  telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> },
+  liveMetrics?: LiveDeviceMetrics
 ): ResourceTelemetry {
+  const ramUsagePct = liveMetrics
+    ? Math.round((1 - liveMetrics.freeMemGb / liveMetrics.totalMemGb) * 100)
+    : 0;
   const stats = telemetrySummary?.resources?.[alias];
   if (!stats || stats.calls === 0) {
     return {
       queueDepth,
-      ramUsagePct: 0,
+      ramUsagePct,
       tokensPerSecond: 0,
       activeModel: null,
       avgQueueWaitMs: 0,
@@ -630,7 +634,7 @@ export function buildResourceTelemetry(
     : 0;
   return {
     queueDepth,
-    ramUsagePct: 0,
+    ramUsagePct,
     tokensPerSecond,
     activeModel: null,
     avgQueueWaitMs: avgDurationMs,
@@ -640,14 +644,13 @@ export function buildResourceTelemetry(
 }
 
 const SCORE_WEIGHTS = {
-  availability: 0.30,
-  // memoryHeadroom is currently inert (ramUsagePct is always 0 — we have no
-  // live RAM data). Its weight is redistributed to reliability and throughput
-  // until a real memory metric is available.
-  memoryHeadroom: 0.0,
+  availability: 0.20,
+  memoryHeadroom: 0.10,
   capabilityMatch: 0.30,
   reliability: 0.25,
-  throughput: 0.15
+  throughput: 0.10,
+  // Fairness: prevents starvation by boosting idle resources.
+  fairness: 0.05
 };
 
 const MAX_QUEUE_DEPTH = 5;
@@ -739,7 +742,8 @@ export function computeResourceScore(
   resource: ResourceProfile,
   telemetry: ResourceTelemetry,
   task: TaskMetadata,
-  healthStatus?: "online" | "offline" | "degraded"
+  healthStatus?: "online" | "offline" | "degraded",
+  lastAssignedMs?: number
 ): number {
   // Offline resources score zero — never route work to a dead endpoint.
   if (healthStatus === "offline") return 0;
@@ -752,13 +756,18 @@ export function computeResourceScore(
   const throughput = telemetry.tokensPerSecond > 0
     ? clamp01(telemetry.tokensPerSecond / 50)
     : 0.5;
+  // Fairness: resources idle longer get a bonus to prevent starvation.
+  // Score decays from 1.0 (idle ≥60 min or never assigned) to 0.0 (assigned <1s ago).
+  const idleMs = lastAssignedMs != null ? Date.now() - lastAssignedMs : 60 * 60 * 1000;
+  const fairness = Math.min(1, idleMs / (60 * 60 * 1000));
 
   let score =
     SCORE_WEIGHTS.availability * availability +
     SCORE_WEIGHTS.memoryHeadroom * memoryHeadroom +
     SCORE_WEIGHTS.capabilityMatch * capabilityMatch +
     SCORE_WEIGHTS.reliability * reliability +
-    SCORE_WEIGHTS.throughput * throughput;
+    SCORE_WEIGHTS.throughput * throughput +
+    SCORE_WEIGHTS.fairness * fairness;
 
   // Degraded resources get a 50% penalty — prefer healthy alternatives.
   if (healthStatus === "degraded") score *= 0.5;
@@ -770,7 +779,8 @@ export function routeTask(
   task: TaskMetadata,
   resources: ResourceProfile[],
   telemetry: Record<string, ResourceTelemetry>,
-  healthStatuses?: Record<string, "online" | "offline" | "degraded">
+  healthStatuses?: Record<string, "online" | "offline" | "degraded">,
+  lastAssignedByAlias?: Record<string, number>
 ): { resource: ResourceProfile; score: number; rationale: string } {
   if (resources.length === 0) {
     throw new Error("No resources are configured.");
@@ -786,7 +796,13 @@ export function routeTask(
       successRate: 1,
       failureCount: 0
     };
-    const score = computeResourceScore(resource, metrics, task, healthStatuses?.[resource.alias]);
+    const score = computeResourceScore(
+      resource,
+      metrics,
+      task,
+      healthStatuses?.[resource.alias],
+      lastAssignedByAlias?.[resource.alias]
+    );
     return { resource, score };
   });
 
@@ -921,6 +937,8 @@ export function chooseResourceForTask(
     resourceLoad?: Record<string, number>;
     primaryOrchestratorAlias?: string;
     telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> };
+    lastAssignedByAlias?: Record<string, number>;
+    liveMetricsByAlias?: Record<string, LiveDeviceMetrics & { receivedAt: number }>;
   } = {}
 ): {
   alias: string;
@@ -934,13 +952,15 @@ export function chooseResourceForTask(
 } {
   const resourceLoad = options.resourceLoad ?? {};
   const resources = sortForRouting(listResources(rootDir));
+  const liveMetricsByAlias = options.liveMetricsByAlias ?? {};
   const telemetryByAlias: Record<string, ResourceTelemetry> = Object.fromEntries(
     resources.map((resource) => [
       resource.alias,
       buildResourceTelemetry(
         resource.alias,
         getResourceLoad(resource.alias, resourceLoad),
-        options.telemetrySummary
+        options.telemetrySummary,
+        liveMetricsByAlias[resource.alias]
       )
     ])
   );
@@ -1082,7 +1102,7 @@ export function chooseResourceForTask(
   }
 
   const classified = classifyTask(task);
-  const scoredRoute = routeTask(classified, resources, telemetryByAlias);
+  const scoredRoute = routeTask(classified, resources, telemetryByAlias, undefined, options.lastAssignedByAlias);
   const fallbackPurpose =
     classified.taskType === "reasoning" || classified.taskType === "planning"
       ? "reasoning"
