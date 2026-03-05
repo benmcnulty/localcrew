@@ -391,9 +391,9 @@ describe("Display CSS: 5K breakpoint values", () => {
     );
   });
 
-  test("5K has larger queue list max-height", () => {
+  test("5K has larger network panel", () => {
     expect(displayHtml).toContain(
-      "min-width: 5120px) { #dqlist { max-height: 560px; }",
+      "min-width: 5120px) { #dpnet { flex: 0 0 640px;",
     );
   });
 
@@ -466,15 +466,15 @@ describe("Display UI: base structure", () => {
 
 describe("Display UI: metrics panel", () => {
   test("has metric tiles", () => {
-    expect(displayHtml).toContain("mv-tpm");
     expect(displayHtml).toContain("mv-done");
     expect(displayHtml).toContain("mv-events");
     expect(displayHtml).toContain("mv-tokens");
   });
 
-  test("has sparkline canvas", () => {
-    expect(displayHtml).toContain('id="dsparkline"');
-    expect(displayHtml).toContain("<canvas");
+  test("has SVG gauge for TPM", () => {
+    expect(displayHtml).toContain('id="dgauge"');
+    expect(displayHtml).toContain("<svg");
+    expect(displayHtml).toContain("dgauge-fill");
   });
 
   test("has model bars section", () => {
@@ -586,8 +586,8 @@ describe("Display JS: data loading", () => {
     expect(displayHtml).toContain("loadAudit");
   });
 
-  test("loadAudit tracks TPM via token windows", () => {
-    expect(displayHtml).toContain("calcTpm");
+  test("loadAudit tracks TPM via EMA", () => {
+    expect(displayHtml).toContain("updateTpmEma");
   });
 });
 
@@ -616,18 +616,19 @@ describe("Display JS: SSE handling", () => {
   });
 });
 
-describe("Display JS: sparkline rendering", () => {
-  test("defines drawSpark function", () => {
-    expect(displayHtml).toContain("drawSpark");
+describe("Display JS: gauge rendering", () => {
+  test("defines updateTpmEma function", () => {
+    expect(displayHtml).toContain("updateTpmEma");
   });
 
-  test("uses canvas 2D context", () => {
-    expect(displayHtml).toContain("getContext");
-    expect(displayHtml).toContain("2d");
+  test("defines applyTpm for gauge update", () => {
+    expect(displayHtml).toContain("applyTpm");
   });
 
-  test("draws gradient fill", () => {
-    expect(displayHtml).toContain("createLinearGradient");
+  test("has SVG gauge arc paths", () => {
+    expect(displayHtml).toContain("dgauge-track");
+    expect(displayHtml).toContain("dgauge-fill");
+    expect(displayHtml).toContain("stroke-dashoffset");
   });
 });
 
@@ -773,5 +774,56 @@ describe("JavaScript syntax validation", () => {
     expect(adminJs).toContain("function");
     // Should start with state declaration
     expect(adminJs.trimStart().startsWith("const state")).toBe(true);
+  });
+});
+
+// ─── Matrix Animation Robustness ──────────────────────────────────────────────
+
+describe("Matrix animation robustness", () => {
+  test("MX state object tracks burst timers array", () => {
+    expect(displayHtml).toContain("burstTimers:[]");
+  });
+
+  test("mxStart stores burst setTimeout IDs in burstTimers", () => {
+    expect(displayHtml).toContain("MX.burstTimers.push(setTimeout(mxSpawn");
+  });
+
+  test("mxStop clears burst timers and resets buffer", () => {
+    expect(displayHtml).toContain("MX.burstTimers.forEach");
+    expect(displayHtml).toContain("clearTimeout(t)");
+    expect(displayHtml).toContain("MX.burstTimers=[]");
+    expect(displayHtml).toContain("MX.buf=[]");
+    expect(displayHtml).toContain("MX.bufIdx=0");
+  });
+
+  test("mxStop clears the interval timer", () => {
+    expect(displayHtml).toContain("clearInterval(MX.timer)");
+  });
+
+  test("mxStop removes all column DOM elements", () => {
+    expect(displayHtml).toContain("MX.cols.forEach");
+    expect(displayHtml).toContain("MX.cols.clear()");
+  });
+});
+
+// ─── Page Lifecycle Cleanup ───────────────────────────────────────────────────
+
+describe("Display page lifecycle cleanup", () => {
+  test("pagehide listener closes overlays and SSE", () => {
+    expect(displayHtml).toContain("pagehide");
+    expect(displayHtml).toContain("mxStop()");
+    expect(displayHtml).toContain("dailyClose()");
+    expect(displayHtml).toContain("closeSSE()");
+  });
+});
+
+// ─── Markdown Link XSS Prevention ─────────────────────────────────────────────
+
+describe("Daily overlay markdown security", () => {
+  test("markdown link rendering validates URL protocol", () => {
+    // The mdToHtml function should check protocol safety instead of blindly inserting href
+    expect(displayHtml).toContain("new URL(u,location.href)");
+    expect(displayHtml).toContain("protocol==='http:'");
+    expect(displayHtml).toContain("protocol==='https:'");
   });
 });
