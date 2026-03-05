@@ -2215,11 +2215,11 @@ export function getDisplayHtml(): string {
       #dpmet  { flex: 0 0 100%; flex-direction: row; gap: var(--gap); min-width: 0; }
     }
     @media (min-width: 1200px) {
-      #dpnet  { flex: 0 0 clamp(205px, 16vw, 240px); }
+      #dpnet  { flex: 0 0 clamp(220px, 18vw, 280px); }
       #dpmain { flex: 1; min-width: 0; }
-      #dpmet  { flex: 0 0 clamp(220px, 18vw, 300px); max-width: clamp(220px, 18vw, 300px); min-width: 0; }
+      #dpmet  { flex: 0 0 clamp(260px, 22vw, 380px); max-width: clamp(260px, 22vw, 380px); min-width: 0; }
     }
-    @media (min-width: 1920px) { #dpnet { flex: 0 0 clamp(240px, 15vw, 300px); } #dpmet { flex: 0 0 clamp(240px, 15vw, 340px); max-width: clamp(240px, 15vw, 340px); } }
+    @media (min-width: 1920px) { #dpnet { flex: 0 0 clamp(260px, 16vw, 340px); } #dpmet { flex: 0 0 clamp(300px, 18vw, 440px); max-width: clamp(300px, 18vw, 440px); } }
     @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; max-width: 540px; } }
     @media (min-width: 5120px) { #dpnet { flex: 0 0 640px; } #dpmet { flex: 0 0 700px; max-width: 700px; } }
 
@@ -2964,7 +2964,7 @@ export function getDisplayHtml(): string {
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function fmt(n){
     if(n==null||isNaN(n))return'\u2014';
-    if(n>=1000000)return(n/1000000).toFixed(1).replace(/\.0$/,'')+'M';
+    if(n>=1000000)return(n/1000000).toFixed(3)+'M';
     if(n>=10000)return Math.round(n/1000)+'K';
     if(n>=1000)return(n/1000).toFixed(1).replace(/\.0$/,'')+'K';
     return String(Math.round(n));

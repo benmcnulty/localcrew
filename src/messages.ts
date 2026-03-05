@@ -400,9 +400,9 @@ export function buildQueueFillMessages(options: {
       role: "system",
       content: [
         `You are ${options.orchestratorName}, the orchestrator identity.`,
-        "The queue is currently empty.",
+        "The queue is running low and needs a fresh batch of work.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
-        "Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
+        "Draft a provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet.",
         "Choose from a DIVERSE range of valuable work areas: routing quality, user-facing features, content generation, knowledge enrichment, system health, documentation, and user-benefit tasks.",
         "NEVER repeat or rephrase a task topic that was recently completed — always propose genuinely new work.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
@@ -416,7 +416,7 @@ export function buildQueueFillMessages(options: {
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
         "Output only task lines in the exact format [medium] task or [low] task.",
-        "Prefer 2-3 tasks total with at least one medium and one low.",
+        "Generate 8-12 tasks to build a meaningful backlog across all available resources. Explicitly distribute tasks so every resource alias listed in the inventory gets at least one task per cycle. Include a mix of high, medium, and low priority with at least two high-priority tasks.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
@@ -571,11 +571,10 @@ export function buildQueueFillFinalizeMessages(options: {
       role: "system",
       content: [
         `You are ${options.orchestratorName}, the orchestrator identity.`,
-        "The queue is currently empty.",
+        "The queue is running low — finalize a substantive batch to keep all resources busy.",
         "Self-aware self-improvement of the local orchestration system is your default stance right now.",
         "You already drafted a provisional backlog and received a critique from the secondary reviewer.",
         "Finalize the queue only after applying that critique and tightening scope, ordering, and expected impact.",
-        "Apply a measure twice, cut once standard: prefer fewer, narrower, better-justified tasks over a larger speculative backlog.",
         "Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them.",
         "Do not finalize external application, API, UI, script, or source-code implementation work into the autonomous queue; that belongs in outbox feature request tickets instead.",
         "Only finalize self-contained tasks with a clear object and expected outcome; do not finalize placeholder verb tasks.",
@@ -585,8 +584,8 @@ export function buildQueueFillFinalizeMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only approved task lines in the exact format [medium] task or [low] task.",
-        "Prefer 1-3 tasks total with at least one medium task when meaningful.",
+        "Output only approved task lines in the exact format [high] task, [medium] task, or [low] task.",
+        "Finalize 5-8 tasks from the approved draft. Ensure every available resource receives at least one task. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
