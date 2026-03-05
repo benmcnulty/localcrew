@@ -2203,7 +2203,7 @@ export function getDisplayHtml(): string {
 
     /* ── Body layout ──────────────────────────────────────────────────────── */
     #dbody {
-      display: flex; flex: 1; overflow: hidden;
+      display: flex; flex: 1; overflow: hidden; min-height: 0;
       gap: var(--gap); padding: var(--gap); padding-bottom: 0;
     }
     #dbody > * { min-width: 0; }
@@ -2219,7 +2219,7 @@ export function getDisplayHtml(): string {
       #dpmain { flex: 1; min-width: 0; }
       #dpmet  { flex: 0 0 clamp(260px, 22vw, 380px); max-width: clamp(260px, 22vw, 380px); min-width: 0; }
     }
-    @media (min-width: 1920px) { #dpnet { flex: 0 0 clamp(260px, 16vw, 340px); } #dpmet { flex: 0 0 clamp(300px, 18vw, 440px); max-width: clamp(300px, 18vw, 440px); } }
+    @media (min-width: 1920px) { #dpnet { flex: 0 0 clamp(260px, 16vw, 340px); } #dpmet { flex: 0 0 clamp(300px, 18vw, 440px); max-width: clamp(300px, 18vw, 440px); } .dpanel { flex: 1 1 0; min-height: 0; } .dpmain-queue { flex: 1; } }
     @media (min-width: 3840px) { #dpnet { flex: 0 0 500px; } #dpmet { flex: 0 0 540px; max-width: 540px; } }
     @media (min-width: 5120px) { #dpnet { flex: 0 0 640px; } #dpmet { flex: 0 0 700px; max-width: 700px; } }
 
@@ -2311,6 +2311,30 @@ export function getDisplayHtml(): string {
       overflow: hidden; transition: color 0.5s;
     }
     @media (min-width: 1920px) { #dtask { -webkit-line-clamp: 5; } }
+
+    #dtask-meta {
+      margin-top: 0.4em; display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap;
+    }
+    .dtask-res {
+      font-size: var(--fs-xs); font-family: "SF Mono",ui-monospace,monospace;
+      font-weight: 700; color: rgba(0,212,255,0.6);
+      background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2);
+      border-radius: 3px; padding: 0.1em 0.4em;
+    }
+    .dtask-pri {
+      font-size: var(--fs-xs); font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.06em; border-radius: 3px; padding: 0.1em 0.4em;
+    }
+    .dtask-pri-high   { background: rgba(255,45,120,0.12); color: #ff2d78; border: 1px solid rgba(255,45,120,0.3); }
+    .dtask-pri-medium { background: rgba(255,204,0,0.10);  color: var(--n-amber); border: 1px solid rgba(255,204,0,0.25); }
+    .dtask-pri-low    { background: rgba(90,90,90,0.12);   color: var(--muted2);  border: 1px solid rgba(90,90,90,0.25); }
+    .dqres {
+      margin-left: auto; flex-shrink: 0;
+      font-size: var(--fs-xs); font-family: "SF Mono",ui-monospace,monospace;
+      font-weight: 600; color: rgba(0,212,255,0.45);
+      background: rgba(0,212,255,0.06); border: 1px solid rgba(0,212,255,0.15);
+      border-radius: 3px; padding: 0.1em 0.35em;
+    }
 
     .dqueue-hdr { display: flex; justify-content: space-between; align-items: center; }
     #dqfrac {
@@ -2856,6 +2880,7 @@ export function getDisplayHtml(): string {
           Active Task
         </div>
         <div id="dtask">Connecting&hellip;</div>
+        <div id="dtask-meta" style="display:none"></div>
       </div>
       <div class="dpmain-row">
         <div class="dpmain-queue">
@@ -3055,8 +3080,11 @@ export function getDisplayHtml(): string {
     if(!tasks.length){listEl.innerHTML='<div class="dempty">No pending tasks</div>';return;}
     var html='',max=Math.min(tasks.length,8);
     for(var i=0;i<max;i++){
+      var res=tasks[i].requestedResource||tasks[i].assignedResource;
       html+='<div class="dqitem"><span class="dqnum">'+(i+1)+'.</span>';
-      html+='<span class="dqtext">'+esc(tasks[i].content)+'</span></div>';
+      html+='<span class="dqtext">'+esc(tasks[i].content)+'</span>';
+      if(res)html+='<span class="dqres">@'+esc(res)+'</span>';
+      html+='</div>';
     }
     listEl.innerHTML=html;
   }
@@ -3225,6 +3253,20 @@ export function getDisplayHtml(): string {
     } else {
       taskEl.textContent='Idle — '+(d.mode||'command')+' mode';
       taskEl.style.color='var(--muted)';
+    }
+
+    var metaEl=el('dtask-meta');
+    if(metaEl){
+      var res=nextTask&&(nextTask.assignedResource||nextTask.requestedResource);
+      var pri=nextTask&&nextTask.priority?String(nextTask.priority).toUpperCase():'';
+      if(res){
+        metaEl.style.display='';
+        metaEl.innerHTML='<span class="dtask-pri dtask-pri-'+(nextTask.priority||'medium')+'">'+esc(pri)+'</span>'
+          +' <span class="dtask-res">@'+esc(res)+'</span>';
+      } else {
+        metaEl.style.display='none';
+        metaEl.innerHTML='';
+      }
     }
 
     var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0);
@@ -3413,6 +3455,7 @@ export function getDisplayHtml(): string {
       }
       if(msg.type==='daily-complete'){
         pushDisplayLog('system','DAILY_COMPLETE '+(msg.sessionId?('('+msg.sessionId+') '):'')+(msg.summary||''),true);
+        if(DAILY.on)dailyFetch();
       }
     };
     es.onerror=function(){
@@ -3675,17 +3718,20 @@ export function getDisplayHtml(): string {
       });
   }
 
+  var dailyRefreshTimer=null;
   function dailyOpen(){
     if(DAILY.on)return;
     if(MX.on)mxStop();
     DAILY.on=true;
     DAILY.overlay.classList.add('active');
     dailyFetch();
+    dailyRefreshTimer=setInterval(dailyFetch,90000);
   }
 
   function dailyClose(){
     DAILY.on=false;
     DAILY.overlay.classList.remove('active');
+    if(dailyRefreshTimer){clearInterval(dailyRefreshTimer);dailyRefreshTimer=null;}
   }
 
   var dailyBtn=document.getElementById('ddaily-btn');

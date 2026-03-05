@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { cpus, homedir, hostname, networkInterfaces, platform, totalmem } from "node:os";
+import { cpus, freemem, homedir, hostname, loadavg, networkInterfaces, platform, totalmem, uptime } from "node:os";
 
 function trimTrailingSlash(value) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -748,6 +748,28 @@ async function startAgentGateway(context) {
     }
 
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+
+    // Live system metrics endpoint — deterministic, zero-inference.
+    if (request.method === "GET" && requestUrl.pathname === "/sysinfo") {
+      const load = loadavg();
+      const total = totalmem();
+      const free = freemem();
+      const payload = JSON.stringify({
+        platform: platform(),
+        cpuLogicalCores: cpus().length,
+        loadAvg1m: Math.round(load[0] * 100) / 100,
+        loadAvg5m: Math.round(load[1] * 100) / 100,
+        totalMemGb: Math.round(total / 1073741824 * 10) / 10,
+        freeMemGb: Math.round(free / 1073741824 * 10) / 10,
+        freePct: Math.round(free / total * 100),
+        uptimeHours: Math.round(uptime() / 360) / 10,
+        timestamp: Date.now()
+      });
+      response.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      response.end(payload);
+      return;
+    }
+
     if (!isAllowedProxyPath(requestUrl.pathname, apiStyle)) {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: `Unsupported agent gateway path ${requestUrl.pathname}.` }));
@@ -1084,6 +1106,20 @@ async function main() {
   const tier = options.tier ?? autoTier(machine);
   const deviceId = await getStableDeviceId(options.rootDir, machine);
 
+  function buildLiveMetrics() {
+    const load = loadavg();
+    const total = totalmem();
+    const free = freemem();
+    return {
+      loadAvg1m: Math.round(load[0] * 100) / 100,
+      loadAvg5m: Math.round(load[1] * 100) / 100,
+      totalMemGb: Math.round(total / 1073741824 * 10) / 10,
+      freeMemGb: Math.round(free / 1073741824 * 10) / 10,
+      freePct: Math.round(free / total * 100),
+      timestamp: Date.now()
+    };
+  }
+
   const buildReport = async (latestDiscovered = discovered) => ({
     alias,
     label: nickname,
@@ -1128,7 +1164,8 @@ async function main() {
     localEndpoint,
     ...(verifiedOrchestrator.orchestratorUrl
       ? { orchestratorUrl: verifiedOrchestrator.orchestratorUrl }
-      : {})
+      : {}),
+    liveMetrics: buildLiveMetrics()
   });
   const report = await buildReport();
 

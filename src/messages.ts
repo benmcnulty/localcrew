@@ -1,5 +1,31 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ChatMessage, ConversationMessage } from "./types.ts";
 import { budgetContextBlocks } from "./utils.ts";
+
+/**
+ * Extracts a domain tag from a task content prefix.
+ * Matches patterns like "{domain:RESEARCH}" → "research".
+ */
+export function parseTaskDomain(content: string): string | null {
+  const m = content.match(/^\{domain:([A-Z]+)\}\s*/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Reads the agent identity spec file for a given domain from
+ * external-memory/agents/{domain}.md and returns its contents as a
+ * system-prompt string. Returns empty string if the file is not found.
+ */
+export async function buildAgentIdentityBlock(domain: string, rootDir: string): Promise<string> {
+  try {
+    const filePath = join(rootDir, "external-memory", "agents", `${domain}.md`);
+    const content = await readFile(filePath, "utf8");
+    return content.trim();
+  } catch {
+    return "";
+  }
+}
 
 function formatConversationLine(message: ConversationMessage): string {
   if (message.speaker === "user") {
@@ -415,8 +441,14 @@ export function buildQueueFillMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only task lines in the exact format [medium] task or [low] task.",
-        "Generate 8-12 tasks to build a meaningful backlog across all available resources. Explicitly distribute tasks so every resource alias listed in the inventory gets at least one task per cycle. Include a mix of high, medium, and low priority with at least two high-priority tasks.",
+        "Output only task lines in the exact format [medium] task or [low] task. Prefix each task with its domain tag exactly as shown below.",
+        "Generate exactly 10-12 tasks distributed across these five domains (2-3 per domain). Prefix each task with its domain tag in this exact format: {domain:X}",
+        "SYSTEM (2-3 tasks): Routing quality, memory hygiene, telemetry accuracy, orchestrator self-improvement, queue management. Examples: update focus-todo with lessons from recent completed tasks, refine routing heuristics, improve an orchestrator memory document.",
+        "RESEARCH (2 tasks): User career context. Surface job opportunities and industry signals aligned with the user profile. End each RESEARCH task line with a SEARCH[jobs]: or SEARCH[news]: grounding request. Target: autonomous agents, LLM infrastructure, TypeScript/Bun backend, developer tooling roles.",
+        "KNOWLEDGE (2 tasks): Learning content enrichment. Synthesize documentation, produce skill notes, or build reference material from trusted AI/engineering sources. Use WIKIPEDIA:, SEARCH[software-engineering]:, or SEARCH[ai-engineering]: as appropriate.",
+        "SYNTHESIS (1-2 tasks): Review the most recent 10-20 completed tasks. Extract recurring patterns, failure modes, and improvement opportunities. Write distilled insights to orchestrator memory or agent identity notes.",
+        "IDENTITY (1-2 tasks): Develop a domain-specific agent identity. Update researcher, synthesizer, curator, or strategist knowledge. Summarize relevant recent findings into the agent notes file.",
+        "Distribute requestedResource assignments explicitly so every resource alias in the inventory receives at least one task. Include at least one high-priority task.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
@@ -584,8 +616,8 @@ export function buildQueueFillFinalizeMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only approved task lines in the exact format [high] task, [medium] task, or [low] task.",
-        "Finalize 5-8 tasks from the approved draft. Ensure every available resource receives at least one task. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.",
+        "Output only approved task lines in the exact format [high] task, [medium] task, or [low] task, with each task prefixed by its domain tag (e.g. {domain:SYSTEM}).",
+        "Finalize 6-8 tasks from the approved draft, preserving domain distribution across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY. Ensure every available resource receives at least one task. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
