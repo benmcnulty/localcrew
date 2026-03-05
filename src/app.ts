@@ -5743,6 +5743,13 @@ export class LocalCrewApp {
           }
         }
 
+        // If queue is still empty after fill attempt (cooldown, circuit breaker,
+        // or failed fill), return silently instead of spamming "Auto queue is
+        // empty" every pulse.
+        if (this.systemState.auto.pending.length === 0) {
+          return { lines: [], errors: [], shouldExit: false };
+        }
+
         return this.processNextAutoTask();
       });
     } catch (error) {
