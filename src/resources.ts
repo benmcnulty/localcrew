@@ -9,7 +9,7 @@ import {
   loadLocalEnv
 } from "./env.ts";
 import { atomicWriteFile, atomicWriteFileSync, getStoragePaths, withFileLock } from "./storage.ts";
-import type { EndpointApiStyle, EndpointConfig, ModelProfileMode, ModelPurpose, ResourceRole } from "./types.ts";
+import type { EndpointApiStyle, EndpointConfig, LiveDeviceMetrics, ModelProfileMode, ModelPurpose, ResourceRole } from "./types.ts";
 
 export type ResourceTier = "top" | "mid" | "low";
 export type ResourceApiStyle = EndpointApiStyle;
@@ -609,13 +609,17 @@ export interface ResourceTelemetry {
 export function buildResourceTelemetry(
   alias: string,
   queueDepth: number,
-  telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> }
+  telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> },
+  liveMetrics?: LiveDeviceMetrics
 ): ResourceTelemetry {
+  const ramUsagePct = liveMetrics
+    ? Math.round((1 - liveMetrics.freeMemGb / liveMetrics.totalMemGb) * 100)
+    : 0;
   const stats = telemetrySummary?.resources?.[alias];
   if (!stats || stats.calls === 0) {
     return {
       queueDepth,
-      ramUsagePct: 0,
+      ramUsagePct,
       tokensPerSecond: 0,
       activeModel: null,
       avgQueueWaitMs: 0,
@@ -630,7 +634,7 @@ export function buildResourceTelemetry(
     : 0;
   return {
     queueDepth,
-    ramUsagePct: 0,
+    ramUsagePct,
     tokensPerSecond,
     activeModel: null,
     avgQueueWaitMs: avgDurationMs,
@@ -640,15 +644,12 @@ export function buildResourceTelemetry(
 }
 
 const SCORE_WEIGHTS = {
-  availability: 0.25,
-  // memoryHeadroom is currently inert (ramUsagePct is always 0 — we have no
-  // live RAM data). Its weight is redistributed to reliability and throughput
-  // until a real memory metric is available.
-  memoryHeadroom: 0.0,
+  availability: 0.20,
+  memoryHeadroom: 0.10,
   capabilityMatch: 0.30,
   reliability: 0.25,
-  throughput: 0.15,
-  // Fairness: prevents starvation by boosting idle resources (5% of availability shifted here).
+  throughput: 0.10,
+  // Fairness: prevents starvation by boosting idle resources.
   fairness: 0.05
 };
 
@@ -937,6 +938,7 @@ export function chooseResourceForTask(
     primaryOrchestratorAlias?: string;
     telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> };
     lastAssignedByAlias?: Record<string, number>;
+    liveMetricsByAlias?: Record<string, LiveDeviceMetrics & { receivedAt: number }>;
   } = {}
 ): {
   alias: string;
@@ -950,13 +952,15 @@ export function chooseResourceForTask(
 } {
   const resourceLoad = options.resourceLoad ?? {};
   const resources = sortForRouting(listResources(rootDir));
+  const liveMetricsByAlias = options.liveMetricsByAlias ?? {};
   const telemetryByAlias: Record<string, ResourceTelemetry> = Object.fromEntries(
     resources.map((resource) => [
       resource.alias,
       buildResourceTelemetry(
         resource.alias,
         getResourceLoad(resource.alias, resourceLoad),
-        options.telemetrySummary
+        options.telemetrySummary,
+        liveMetricsByAlias[resource.alias]
       )
     ])
   );

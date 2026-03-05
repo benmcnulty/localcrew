@@ -64,12 +64,14 @@ import {
 } from "./dropbox.ts";
 import {
   buildAgentChatMessages,
+  buildAgentIdentityBlock,
   buildAutoTaskMessages,
   buildChatMessages,
   buildQueueFillFinalizeMessages,
   buildQueueFillMessages,
   buildQueueFillReviewMessages,
-  buildTaskPreflightMessages
+  buildTaskPreflightMessages,
+  parseTaskDomain
 } from "./messages.ts";
 import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
 import { pingResource, probeResourceModels } from "./resource-discovery.ts";
@@ -124,6 +126,7 @@ import type {
   Command,
   EditRequest,
   FollowUpRequest,
+  LiveDeviceMetrics,
   ReplMode,
   RuntimeState,
   SessionsFile,
@@ -949,6 +952,8 @@ export class LocalCrewApp {
   private readonly networkFailureTimes = new Map<string, number>();
   /** ISO epoch ms of when each resource alias last received a task assignment — used for fairness scoring. */
   private readonly resourceLastAssignedAt = new Map<string, number>();
+  /** Live OS metrics from agent sync, keyed by alias. Stale entries older than 10 minutes are ignored. */
+  private readonly liveDeviceMetrics = new Map<string, LiveDeviceMetrics & { receivedAt: number }>();
   /** Cooldown period (ms) during which a network-failed resource gets a routing penalty. */
   private static readonly NETWORK_FAILURE_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
   /** Date slug (YYYY-MM-DD) of the last successfully queued daily-work task, prevents re-queuing loop. */
@@ -1807,6 +1812,11 @@ export class LocalCrewApp {
       await updateResource(alias, nextResource, this.rootDir);
     } else {
       await addResource(nextResource, this.rootDir);
+    }
+
+    // Store live OS metrics from the sync payload for use in routing decisions.
+    if (report.liveMetrics && typeof report.liveMetrics.freeMemGb === "number") {
+      this.liveDeviceMetrics.set(alias, { ...report.liveMetrics, receivedAt: Date.now() });
     }
 
     await this.syncSystemFiles();
@@ -5122,7 +5132,7 @@ export class LocalCrewApp {
       };
     }
 
-    const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+    let [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
     const taskStartedAt = new Date().toISOString();
     const taskStartMs = Date.now();
     const [documents, agents, telemetrySummary] = await Promise.all([
@@ -5148,6 +5158,22 @@ export class LocalCrewApp {
       resourceLoad[alias] = (resourceLoad[alias] ?? 0) + penalty;
     }
 
+    // Parse domain tag and strip it from task content before routing/execution.
+    const taskDomain = parseTaskDomain(task.content);
+    if (taskDomain) {
+      task = { ...task, domain: taskDomain, content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "") };
+    }
+
+    // Build filtered live metrics map (entries within the last 10 minutes only).
+    const TEN_MIN_MS = 10 * 60 * 1000;
+    const now = Date.now();
+    const liveMetricsByAlias: Record<string, LiveDeviceMetrics & { receivedAt: number }> = {};
+    for (const [alias, metrics] of this.liveDeviceMetrics) {
+      if (now - metrics.receivedAt < TEN_MIN_MS) {
+        liveMetricsByAlias[alias] = metrics;
+      }
+    }
+
     let selection;
     let routingFallbackWarning: string | null = null;
 
@@ -5162,7 +5188,8 @@ export class LocalCrewApp {
         resourceLoad,
         primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
         telemetrySummary,
-        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt)
+        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
+        liveMetricsByAlias
       });
     } catch (error) {
       const invalidRequestedResource = task.requestedResource;
@@ -5170,7 +5197,8 @@ export class LocalCrewApp {
         resourceLoad,
         primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
         telemetrySummary,
-        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt)
+        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
+        liveMetricsByAlias
       });
       task.requestedResource = undefined;
       routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${this.toDisplayResourceAlias(selection.alias)}.`;
@@ -5228,6 +5256,14 @@ export class LocalCrewApp {
       };
     }
     const extraContextBlocks = await this.getAutoTaskExtraContext(task);
+
+    // Inject domain-specific agent identity block at the front of context blocks.
+    if (task.domain) {
+      const identityBlock = await buildAgentIdentityBlock(task.domain, this.rootDir);
+      if (identityBlock) {
+        extraContextBlocks.unshift(identityBlock);
+      }
+    }
 
     // Context budget pre-flight: estimate whether the prompt will fit within
     // the selected resource's context window. If it doesn't fit, attempt to
@@ -6041,9 +6077,11 @@ export class LocalCrewApp {
           mode: "auto",
           currentAgent: undefined
         };
-        // Auto-start a daily work session if none is active.
+        // Auto-start a daily work session if none is active or if the calendar day has changed.
         const existingSession = this.systemState.auto.dailySession;
-        const dailyStarted = !existingSession || Boolean(existingSession.completedAt);
+        const sessionDate = existingSession?.startedAt ? existingSession.startedAt.slice(0, 10) : null;
+        const today = new Date().toISOString().slice(0, 10);
+        const dailyStarted = !existingSession || Boolean(existingSession.completedAt) || sessionDate !== today;
         if (dailyStarted) {
           this.systemState = {
             ...this.systemState,
