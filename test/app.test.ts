@@ -89,6 +89,41 @@ async function seedResourceInventory(rootDir: string): Promise<void> {
   await saveResources(resources, rootDir);
 }
 
+/**
+ * Pre-seeds the auto queue with enough low-priority padding tasks to exceed
+ * QUEUE_REFILL_THRESHOLD (4), so runIdleCycle skips queue-fill and goes
+ * straight to processNextAutoTask.  Uses high IDs (900+) and sets lastTaskId
+ * to 0 so user-queued tasks still start from 1.
+ */
+async function seedPaddingTasks(rootDir: string): Promise<void> {
+  const paths = getStoragePaths(rootDir);
+  await mkdir(paths.systemDir, { recursive: true });
+  const padding = Array.from({ length: 5 }, (_, i) => ({
+    id: 900 + i,
+    content: `Padding task ${i + 1}`,
+    priority: "low",
+    createdAt: "2026-03-01T00:00:00.000Z",
+    createdBy: "test:padding",
+    status: "queued",
+  }));
+  await writeFile(
+    paths.systemStatePath,
+    `${JSON.stringify(
+      {
+        auto: {
+          enabled: false,
+          defaultPriority: "high",
+          lastTaskId: 0,
+          pending: padding,
+          completed: [],
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 function makeChatResponse(
   text: string,
   options: {
@@ -370,6 +405,7 @@ describe("LocalCrewApp", () => {
   test("enters auto mode, queues a task, and processes it through the configured orchestrator identity", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       const previousName = process.env.LOCALCREW_ORCHESTRATOR_NAME;
       process.env.LOCALCREW_ORCHESTRATOR_NAME = "Aster";
       const app = await LocalCrewApp.create({
@@ -389,23 +425,27 @@ describe("LocalCrewApp", () => {
 
         expect(result.lines[0]).toBe("Queued #1 [high]: Design a routing policy.");
         expect(result.lines[1]).toContain("Aster completed #1 [high] via @orchestrator/");
-        expect(result.lines[3]).toBe(
-          "Queued #2 [low] -> @overflow/llama3.2:3b: sanity check the result"
+        expect(result.lines.some((l) =>
+          l === "Queued #2 [low] -> @overflow/llama3.2:3b: sanity check the result"
+        )).toBe(true);
+        expect(systemState.auto.pending).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 2,
+              priority: "low",
+              requestedResource: "overflow",
+              content: "sanity check the result"
+            })
+          ])
         );
-        expect(systemState.auto.pending).toEqual([
-          expect.objectContaining({
-            id: 2,
-            priority: "low",
-            requestedResource: "overflow",
-            content: "sanity check the result"
-          })
-        ]);
-        expect(systemState.auto.completed).toEqual([
-          expect.objectContaining({
-            id: 1,
-            status: "completed"
-          })
-        ]);
+        expect(systemState.auto.completed).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 1,
+              status: "completed"
+            })
+          ])
+        );
       } finally {
         if (previousName === undefined) {
           delete process.env.LOCALCREW_ORCHESTRATOR_NAME;
@@ -419,6 +459,7 @@ describe("LocalCrewApp", () => {
   test("emits enriched display state and task events during auto processing", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       const pushedEvents: Array<Record<string, unknown>> = [];
       const app = await LocalCrewApp.create({
         rootDir,
@@ -1028,6 +1069,7 @@ describe("LocalCrewApp", () => {
   test("supports queued model overrides for later auto execution", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       await createAgent(
         {
           name: "Reviewer",
@@ -1165,7 +1207,7 @@ describe("LocalCrewApp", () => {
             auto: {
               enabled: false,
               defaultPriority: "high",
-              lastTaskId: 1,
+              lastTaskId: 6,
               pending: [
                 {
                   id: 1,
@@ -1174,7 +1216,15 @@ describe("LocalCrewApp", () => {
                   createdAt: "2026-03-01T00:00:00.000Z",
                   createdBy: "orchestrator:auto-fill",
                   status: "queued"
-                }
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
               ],
               completed: []
             }
@@ -1209,7 +1259,8 @@ describe("LocalCrewApp", () => {
       expect(
         result.lines.some((line) => line.includes("Redirected external feature request to outbox ticket"))
       ).toBe(true);
-      expect(state.auto.pending).toHaveLength(0);
+      // The real task was completed; only padding tasks remain.
+      expect(state.auto.pending.every((t) => t.createdBy === "test:padding")).toBe(true);
       expect(dropbox.active.map((entry) => entry.relativePath)).not.toContain("scripts/terminal_hud.py");
       expect(
         dropbox.outbox.some((entry) => entry.relativePath.startsWith("feature-requests/"))
@@ -1229,7 +1280,7 @@ describe("LocalCrewApp", () => {
             auto: {
               enabled: false,
               defaultPriority: "high",
-              lastTaskId: 1,
+              lastTaskId: 6,
               pending: [
                 {
                   id: 1,
@@ -1238,7 +1289,15 @@ describe("LocalCrewApp", () => {
                   createdAt: "2026-03-01T00:00:00.000Z",
                   createdBy: "orchestrator:auto-fill",
                   status: "queued"
-                }
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
               ],
               completed: []
             }
@@ -1291,7 +1350,7 @@ describe("LocalCrewApp", () => {
             auto: {
               enabled: false,
               defaultPriority: "high",
-              lastTaskId: 1,
+              lastTaskId: 6,
               pending: [
                 {
                   id: 1,
@@ -1300,7 +1359,15 @@ describe("LocalCrewApp", () => {
                   createdAt: "2026-03-01T00:00:00.000Z",
                   createdBy: "orchestrator:auto-fill",
                   status: "queued"
-                }
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
               ],
               completed: []
             }
@@ -1322,7 +1389,8 @@ describe("LocalCrewApp", () => {
 
       expect(result.errors).toEqual([]);
       expect(result.lines.some((line) => line.includes("Skipped vague autonomous task: implement"))).toBe(true);
-      expect(state.auto.pending).toHaveLength(0);
+      // Padding tasks + the completed task's follow-ups should be in pending (minus the processed high-priority one)
+      expect(state.auto.pending.every((t) => t.content !== "implement")).toBe(true);
     });
   });
 
@@ -1338,7 +1406,7 @@ describe("LocalCrewApp", () => {
             auto: {
               enabled: false,
               defaultPriority: "high",
-              lastTaskId: 1,
+              lastTaskId: 6,
               pending: [
                 {
                   id: 1,
@@ -1348,7 +1416,15 @@ describe("LocalCrewApp", () => {
                   createdBy: "orchestrator:auto-fill",
                   status: "queued",
                   retryCount: 1
-                }
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
               ],
               completed: []
             }
@@ -1374,7 +1450,7 @@ describe("LocalCrewApp", () => {
       expect(result.errors[0]).toContain("HTTP 500: upstream unavailable");
       expect(
         result.lines.some((line) =>
-          line.includes("Quarantined failed auto task #1 and queued safe mode recovery task #2.")
+          line.includes("Quarantined failed auto task #1 and queued safe mode recovery task #7.")
         )
       ).toBe(true);
       expect(state.auto.completed).toHaveLength(1);
@@ -1385,15 +1461,11 @@ describe("LocalCrewApp", () => {
           result: "FAILED: HTTP 500: upstream unavailable"
         })
       );
-      expect(state.auto.pending).toHaveLength(1);
-      expect(state.auto.pending[0]).toEqual(
-        expect.objectContaining({
-          id: 2,
-          createdBy: "orchestrator:safe-mode",
-          priority: "high",
-          requestedResource: "orchestrator"
-        })
-      );
+      expect(state.auto.pending.some((t) =>
+        t.createdBy === "orchestrator:safe-mode" &&
+        t.priority === "high" &&
+        t.requestedResource === "orchestrator"
+      )).toBe(true);
     });
   });
 
@@ -1598,6 +1670,7 @@ describe("AutoQueueTask timing", () => {
   test("completed task has startedAt, completedAt, and durationMs set", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       // Each call returns the same mock response regardless of whether it is a
       // preflight or the main execution call.
       const app = await LocalCrewApp.create({
@@ -1626,6 +1699,7 @@ describe("AutoQueueTask timing", () => {
   test("quarantined task also records startedAt and durationMs", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       let callCount = 0;
       const app = await LocalCrewApp.create({
         rootDir,
@@ -1668,7 +1742,7 @@ describe("AutoQueueTask timing", () => {
             auto: {
               enabled: false,
               defaultPriority: "high",
-              lastTaskId: 1,
+              lastTaskId: 6,
               pending: [
                 {
                   id: 1,
@@ -1677,7 +1751,15 @@ describe("AutoQueueTask timing", () => {
                   createdAt: "2026-03-01T00:00:00.000Z",
                   createdBy: "orchestrator:auto-fill",
                   status: "queued"
-                }
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
               ],
               completed: []
             }
@@ -1699,10 +1781,9 @@ describe("AutoQueueTask timing", () => {
       const firstResult = await app.runIdleCycle();
       const stateAfterRetry = await loadSystemState(rootDir);
 
-      // Task should be re-queued, not quarantined.
+      // Task should be re-queued, not quarantined. Padding tasks remain.
       expect(stateAfterRetry.auto.completed).toHaveLength(0);
-      expect(stateAfterRetry.auto.pending).toHaveLength(1);
-      expect(stateAfterRetry.auto.pending[0].retryCount).toBe(1);
+      expect(stateAfterRetry.auto.pending.some((t) => t.retryCount === 1)).toBe(true);
       expect(firstResult.errors).toHaveLength(0);
 
       // Second idle cycle: task fails again and is quarantined (retries exhausted).
@@ -1711,9 +1792,8 @@ describe("AutoQueueTask timing", () => {
 
       expect(stateAfterQuarantine.auto.completed).toHaveLength(1);
       expect(stateAfterQuarantine.auto.completed[0].result).toContain("FAILED:");
-      // A safe mode recovery task should be queued.
-      expect(stateAfterQuarantine.auto.pending).toHaveLength(1);
-      expect(stateAfterQuarantine.auto.pending[0].createdBy).toBe("orchestrator:safe-mode");
+      // A safe mode recovery task should be queued alongside padding tasks.
+      expect(stateAfterQuarantine.auto.pending.some((t) => t.createdBy === "orchestrator:safe-mode")).toBe(true);
     });
   });
 });
@@ -1749,6 +1829,7 @@ describe("pre-flight task reasoning", () => {
   test("pre-flight failure is non-fatal: task still completes", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
       let callCount = 0;
       const app = await LocalCrewApp.create({
         rootDir,

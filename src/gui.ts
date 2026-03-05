@@ -2180,6 +2180,7 @@ export function getDisplayHtml(): string {
     .ddot {
       display: inline-block; border-radius: 50%; flex-shrink: 0;
       width: 0.65em; height: 0.65em; background: var(--muted);
+      will-change: opacity, box-shadow;
     }
     @keyframes dotPulse {
       0%,100% { box-shadow: 0 0 4px currentColor, 0 0 8px currentColor; }
@@ -2199,7 +2200,7 @@ export function getDisplayHtml(): string {
       15%  { opacity: 0.1; filter: brightness(3) saturate(2); }
       100% { opacity: 1; }
     }
-    .flash { animation: valFlash 0.45s ease forwards; }
+    .flash { animation: valFlash 0.6s ease forwards; }
 
     /* ── Body layout ──────────────────────────────────────────────────────── */
     #dbody {
@@ -2360,9 +2361,10 @@ export function getDisplayHtml(): string {
       height: 100%; border-radius: inherit;
       background: linear-gradient(90deg, #00ff7f, #00d4ff, #00fff5, #00d4ff, #00ff7f);
       background-size: 300% 100%;
-      animation: shimmer 3s linear infinite;
+      animation: shimmer 3s ease-in-out infinite;
       box-shadow: 0 0 10px rgba(0,212,255,0.6), 0 0 24px rgba(0,255,127,0.3);
       transition: width 0.8s ease;
+      will-change: width, background-position;
     }
     /* ── Center panel layout: task card → side-by-side row ──────────────── */
     .dpmain-row {
@@ -2370,6 +2372,7 @@ export function getDisplayHtml(): string {
     }
     .dpmain-queue {
       flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; overflow: hidden;
+      contain: layout;
     }
     .dpmain-gauge {
       flex: 0 0 clamp(130px, 36%, 240px); min-width: 0;
@@ -2458,6 +2461,7 @@ export function getDisplayHtml(): string {
       background: linear-gradient(90deg, var(--n-purple), var(--n-blue));
       box-shadow: 0 0 6px var(--n-purple); opacity: 0.8;
       transition: width 1s ease;
+      will-change: width;
     }
 
     .paused #dqfill,
@@ -2539,7 +2543,8 @@ export function getDisplayHtml(): string {
     /* ── Scrollbar ────────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.2); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.35); border-radius: 2px; transition: background 0.2s ease; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.55); }
 
     /* ── Empty ────────────────────────────────────────────────────────────── */
     .dempty { color: var(--muted2); font-size: var(--fs-sm); font-style: italic; text-align: center; padding: 1em 0; }
@@ -2575,7 +2580,7 @@ export function getDisplayHtml(): string {
       content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
       background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.35) 100%);
     }
-    #matrix-canvas { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+    #matrix-canvas { position: absolute; inset: 0; z-index: 1; overflow: hidden; contain: paint; }
 
     /* Falling column */
     .mx-col {
@@ -2804,13 +2809,14 @@ export function getDisplayHtml(): string {
       font-size: 0.95rem; line-height: 1.7;
     }
     .daily-body h1,.daily-body h2,.daily-body h3 {
-      color: #ffbf00; font-weight: 800;
-      text-shadow: 0 0 8px rgba(255,191,0,0.25);
+      font-weight: 800;
       margin-top: 2em; margin-bottom: 0.5em;
       border-bottom: 1px solid rgba(255,191,0,0.12);
       padding-bottom: 0.3em;
     }
-    .daily-body h1{font-size:1.6rem} .daily-body h2{font-size:1.3rem} .daily-body h3{font-size:1.1rem}
+    .daily-body h1 { color: #ffcc00; font-size: 1.6rem; text-shadow: 0 0 10px rgba(255,204,0,0.35); }
+    .daily-body h2 { color: #f0b800; font-size: 1.3rem; text-shadow: 0 0 8px rgba(255,191,0,0.25); }
+    .daily-body h3 { color: #d4a000; font-size: 1.1rem; text-shadow: 0 0 6px rgba(212,160,0,0.2); }
     .daily-body ul,.daily-body ol { padding-left: 1.5em; }
     .daily-body li { margin-bottom: 0.4em; }
     .daily-body strong { color: #ffd966; }
@@ -2901,8 +2907,13 @@ export function getDisplayHtml(): string {
               <svg id="dgauge" viewBox="0 0 200 145" preserveAspectRatio="xMidYMid meet">
                 <defs>
                   <filter id="neon-glow" x="-40%" y="-40%" width="180%" height="180%">
-                    <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
-                    <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur1"/>
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2"/>
+                    <feMerge>
+                      <feMergeNode in="blur2"/>
+                      <feMergeNode in="blur1"/>
+                      <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
                   </filter>
                   <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stop-color="#00d4ff"/>
@@ -3513,7 +3524,7 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine ────────────────────────────────────────────
-  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,timer:null,cols:new Set(),maxCols:30};
+  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,timer:null,cols:new Set(),maxCols:30,burstTimers:[]};
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
   MX.closeEl=document.getElementById('mx-close');
@@ -3618,7 +3629,8 @@ export function getDisplayHtml(): string {
     MX.maxCols=Math.max(8,Math.min(rawCols,80));
     var rate=Math.max(60,Math.round(220-vw/30));
     var burst=Math.floor(MX.maxCols*0.4);
-    for(var i=0;i<burst;i++)setTimeout(mxSpawn,i*25);
+    MX.burstTimers=[];
+    for(var i=0;i<burst;i++)MX.burstTimers.push(setTimeout(mxSpawn,i*25));
     MX.timer=setInterval(function(){
       if(Math.random()<0.2){mxSpawnGroup();}else{mxSpawn();}
     },rate);
@@ -3628,8 +3640,11 @@ export function getDisplayHtml(): string {
     MX.on=false;
     MX.overlay.classList.remove('active');
     if(MX.timer){clearInterval(MX.timer);MX.timer=null;}
+    MX.burstTimers.forEach(function(t){clearTimeout(t);});
+    MX.burstTimers=[];
     MX.cols.forEach(function(c){if(c.parentNode)c.parentNode.removeChild(c);});
     MX.cols.clear();
+    MX.buf=[];MX.bufIdx=0;
   }
 
   function mxProcessEvent(msg){
@@ -3676,7 +3691,7 @@ export function getDisplayHtml(): string {
     // wrap consecutive <li> in <ul>
     h=h.replace(/((?:<li>.*<\\/li>\\n?)+)/g,'<ul>$1</ul>');
     // links
-    h=h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    h=h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,function(_,t,u){try{var p=new URL(u,location.href);if(p.protocol==='http:'||p.protocol==='https:')return'<a href="'+u+'" target="_blank" rel="noopener">'+t+'</a>';}catch(e){}return t;});
     // paragraphs — double newlines
     h=h.replace(/\\n{2,}/g,'</p><p>');
     // single newlines to <br>
@@ -3753,6 +3768,7 @@ export function getDisplayHtml(): string {
     }
   });
 
+  window.addEventListener('pagehide',function(){if(MX.on)mxStop();if(DAILY.on)dailyClose();closeSSE();});
   updateActivityControls();
   syncActivityState();
 </script>

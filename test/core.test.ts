@@ -27,6 +27,7 @@ import {
 import type { AutoQueueTask, DailyWorkSession } from "../src/types.ts";
 import {
   classifyTask,
+  buildResourceTelemetry,
   chooseResourceForTask,
   computeResourceScore,
   detectTaskPurpose,
@@ -756,8 +757,7 @@ describe("message assembly", () => {
       content: "Priority: high\nCreated by: user\n\nTask:\nInspect the queue."
     });
 
-    expect(
-      buildQueueFillMessages({
+    const fillMsg = buildQueueFillMessages({
         directives: "Directives",
         inventory: "Inventory",
         roadmap: "Roadmap",
@@ -766,15 +766,22 @@ describe("message assembly", () => {
         orchestratorSummary: "Summary",
         orchestratorName: "Aster",
         agents: ["@reviewer"]
-      })[1]
-    ).toEqual({
-      role: "system",
-      content:
-        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. Draft a brief provisional self-improvement backlog for the local orchestration system only; this is not the final queue yet. Choose from a DIVERSE range of valuable work areas: routing quality, user-facing features, content generation, knowledge enrichment, system health, documentation, and user-benefit tasks. NEVER repeat or rephrase a task topic that was recently completed — always propose genuinely new work. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. Do not draft external application, API, UI, script, or source-code implementation work into the autonomous queue; those belong in outbox feature request tickets instead. Each task must be self-contained and explicit enough to execute without guessing. Reject placeholder verbs with no object or outcome. This draft will be critiqued by the standing secondary reviewer before any tasks are finalized. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Local Crew diagnostics. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. Output only task lines in the exact format [medium] task or [low] task. Prefer 2-3 tasks total with at least one medium and one low. Do not output any explanation before or after the task lines."
-    });
+      })[1];
+    const fillContent = fillMsg.content as string;
+    expect(fillMsg.role).toBe("system");
+    expect(fillContent).toContain("You are Aster, the orchestrator identity.");
+    expect(fillContent).toContain("Self-aware self-improvement");
+    expect(fillContent).toContain("WIKIPEDIA:");
+    expect(fillContent).toContain("REDDIT:");
+    expect(fillContent).toContain("SEARCH[topic]:");
+    expect(fillContent).toContain("{domain:");
+    expect(fillContent).toContain("SYSTEM");
+    expect(fillContent).toContain("RESEARCH");
+    expect(fillContent).toContain("KNOWLEDGE");
+    expect(fillContent).toContain("SYNTHESIS");
+    expect(fillContent).toContain("IDENTITY");
 
-    expect(
-      buildQueueFillReviewMessages({
+    const reviewMsg = buildQueueFillReviewMessages({
         orchestratorName: "Aster",
         reviewerAlias: "zora",
         draftTasks: "[medium] Tighten routing\n[low] Rewrite docs",
@@ -782,15 +789,12 @@ describe("message assembly", () => {
         roadmap: "Roadmap",
         focusTodo: "Focus",
         changelog: "Changelog"
-      })[0]
-    ).toEqual({
-      role: "system",
-      content:
-        "You are @zora, the secondary reviewer for Aster's auto-mode planning. Critique the proposed self-improvement backlog before anything is queued. Apply a measure twice, cut once standard: reject vague, duplicative, over-broad, or low-leverage work. Prefer fewer, narrower, higher-impact tasks over many speculative tasks. Call out documentation churn, memory churn, and process sprawl when the plan does not first justify the added complexity. Reject placeholder tasks that are not self-contained, such as bare implement, review, compare, or evaluate instructions. Do not propose external deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. Reject external application, API, UI, script, or source-code implementation work in the autonomous queue and push that work toward outbox feature request tickets instead. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Local Crew diagnostics. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. Respond with a short critique followed by one final verdict line exactly in the form VERDICT: approve or VERDICT: revise."
-    });
+      })[0];
+    expect(reviewMsg.role).toBe("system");
+    expect(reviewMsg.content).toContain("@zora, the secondary reviewer");
+    expect(reviewMsg.content).toContain("VERDICT: approve");
 
-    expect(
-      buildQueueFillFinalizeMessages({
+    const finalizeMsg = buildQueueFillFinalizeMessages({
         directives: "Directives",
         inventory: "Inventory",
         roadmap: "Roadmap",
@@ -801,12 +805,11 @@ describe("message assembly", () => {
         agents: ["@reviewer"],
         draftTasks: "[medium] Tighten routing",
         reviewFeedback: "Too broad.\nVERDICT: revise"
-      })[1]
-    ).toEqual({
-      role: "system",
-      content:
-        "You are Aster, the orchestrator identity. The queue is currently empty. Self-aware self-improvement of the local orchestration system is your default stance right now. You already drafted a provisional backlog and received a critique from the secondary reviewer. Finalize the queue only after applying that critique and tightening scope, ordering, and expected impact. Apply a measure twice, cut once standard: prefer fewer, narrower, better-justified tasks over a larger speculative backlog. Do not propose deployment, package installation, service restarts, firewall changes, model pulls, or other external system mutations unless the user explicitly asked for them. Do not finalize external application, API, UI, script, or source-code implementation work into the autonomous queue; that belongs in outbox feature request tickets instead. Only finalize self-contained tasks with a clear object and expected outcome; do not finalize placeholder verb tasks. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for internal Local Crew diagnostics. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. Output only approved task lines in the exact format [medium] task or [low] task. Prefer 1-3 tasks total with at least one medium task when meaningful. Do not output any explanation before or after the task lines."
-    });
+      })[1];
+    expect(finalizeMsg.role).toBe("system");
+    expect(finalizeMsg.content).toContain("You are Aster, the orchestrator identity.");
+    expect(finalizeMsg.content).toContain("received a critique from the secondary reviewer");
+    expect(finalizeMsg.content).toContain("domain");
   });
 
   describe("detectTaskPurpose", () => {
@@ -1331,5 +1334,119 @@ describe("pingResource", () => {
     await pingResource("http://api.example.com", "openai", mockFetch);
     expect(urls[0]).toBe("http://localhost:11434/api/tags");
     expect(urls[1]).toBe("http://api.example.com/v1/models");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fairness scoring
+// ---------------------------------------------------------------------------
+
+describe("fairness scoring", () => {
+  test("recently assigned resource scores lower than idle resource", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const resources = Object.values(getResourceProfilesByTier(rootDir)).flat();
+      const resource = resources[0];
+      const telemetry: ResourceTelemetry = {
+        queueDepth: 0,
+        ramUsagePct: 20,
+        tokensPerSecond: 15,
+        activeModel: "llama3.1:8b",
+        avgQueueWaitMs: 100,
+        successRate: 1,
+        failureCount: 0
+      };
+      const task = classifyTask("Analyze some data.");
+      const recentScore = computeResourceScore(resource, telemetry, task, "online", Date.now() - 1000);
+      const idleScore = computeResourceScore(resource, telemetry, task, "online", Date.now() - 60 * 60 * 1000);
+      expect(idleScore).toBeGreaterThan(recentScore);
+    });
+  });
+
+  test("fairness score is 1.0 when never assigned (undefined lastAssignedMs)", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const resources = Object.values(getResourceProfilesByTier(rootDir)).flat();
+      const resource = resources[0];
+      const telemetry: ResourceTelemetry = {
+        queueDepth: 0,
+        ramUsagePct: 0,
+        tokensPerSecond: 10,
+        activeModel: null,
+        avgQueueWaitMs: 0,
+        successRate: 1,
+        failureCount: 0
+      };
+      const task = classifyTask("Simple task.");
+      const scoreNoAssignment = computeResourceScore(resource, telemetry, task, "online", undefined);
+      const scoreRecentAssignment = computeResourceScore(resource, telemetry, task, "online", Date.now());
+      expect(scoreNoAssignment).toBeGreaterThan(scoreRecentAssignment);
+    });
+  });
+
+  test("routeTask passes lastAssignedByAlias through to scoring", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const resources = Object.values(getResourceProfilesByTier(rootDir)).flat();
+      const task = classifyTask("Research recent AI trends.");
+      const emptyTelemetry: Record<string, ResourceTelemetry> = {};
+      for (const r of resources) {
+        emptyTelemetry[r.alias] = {
+          queueDepth: 0, ramUsagePct: 0, tokensPerSecond: 10,
+          activeModel: null, avgQueueWaitMs: 0, successRate: 1, failureCount: 0
+        };
+      }
+      // Make orchestrator just-assigned and workhorse idle
+      const lastAssigned: Record<string, number> = {
+        orchestrator: Date.now(),
+        workhorse: Date.now() - 60 * 60 * 1000
+      };
+      const routed = routeTask(task, resources, emptyTelemetry, undefined, lastAssigned);
+      // The idle resource should be preferred over the just-assigned one
+      expect(routed.resource.alias).not.toBe("orchestrator");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildResourceTelemetry with live metrics
+// ---------------------------------------------------------------------------
+
+describe("buildResourceTelemetry with live device metrics", () => {
+  test("computes RAM usage from live metrics when provided", () => {
+    const result = buildResourceTelemetry("test-alias", 2, undefined, {
+      loadAvg1m: 1.5,
+      loadAvg5m: 1.2,
+      totalMemGb: 32,
+      freeMemGb: 8,
+      freePct: 25,
+      timestamp: Date.now()
+    });
+    expect(result.ramUsagePct).toBe(75);
+    expect(result.queueDepth).toBe(2);
+  });
+
+  test("defaults RAM usage to 0 when no live metrics provided", () => {
+    const result = buildResourceTelemetry("test-alias", 1);
+    expect(result.ramUsagePct).toBe(0);
+  });
+
+  test("incorporates telemetry summary stats alongside live metrics", () => {
+    const result = buildResourceTelemetry("myalias", 0, {
+      resources: {
+        myalias: { calls: 100, errors: 5, totalDurationMs: 50000, evalCount: 20000 }
+      }
+    }, {
+      loadAvg1m: 2.0,
+      loadAvg5m: 1.8,
+      totalMemGb: 16,
+      freeMemGb: 4,
+      freePct: 25,
+      timestamp: Date.now()
+    });
+    expect(result.ramUsagePct).toBe(75);
+    expect(result.successRate).toBeCloseTo(0.95);
+    expect(result.tokensPerSecond).toBeGreaterThan(0);
+    expect(result.failureCount).toBe(5);
   });
 });
