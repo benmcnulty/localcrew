@@ -528,7 +528,20 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     }
 
     try {
-      const result = await app.runIdleCycle();
+      const slots = app.getAvailableCycleSlots();
+      if (slots <= 0) return;
+      // Dispatch up to MAX_PARALLEL_CYCLES task cycles concurrently.
+      // Extra cycles beyond the first are fire-and-forget (errors logged separately).
+      const [firstCycle, ...extraCycles] = Array.from({ length: slots }, () =>
+        app.runIdleCycle()
+      );
+      for (const cycle of extraCycles) {
+        cycle.catch((err: unknown) => {
+          // Extra cycle errors are non-fatal — the primary cycle handles reporting.
+          void err;
+        });
+      }
+      const result = await firstCycle;
       renderBackgroundResult(readline, getPromptOnly, result);
     } catch (error) {
       renderBackgroundResult(readline, getPromptOnly, {

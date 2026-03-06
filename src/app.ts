@@ -82,6 +82,7 @@ import {
   detectTaskPurpose,
   getModelProfile,
   getEffectiveResourceRole,
+  getShipRoleLabel,
   getResourceCapacitySummary,
   getOrchestratorResourceAlias,
   getResourceEndpoint,
@@ -945,7 +946,12 @@ export class LocalCrewApp {
   private readonly speakFn: SpeakFn;
   private readonly warn: WarnFn;
   private readonly platform: NodeJS.Platform;
-  private autoCyclePromise: Promise<CommandResult> | null;
+  private activeCycleCount = 0;
+  private static readonly MAX_PARALLEL_CYCLES = 3;
+  /** Maps resource alias → the task currently being processed by that resource. */
+  private readonly activeTasksByResource = new Map<string, AutoQueueTask>();
+  /** IDs of tasks currently being processed (prevents duplicate dequeue under parallel dispatch). */
+  private readonly processingTaskIds = new Set<number>();
   private apiServerHandle?: { pushDisplayEvent(payload: Record<string, unknown>): void };
   private readonly resourceTelemetry = new Map<string, ResourceTelemetry>();
   /** Tracks when each resource last had a network-level failure (e.g. "fetch failed"). */
@@ -988,7 +994,6 @@ export class LocalCrewApp {
     this.speakFn = options.speakFn ?? defaultSpeakFn;
     this.warn = options.warn ?? (() => {});
     this.platform = options.platform ?? process.platform;
-    this.autoCyclePromise = null;
     setModelProfile(config.preferences?.modelProfile ?? "auto");
     this.runtime = {
       mode: "command",
@@ -1235,13 +1240,21 @@ export class LocalCrewApp {
     this.pushDisplayEvent({
       type: "state",
       orchestratorName: this.config.orchestratorName,
+      orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       auto: {
         enabled: auto.enabled,
         pendingCount: auto.pending.length,
         completedCount: auto.totalCompletedCount ?? auto.completed.length,
         failedCount: auto.completed.filter((task) => task.status === "failed").length,
-        busy: this.autoCyclePromise !== null,
+        busy: this.activeCycleCount > 0,
+        activeTasks: [...this.activeTasksByResource.values()].map(t => ({
+          id: t.id,
+          content: t.content.replace(/^\{domain:[A-Z]+\}\s*/i, ""),
+          assignedResource: t.assignedResource ?? null,
+          requestedResource: t.requestedResource ?? null,
+          priority: t.priority
+        })),
         nextTask: auto.pending[0]
           ? {
               id: auto.pending[0].id,
@@ -1323,7 +1336,7 @@ export class LocalCrewApp {
   }
 
   isAutoBusy(): boolean {
-    return this.autoCyclePromise !== null;
+    return this.activeCycleCount > 0;
   }
 
   /** Collect all participant + resource aliases for internal-query filtering. */
@@ -1353,7 +1366,19 @@ export class LocalCrewApp {
   }
 
   shouldAutoPulse(): boolean {
-    return this.isAutoMode() && !this.isAutoBusy();
+    return this.isAutoMode() && this.activeCycleCount < LocalCrewApp.MAX_PARALLEL_CYCLES;
+  }
+
+  /** Returns how many additional parallel task cycles can be dispatched right now. */
+  getAvailableCycleSlots(): number {
+    if (!this.isAutoMode()) return 0;
+    const pendingCount = this.systemState.auto.pending.filter(
+      t => !this.processingTaskIds.has(t.id)
+    ).length;
+    return Math.min(
+      LocalCrewApp.MAX_PARALLEL_CYCLES - this.activeCycleCount,
+      pendingCount
+    );
   }
 
   getAutoPulseIntervalMs(): number {
@@ -1444,6 +1469,7 @@ export class LocalCrewApp {
 
   async getStatusSnapshot(): Promise<{
     orchestratorName: string;
+    orchestratorAlias: string;
     mode: ReplMode;
     prompt: string;
     currentEndpoint: string;
@@ -1480,6 +1506,7 @@ export class LocalCrewApp {
 
     return {
       orchestratorName: this.config.orchestratorName,
+      orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       prompt: this.getPrompt(),
       currentEndpoint: this.runtime.currentEndpoint,
@@ -1513,14 +1540,26 @@ export class LocalCrewApp {
     enabled: boolean;
     busy: boolean;
     defaultPriority: TaskPriority;
+    activeTasks: AutoQueueTask[];
     pending: AutoQueueTask[];
     completed: AutoQueueTask[];
   }> {
+    const activeTasks = [...this.activeTasksByResource.values()].map(task => ({
+      ...task,
+      content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "")
+    }));
+    const activeIds = new Set(activeTasks.map(t => t.id));
     return {
       enabled: this.isAutoMode(),
       busy: this.isAutoBusy(),
       defaultPriority: this.systemState.auto.defaultPriority,
-      pending: this.sortPendingTasks(this.systemState.auto.pending),
+      activeTasks,
+      pending: this.sortPendingTasks(
+        this.systemState.auto.pending.filter(t => !activeIds.has(t.id))
+      ).map(task => ({
+        ...task,
+        content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "")
+      })),
       completed: [...this.systemState.auto.completed].reverse()
     };
   }
@@ -1551,7 +1590,11 @@ export class LocalCrewApp {
   }
 
   async getResourcesSnapshot() {
-    return listResources(this.rootDir);
+    const orchestratorAlias = this.resolveOrchestratorAlias();
+    return listResources(this.rootDir).map(r => ({
+      ...r,
+      shipRole: getShipRoleLabel(r, orchestratorAlias)
+    }));
   }
 
   private speechUnavailableLine(): string {
@@ -2385,19 +2428,13 @@ export class LocalCrewApp {
   }
 
   private async runAutoCycleLocked(run: () => Promise<CommandResult>): Promise<CommandResult> {
-    if (this.autoCyclePromise) {
-      return {
-        lines: [],
-        errors: [],
-        shouldExit: false
-      };
+    if (this.activeCycleCount >= LocalCrewApp.MAX_PARALLEL_CYCLES) {
+      return { lines: [], errors: [], shouldExit: false };
     }
-
-    const cyclePromise = run().finally(() => {
-      this.autoCyclePromise = null;
+    this.activeCycleCount++;
+    return run().finally(() => {
+      this.activeCycleCount--;
     });
-    this.autoCyclePromise = cyclePromise;
-    return cyclePromise;
   }
 
   private async syncSystemFiles(): Promise<void> {
@@ -2721,7 +2758,9 @@ export class LocalCrewApp {
     await clearSystemState(this.rootDir);
     await clearDropboxState(this.rootDir);
     this.systemState = await loadSystemState(this.rootDir);
-    this.autoCyclePromise = null;
+    this.activeCycleCount = 0;
+    this.activeTasksByResource.clear();
+    this.processingTaskIds.clear();
     this.runtime = {
       mode: "command",
       currentEndpoint: this.config.defaultEndpoint
@@ -5149,15 +5188,19 @@ export class LocalCrewApp {
   }
 
   private async processNextAutoTask(): Promise<CommandResult> {
-    if (this.systemState.auto.pending.length === 0) {
-      return {
-        lines: ["Auto queue is empty."],
-        errors: [],
-        shouldExit: false
-      };
+    // Filter out tasks already being processed to prevent duplicate dequeue under parallel dispatch.
+    const busyAliases = new Set(this.activeTasksByResource.keys());
+    const available = this.sortPendingTasks(
+      this.systemState.auto.pending.filter(t => !this.processingTaskIds.has(t.id) &&
+        (!t.requestedResource || !busyAliases.has(t.requestedResource)))
+    );
+    let task = available[0];
+    if (!task) {
+      return { lines: [], errors: [], shouldExit: false };
     }
 
-    let [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+    // Eagerly mark as processing to prevent duplicate picks by concurrent cycles.
+    this.processingTaskIds.add(task.id);
     const taskStartedAt = new Date().toISOString();
     const taskStartMs = Date.now();
     const [documents, agents, telemetrySummary] = await Promise.all([
@@ -5252,9 +5295,10 @@ export class LocalCrewApp {
       endpoint.model = task.requestedModel;
     }
     if (!endpoint.model?.trim()) {
+      this.processingTaskIds.delete(task.id);
       const recovery = await this.quarantineFailedAutoTask({
         task,
-        remaining,
+        remaining: this.systemState.auto.pending.filter(t => t.id !== task.id),
         assignedResource: selection.alias,
         errorMessage: `No default model configured for resource "${selection.alias}".`,
         createRecoveryTask: !this.isSafeModeRecoveryTask(task),
@@ -5405,6 +5449,7 @@ export class LocalCrewApp {
       dailySessionContext: this.getDailySessionContext()
     });
 
+    this.activeTasksByResource.set(selection.alias, task);
     this.emitTaskEvent({
       type: "task-start",
       taskId: task.id,
@@ -5438,9 +5483,11 @@ export class LocalCrewApp {
       });
     } catch (error) {
       const errorMessage = (error as Error).message;
+      this.activeTasksByResource.delete(selection.alias);
+      this.processingTaskIds.delete(task.id);
       const recovery = await this.quarantineFailedAutoTask({
         task,
-        remaining,
+        remaining: this.systemState.auto.pending.filter(t => t.id !== task.id),
         assignedResource: selection.alias,
         assignedModel: endpoint.model,
         errorMessage,
@@ -5520,11 +5567,13 @@ export class LocalCrewApp {
         : { errorMessage: `Task output verification failed: ${verification.reason}` })
     };
 
+    this.activeTasksByResource.delete(selection.alias);
+    this.processingTaskIds.delete(task.id);
     this.systemState = {
       ...this.systemState,
       auto: {
         ...this.systemState.auto,
-        pending: remaining,
+        pending: this.systemState.auto.pending.filter(t => t.id !== task.id),
         completed: [...this.systemState.auto.completed, completedTask].slice(
           -AUTO_COMPLETED_TASK_LIMIT
         ),
@@ -5759,7 +5808,9 @@ export class LocalCrewApp {
     } catch (error) {
       let recoveryLine: string | undefined;
       if (this.systemState.auto.pending.length > 0) {
-        const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+        const [task, ...remaining] = this.sortPendingTasks(
+          this.systemState.auto.pending.filter(t => !this.processingTaskIds.has(t.id))
+        );
         const recovery = await this.quarantineFailedAutoTask({
           task,
           remaining,
