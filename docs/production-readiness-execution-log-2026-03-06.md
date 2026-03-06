@@ -131,3 +131,21 @@ Ship the next production-readiness iteration from `staging` without disturbing t
 - `bunx tsc --noEmit` ✅
 - `npm test` ✅ (`757 pass / 0 fail`)
 - `bunx playwright test --list` ✅ (`21 tests discovered`)
+
+### 2026-03-06 Fresh-Start Runtime Fixes
+
+- Investigated a live `dev` restart where `/auto` was enabled but remained idle with an empty queue and stale billboard counters.
+- Root cause 1: the background pulse in `src/index.ts` depends on `getAvailableCycleSlots()`, and that helper returned `0` when the queue was empty, so `runIdleCycle()` never fired to perform queue fill.
+- Root cause 2: the manual queue reset cleared `.localcrew/system/state.json` only; display counters are driven by telemetry under `.localcrew/system/secure/orchestrator/telemetry/`, which remained intact.
+- Implemented runtime fixes:
+  - `src/app.ts`: `getAvailableCycleSlots()` now exposes one idle-cycle slot for empty-queue `/auto` so queue fill can start from a true fresh run.
+  - `src/telemetry.ts`: added `resetTelemetry()` to atomically clear `summary.json`, `audit-log.jsonl`, and rotated audit archives under lock.
+  - `src/app.ts`: auto-mode `/reset` now performs a full run reset: queue, completion counters, daily-session counters, fill cooldown, network failure cooldown, and telemetry.
+  - `src/terminal.ts`: corrected `/clear` and `/reset` descriptions to match actual behavior.
+- Added regression coverage:
+  - `test/app.test.ts`: empty-queue auto slot exposure and auto-mode `/reset` telemetry reset
+  - `test/telemetry.test.ts`: `resetTelemetry()` clears current and archived audit state
+- Validation:
+  - `bunx tsc --noEmit` ✅
+  - `bun test test/app.test.ts test/telemetry.test.ts` ✅
+  - `npm test` ✅ (`760 pass / 0 fail`)

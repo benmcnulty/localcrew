@@ -115,7 +115,12 @@ import {
 } from "./session-store.ts";
 import { isSpeechSupported, speakText, type WarnFn } from "./speech.ts";
 import { atomicWriteFile, getStoragePaths, type StoragePaths, withFileLock } from "./storage.ts";
-import { appendAuditEvent, loadTelemetrySummary, readRecentAuditEvents } from "./telemetry.ts";
+import {
+  appendAuditEvent,
+  loadTelemetrySummary,
+  readRecentAuditEvents,
+  resetTelemetry
+} from "./telemetry.ts";
 import type {
   AgentCreateAnswers,
   AuditEvent,
@@ -1619,7 +1624,7 @@ export class LocalCrewApp {
     ).length;
     return Math.min(
       Math.max(0, parallelCycleLimit - this.activeCycleCount),
-      pendingCount
+      Math.max(1, pendingCount)
     );
   }
 
@@ -3042,6 +3047,40 @@ export class LocalCrewApp {
     };
     await this.persistConfig();
     await this.persistSessions();
+    await this.persistSystemState();
+  }
+
+  private async resetAutoRunState(options: {
+    keepAutoEnabled?: boolean;
+    resetTelemetry?: boolean;
+  } = {}): Promise<void> {
+    const restartDailySession = Boolean(
+      this.systemState.auto.dailySession && !this.systemState.auto.dailySession.completedAt
+    );
+    this.systemState = {
+      ...this.systemState,
+      auto: {
+        ...this.systemState.auto,
+        enabled: options.keepAutoEnabled ?? this.systemState.auto.enabled,
+        lastTaskId: 0,
+        totalCompletedCount: 0,
+        pending: [],
+        completed: [],
+        ...(restartDailySession ? { dailySession: startDailySession() } : {})
+      }
+    };
+    if (!restartDailySession) {
+      delete this.systemState.auto.dailySession;
+    }
+    this.activeCycleCount = 0;
+    this.activeTasksByResource.clear();
+    this.processingTaskIds.clear();
+    this.lastDailyWorkQueuedDate = null;
+    this.lastFillFailedAt = 0;
+    this.networkFailureTimes.clear();
+    if (options.resetTelemetry) {
+      await resetTelemetry(this.rootDir);
+    }
     await this.persistSystemState();
   }
 
@@ -7581,17 +7620,19 @@ export class LocalCrewApp {
         }
 
         if (this.runtime.mode === "auto") {
-          this.systemState = {
-            ...this.systemState,
-            auto: {
-              ...this.systemState.auto,
-              pending: [],
-              completed: []
-            }
-          };
-          await this.persistSystemState();
+          if (this.isAutoBusy()) {
+            return {
+              lines: [],
+              errors: ["Wait for the current auto cycle to finish before resetting the run state."],
+              shouldExit: false
+            };
+          }
+          await this.resetAutoRunState({
+            keepAutoEnabled: true,
+            resetTelemetry: true
+          });
           return {
-            lines: ["Auto queue reset."],
+            lines: ["Auto run state reset."],
             errors: [],
             shouldExit: false
           };
