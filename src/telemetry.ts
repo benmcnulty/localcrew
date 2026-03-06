@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 
 import { atomicWriteFile, getStoragePaths, withFileLock } from "./storage.ts";
 import type { AuditEvent, TelemetryMetricBucket, TelemetrySummary } from "./types.ts";
@@ -114,6 +114,21 @@ export async function loadTelemetrySummary(rootDir = process.cwd()): Promise<Tel
 
     throw error;
   }
+}
+
+export async function resetTelemetry(rootDir = process.cwd()): Promise<void> {
+  const paths = getStoragePaths(rootDir);
+  await withFileLock(paths.telemetrySummaryPath, async () => {
+    await ensureTelemetryLayout(rootDir);
+    await atomicWriteFile(
+      paths.telemetrySummaryPath,
+      `${JSON.stringify(getDefaultTelemetrySummary(), null, 2)}\n`
+    );
+    await atomicWriteFile(paths.auditLogPath, "");
+    for (let index = 1; index <= AUDIT_LOG_KEEP_ARCHIVES; index += 1) {
+      await rm(getAuditLogArchivePath(paths.auditLogPath, index), { force: true }).catch(() => {});
+    }
+  });
 }
 
 function updateMetricBucket(

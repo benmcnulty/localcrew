@@ -21,7 +21,11 @@ import {
 } from "../src/session-store.ts";
 import { speakText } from "../src/speech.ts";
 import { getStoragePaths } from "../src/storage.ts";
-import { loadTelemetrySummary, readRecentAuditEvents } from "../src/telemetry.ts";
+import {
+  appendAuditEvent,
+  loadTelemetrySummary,
+  readRecentAuditEvents
+} from "../src/telemetry.ts";
 import type { ChatMessage } from "../src/types.ts";
 
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
@@ -573,6 +577,95 @@ describe("LocalCrewApp", () => {
           process.env.LOCALCREW_ORCHESTRATOR_NAME = previousName;
         }
       }
+    });
+  });
+
+  test("reports one available auto cycle when auto is idle and the queue is empty", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
+
+      await app.execute(parseCommand("/auto"));
+
+      expect(app.shouldAutoPulse()).toBe(true);
+      expect(app.getAvailableCycleSlots()).toBe(1);
+    });
+  });
+
+  test("reset in auto mode clears telemetry and queue history for a fresh run", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: true,
+              defaultPriority: "high",
+              lastTaskId: 12,
+              totalCompletedCount: 9,
+              pending: [
+                {
+                  id: 12,
+                  content: "Stale queued task.",
+                  priority: "medium",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:manual",
+                  status: "queued"
+                }
+              ],
+              completed: [
+                {
+                  id: 11,
+                  content: "Old completed task.",
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  completedAt: "2026-03-01T00:01:00.000Z",
+                  createdBy: "test:manual",
+                  status: "completed"
+                }
+              ]
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+      await appendAuditEvent(
+        {
+          timestamp: "2026-03-01T00:00:00.000Z",
+          kind: "ollama.chat",
+          scope: "auto.task",
+          summary: "Old telemetry event",
+          success: true,
+          actor: "test",
+          resourceAlias: "orchestrator",
+          model: "llama3.1:8b",
+          evalCount: 42
+        },
+        rootDir
+      );
+
+      const app = await LocalCrewApp.create({ rootDir, speakFn: () => {} });
+      await app.execute(parseCommand("/auto"));
+
+      const result = await app.execute(parseCommand("/reset"));
+      const state = await loadSystemState(rootDir);
+      const telemetry = await loadTelemetrySummary(rootDir);
+      const audit = await readRecentAuditEvents(5, rootDir);
+
+      expect(result.lines).toEqual(["Auto run state reset."]);
+      expect(state.auto.enabled).toBe(true);
+      expect(state.auto.lastTaskId).toBe(0);
+      expect(state.auto.totalCompletedCount).toBe(0);
+      expect(state.auto.pending).toEqual([]);
+      expect(state.auto.completed).toEqual([]);
+      expect(telemetry.totalEvents).toBe(0);
+      expect(telemetry.lastEventId).toBe(0);
+      expect(telemetry.models).toEqual({});
+      expect(audit).toEqual([]);
     });
   });
 
