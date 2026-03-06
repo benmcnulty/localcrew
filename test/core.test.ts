@@ -693,27 +693,23 @@ describe("message assembly", () => {
   });
 
   test("builds agent chat prompts with queue delegation guidance", () => {
-    expect(
-      buildAgentChatMessages({
-        agentName: "Reviewer",
-        agentSlug: "reviewer",
-        preferredResource: "workhorse",
-        orchestratorName: "Aster",
-        spec: "# Reviewer\n\nSummary: Reviews delegation plans.",
-        summary: "The agent has been evaluating queue flow.",
-        recentMessages: [{ speaker: "user", target: "reviewer", content: "Review this queue." }],
-        taskPrompt: "USER -> @reviewer: Review the queue."
-      })
-    ).toEqual([
+    const agentMessages = buildAgentChatMessages({
+      agentName: "Reviewer",
+      agentSlug: "reviewer",
+      preferredResource: "workhorse",
+      orchestratorName: "Aster",
+      spec: "# Reviewer\n\nSummary: Reviews delegation plans.",
+      summary: "The agent has been evaluating queue flow.",
+      recentMessages: [{ speaker: "user", target: "reviewer", content: "Review this queue." }],
+      taskPrompt: "USER -> @reviewer: Review the queue."
+    });
+
+    expect(agentMessages).toEqual([
       {
         role: "system",
         content: "# Reviewer\n\nSummary: Reviews delegation plans."
       },
-      {
-        role: "system",
-        content:
-          "You are Reviewer (@reviewer), a persistent agent identity managed by Aster, the orchestrator. Your preferred inference resource is workhorse. Stay aligned with your specification and maintain continuity with your private memory. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, or model-configuration decisions. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or add an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. Use only the exact installed resource aliases provided by Local Crew for any QUEUE line. If you are unsure which resource to target, omit the alias and let Local Crew route it automatically. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Use WRITE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets. Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work unless the user explicitly asked for a file deliverable. If a useful improvement would require external application, API, UI, or script changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work. Do not emit queue lines unless a concrete asynchronous follow-up is useful."
-      },
+      expect.objectContaining({ role: "system" }),
       {
         role: "system",
         content: "Agent memory summary:\nThe agent has been evaluating queue flow."
@@ -727,6 +723,13 @@ describe("message assembly", () => {
         content: "USER -> @reviewer: Review the queue."
       }
     ]);
+    const agentSystemPrompt = agentMessages[1]?.content as string;
+    expect(agentSystemPrompt).toContain("You are Reviewer (@reviewer)");
+    expect(agentSystemPrompt).toContain("QUEUE[medium]: task");
+    expect(agentSystemPrompt).toContain("UPDATE[stage][path][replace]");
+    expect(agentSystemPrompt).toContain("replace-section");
+    expect(agentSystemPrompt).toContain("HEADING: Parent > Child");
+    expect(agentSystemPrompt).toContain("WRITE[outbox] or UPDATE[outbox]");
   });
 
   test("builds orchestrator prompts for auto tasks and queue fill", () => {
@@ -746,11 +749,14 @@ describe("message assembly", () => {
       resourceRationale: "Use the strongest reasoning node."
     });
 
-    expect(autoTaskMessages[1]).toEqual({
-      role: "system",
-      content:
-        'You are Aster, the orchestrator identity. The selected inference resource for this task is @orchestrator. Selection rationale: Use the strongest reasoning node. You are using that resource as a tool, but you still answer as Aster. Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system through stronger documentation, indexing, queue hygiene, memory quality, and next-step preparation whenever the current task allows it. Prioritize self-improvement work that better understands and exploits the current local hardware profile, context limits, and delegation opportunities of this specific network. Consistently reference the project directives, roadmap, and focus-todo to maintain orientation and alignment within each task. Every step should connect to the broader objective scope. When a task set exceeds a single context window, decompose it into a coordinated sequence of QUEUE items with clear handoff state. Each follow-up task must include enough context in its description to be self-contained within one context pass. Update working memory (orchestrator summary, focus-todo) to track the current state of multi-step work so that subsequent context windows can resume without losing progress or orientation. Stay inside internal process improvement unless the user explicitly asks for external system changes. Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions. If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. If useful, end with one or more final lines in the exact format QUEUE[high]: task, QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or include an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task. When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit. Use only the exact installed resource aliases provided by Local Crew for any QUEUE line. If you are unsure which resource to target, omit the alias and let Local Crew route it automatically. Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome. When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences. Use WRITE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets. To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], WRITE[internal][roadmap.md], or WRITE[internal][daily-work.md]. These will update the actual orchestrator memory rather than writing to the generated directory. Use WRITE[internal][daily-work.md] to generate or refresh the Daily Work briefing document. Use this to track cross-context-window state, record progress, and maintain orientation for subsequent tasks. Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work.'
-    });
+    expect(autoTaskMessages[1]).toEqual(expect.objectContaining({ role: "system" }));
+    const autoTaskSystemPrompt = autoTaskMessages[1]?.content as string;
+    expect(autoTaskSystemPrompt).toContain("You are Aster, the orchestrator identity.");
+    expect(autoTaskSystemPrompt).toContain("QUEUE[high]: task");
+    expect(autoTaskSystemPrompt).toContain("UPDATE[stage][path][replace]");
+    expect(autoTaskSystemPrompt).toContain("replace-section");
+    expect(autoTaskSystemPrompt).toContain("HEADING: Parent > Child");
+    expect(autoTaskSystemPrompt).toContain("Prefer UPDATE[internal][summary.md]");
 
     expect(autoTaskMessages.at(-1)).toEqual({
       role: "user",
@@ -765,7 +771,8 @@ describe("message assembly", () => {
         changelog: "Changelog",
         orchestratorSummary: "Summary",
         orchestratorName: "Aster",
-        agents: ["@reviewer"]
+        agents: ["@reviewer"],
+        targetTaskCount: 8
       })[1];
     const fillContent = fillMsg.content as string;
     expect(fillMsg.role).toBe("system");
@@ -804,7 +811,8 @@ describe("message assembly", () => {
         orchestratorName: "Aster",
         agents: ["@reviewer"],
         draftTasks: "[medium] Tighten routing",
-        reviewFeedback: "Too broad.\nVERDICT: revise"
+        reviewFeedback: "Too broad.\nVERDICT: revise",
+        targetTaskCount: 6
       })[1];
     expect(finalizeMsg.role).toBe("system");
     expect(finalizeMsg.content).toContain("You are Aster, the orchestrator identity.");

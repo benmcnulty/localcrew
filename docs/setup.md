@@ -145,6 +145,12 @@ Use the script output to decide the device tier:
 - `mid`: structured work, indexing, queue support, moderate drafting
 - `low`: small-context isolated work and overflow
 
+## Explorer Navigation
+
+- Start document traversal with `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md`.
+- Open per-document outline sidecars under `.localcrew/system/secure/orchestrator/navigation/outlines/` when you need copyable `HEADING: Parent > Child` references for targeted markdown edits.
+- In `/explore`, use the generated sitemap first, then open the specific markdown file or outline sidecar you want to revise.
+
 ## Useful Commands
 
 - `/help`

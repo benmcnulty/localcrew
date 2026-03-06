@@ -144,8 +144,10 @@ export function buildAgentChatMessages(options: {
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
         "If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or add an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task.",
         "Use only the exact installed resource aliases provided by Local Crew for any QUEUE line. If you are unsure which resource to target, omit the alias and let Local Crew route it automatically.",
-        "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line.",
-        "Use WRITE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets.",
+        "When a task should create a brand new file or intentionally replace an entire document, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line.",
+        "When a task should update an existing document, prefer UPDATE blocks instead of rewriting the whole file. Valid forms are: UPDATE[stage][path][replace] with SEARCH...ENDSEARCH and CONTENT...ENDCONTENT blocks for exact text replacement, UPDATE[stage][path][replace-section] with SEARCH...ENDSEARCH where SEARCH is HEADING: Parent > Child and CONTENT...ENDCONTENT for full markdown section replacement, UPDATE[stage][path][insert-after] with ANCHOR...ENDANCHOR and CONTENT...ENDCONTENT blocks, UPDATE[stage][path][insert-before] with ANCHOR...ENDANCHOR and CONTENT...ENDCONTENT blocks, or UPDATE[stage][path][append|prepend] with CONTENT...ENDCONTENT, then ENDUPDATE.",
+        "Use WRITE[internal] or UPDATE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] or UPDATE[active] only for drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] or UPDATE[outbox] for user-facing deliverables and external feature request tickets.",
+        "For markdown documents, prefer HEADING: Parent > Child selectors in SEARCH or ANCHOR blocks instead of brittle raw text. Local Crew maintains copyable heading references in `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outline sidecars under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
         "Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work unless the user explicitly asked for a file deliverable. If a useful improvement would require external application, API, UI, or script changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work.",
         "Do not emit queue lines unless a concrete asynchronous follow-up is useful."
       ].join(" ")
@@ -293,9 +295,11 @@ export function buildAutoTaskMessages(options: {
         "When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit.",
         "Use only the exact installed resource aliases provided by Local Crew for any QUEUE line. If you are unsure which resource to target, omit the alias and let Local Crew route it automatically.",
         "Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome.",
-        "When a task should create a file, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences.",
-        "Use WRITE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] for user-facing deliverables and external feature request tickets.",
-        "To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], WRITE[internal][roadmap.md], or WRITE[internal][daily-work.md]. These will update the actual orchestrator memory rather than writing to the generated directory. Use WRITE[internal][daily-work.md] to generate or refresh the Daily Work briefing document. Use this to track cross-context-window state, record progress, and maintain orientation for subsequent tasks.",
+        "When a task should create a brand new file or intentionally replace an entire document, emit zero or more exact file blocks in this format: WRITE[internal][relative/path.ext], WRITE[active][relative/path.ext], or WRITE[outbox][relative/path.ext] on its own line, then the full file content, then ENDWRITE on its own line. Do not wrap WRITE blocks in markdown fences.",
+        "When a task should revise an existing document, prefer UPDATE blocks over whole-file rewrites. Valid forms are UPDATE[stage][path][replace] with SEARCH...ENDSEARCH and CONTENT...ENDCONTENT blocks for exact text replacement, UPDATE[stage][path][replace-section] with SEARCH...ENDSEARCH where SEARCH is HEADING: Parent > Child and CONTENT...ENDCONTENT for full markdown section replacement, UPDATE[stage][path][insert-after] with ANCHOR...ENDANCHOR and CONTENT...ENDCONTENT blocks, UPDATE[stage][path][insert-before] with ANCHOR...ENDANCHOR and CONTENT...ENDCONTENT blocks, or UPDATE[stage][path][append|prepend] with CONTENT...ENDCONTENT, then ENDUPDATE.",
+        "Use WRITE[internal] or UPDATE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] or UPDATE[active] only for in-progress drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] or UPDATE[outbox] for user-facing deliverables and external feature request tickets.",
+        "For markdown documents, prefer HEADING: Parent > Child selectors in SEARCH or ANCHOR blocks instead of brittle raw text. Local Crew maintains copyable heading references in `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outline sidecars under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
+        "To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], WRITE[internal][roadmap.md], or WRITE[internal][daily-work.md] only when regenerating the whole file. Prefer UPDATE[internal][summary.md], UPDATE[internal][focus-todo.md], UPDATE[internal][roadmap.md], or UPDATE[internal][daily-work.md] for targeted revisions that should preserve existing content.",
         "Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work."
       ].join(" ")
     },
@@ -416,7 +420,9 @@ export function buildQueueFillMessages(options: {
   resourceRoster?: string;
   currentDateTime?: string;
   recentCompletedTopics?: ReadonlyArray<string>;
+  targetTaskCount?: number;
 }): ChatMessage[] {
+  const targetTaskCount = options.targetTaskCount ?? 8;
   const outgoing: ChatMessage[] = [
     {
       role: "system",
@@ -441,14 +447,14 @@ export function buildQueueFillMessages(options: {
         'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.',
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
-        "Output only task lines in the exact format [medium] task or [low] task. Prefix each task with its domain tag exactly as shown below.",
-        "Generate exactly 10-12 tasks distributed across these five domains (2-3 per domain). Prefix each task with its domain tag in this exact format: {domain:X}",
-        "SYSTEM (2-3 tasks): Routing quality, memory hygiene, telemetry accuracy, orchestrator self-improvement, queue management. Examples: update focus-todo with lessons from recent completed tasks, refine routing heuristics, improve an orchestrator memory document.",
-        "RESEARCH (2 tasks): User career context. Surface job opportunities and industry signals aligned with the user profile. End each RESEARCH task line with a SEARCH[jobs]: or SEARCH[news]: grounding request. Target: autonomous agents, LLM infrastructure, TypeScript/Bun backend, developer tooling roles.",
-        "KNOWLEDGE (2 tasks): Learning content enrichment. Synthesize documentation, produce skill notes, or build reference material from trusted AI/engineering sources. Use WIKIPEDIA:, SEARCH[software-engineering]:, or SEARCH[ai-engineering]: as appropriate.",
-        "SYNTHESIS (1-2 tasks): Review the most recent 10-20 completed tasks. Extract recurring patterns, failure modes, and improvement opportunities. Write distilled insights to orchestrator memory or agent identity notes.",
-        "IDENTITY (1-2 tasks): Develop a domain-specific agent identity. Update research, synthesis, knowledge, or identity agent specs. Summarize relevant recent findings into the agent notes file.",
-        "Distribute requestedResource assignments explicitly so every resource alias in the inventory receives at least one task. Include at least one high-priority task.",
+        "Output only task lines in the exact format {domain:SYSTEM} [high] task, {domain:SYSTEM} [medium] task, or {domain:SYSTEM} [low] task.",
+        `Generate exactly ${targetTaskCount} tasks. Keep the batch diverse across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY. If the target count is at least 5, include every domain at least once; otherwise choose the highest-value mix without duplicating topics.`,
+        "SYSTEM: Routing quality, memory hygiene, telemetry accuracy, orchestrator self-improvement, queue management. Examples: update focus-todo with lessons from recent completed tasks, refine routing heuristics, improve an orchestrator memory document.",
+        "RESEARCH: User career context. Surface job opportunities and industry signals aligned with the user profile. End each RESEARCH task line with a SEARCH[jobs]: or SEARCH[news]: grounding request. Target: autonomous agents, LLM infrastructure, TypeScript/Bun backend, developer tooling roles.",
+        "KNOWLEDGE: Learning content enrichment. Synthesize documentation, produce skill notes, or build reference material from trusted AI/engineering sources. Use WIKIPEDIA:, SEARCH[software-engineering]:, or SEARCH[ai-engineering]: as appropriate.",
+        "SYNTHESIS: Review the most recent 10-20 completed tasks. Extract recurring patterns, failure modes, and improvement opportunities. Write distilled insights to orchestrator memory or agent identity notes.",
+        "IDENTITY: Develop a domain-specific agent identity. Update research, synthesis, knowledge, or identity agent specs. Summarize relevant recent findings into the agent notes file.",
+        "Distribute requestedResource assignments explicitly so every resource alias in the inventory receives work when capacity allows. Include at least one high-priority task.",
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },
@@ -593,7 +599,9 @@ export function buildQueueFillFinalizeMessages(options: {
   reviewFeedback: string;
   resourceRoster?: string;
   currentDateTime?: string;
+  targetTaskCount?: number;
 }): ChatMessage[] {
+  const targetTaskCount = options.targetTaskCount ?? 6;
   const outgoing: ChatMessage[] = [
     {
       role: "system",
@@ -617,7 +625,7 @@ export function buildQueueFillFinalizeMessages(options: {
         'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
         'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.',
         "Output only approved task lines in the exact format [high] task, [medium] task, or [low] task, with each task prefixed by its domain tag (e.g. {domain:SYSTEM}).",
-        "Finalize 6-8 tasks from the approved draft, preserving domain distribution across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY. Ensure every available resource receives at least one task. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.",
+        `Finalize exactly ${targetTaskCount} tasks from the approved draft. If the target count is at least 5, preserve coverage across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY; otherwise choose the highest-value mix. Ensure every available resource receives work when capacity allows. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles.`,
         "Do not output any explanation before or after the task lines."
       ].join(" ")
     },

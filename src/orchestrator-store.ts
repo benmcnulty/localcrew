@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
+import { syncDocumentNavigation } from "./document-outline.ts";
 import { loadLocalEnv } from "./env.ts";
 import { loadBuiltinAgentSeeds, loadSeedFile } from "./external-memory.ts";
 import { getOrchestratorIdentityName } from "./orchestrator-identity.ts";
@@ -209,6 +210,13 @@ function getDefaultDirectives(rootDir = process.cwd()): string {
     "- Promote only validated lessons from local memory into committed seeds after they have been reviewed and simplified.",
     "- Prefer concise summaries and stable indexes over sprawling process prose.",
     "",
+    "## Document Navigation",
+    "",
+    "- Local Crew maintains a generated sitemap at `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outlines under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
+    "- Treat heading trails as the compact content map for markdown documents and preserve stable section names when you refine recurring docs.",
+    "- When revising one markdown section without regenerating the whole file, use UPDATE blocks with HEADING: Parent > Child selectors and prefer replace-section for whole-section rewrites.",
+    "- Use insert-after or insert-before with heading selectors when appending notes under an existing section or inserting a new section between established headings.",
+    "",
     ACTIVE_AUTO_DIRECTIVE_HEADING,
     "",
     `- In \`/auto\`, self-aware self-improvement is ${orchestratorName}'s default operating stance whenever the user has not given a more urgent direct task.`,
@@ -237,6 +245,7 @@ function getDefaultRoadmap(): string {
     "- Expand observability through the HUD, local API, and browser GUI without weakening the internal/external memory boundary.",
     "- Strengthen safe-mode recovery so failures produce diagnosis and realignment instead of repeated derailment.",
     "- Formalize the promotion path from local discoveries in `.localcrew/` into simplified, committed `external-memory/` seeds.",
+    "- Keep document navigation, sitemap generation, and heading-aware markdown updates stable across local and committed memory.",
     "- Keep external feature work spec-driven through outbox tickets until it is deliberately implemented in the application layer."
   ].join("\n");
 }
@@ -248,6 +257,7 @@ function getDefaultFocusTodo(): string {
     "- [high] Keep canonical resource naming, routing, and queue delegation resistant to context drift.",
     "- [medium] Tighten orchestrator summaries, indexes, and prompt guidance so long-running `/auto` sessions stay coherent.",
     "- [medium] Improve safe-mode recovery and failure diagnosis using recent audit evidence.",
+    "- [medium] Keep document outlines, sitemap references, and heading-based memory updates coherent across recurring docs.",
     "- [low] Distill validated local lessons into simpler committed seed documents without carrying over experimental clutter."
   ].join("\n");
 }
@@ -393,6 +403,8 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
   await mkdir(paths.orchestratorDir, { recursive: true });
   await mkdir(paths.orchestratorGeneratedDir, { recursive: true });
   await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+  await mkdir(paths.navigationDir, { recursive: true });
+  await mkdir(paths.navigationOutlinesDir, { recursive: true });
   await mkdir(paths.telemetryDir, { recursive: true });
   await mkdir(paths.agentsDir, { recursive: true });
 
@@ -479,7 +491,20 @@ export async function ensureSystemLayout(rootDir = process.cwd()): Promise<void>
       "- [medium] Formalize promotion from internal runtime discoveries into committed external-memory seeds."
     ].join("\n")
   );
+  await ensureDocumentContains(
+    paths.directivesPath,
+    "- Local Crew maintains a generated sitemap at `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outlines under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
+    [
+      "## Document Navigation",
+      "",
+      "- Local Crew maintains a generated sitemap at `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outlines under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
+      "- Treat heading trails as the compact content map for markdown documents and preserve stable section names when you refine recurring docs.",
+      "- When revising one markdown section without regenerating the whole file, use UPDATE blocks with HEADING: Parent > Child selectors and prefer replace-section for whole-section rewrites.",
+      "- Use insert-after or insert-before with heading selectors when appending notes under an existing section or inserting a new section between established headings."
+    ].join("\n")
+  );
   await seedBuiltinAgents(rootDir);
+  await syncDocumentNavigation(rootDir);
 }
 
 export async function loadSystemState(rootDir = process.cwd()): Promise<SystemState> {

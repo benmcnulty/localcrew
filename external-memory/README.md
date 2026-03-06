@@ -24,6 +24,13 @@ Internal notes, summaries, diagnostics, and process artifacts generated during `
 should stay under `.localcrew/system/secure/orchestrator/` rather than being treated as
 portable external memory.
 
+## Outline Navigation
+
+- Local Crew generates a runtime sitemap at `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md`.
+- Per-document outline sidecars are generated under `.localcrew/system/secure/orchestrator/navigation/outlines/`.
+- These outline files are the compact navigation layer for recurring markdown docs and the preferred source of `HEADING: Parent > Child` references during targeted updates.
+- Keep committed markdown headings stable and functional so the runtime outline index stays reliable across installs.
+
 ## Promotion Rule
 
 Promote a local lesson into `external-memory/` only when it is:
