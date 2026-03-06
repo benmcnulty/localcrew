@@ -347,7 +347,9 @@ describe("API server", () => {
         expect(participantDelete.result.lines[0]).toContain("Removed participant @reviewer.");
         expect(dropbox.inbox.map((entry: { relativePath: string }) => entry.relativePath)).toContain("remote.md");
         expect(tree.lines.some((line: string) => line.includes("external-memory"))).toBe(true);
+        expect(tree.sitemapPath).toContain("document-sitemap.md");
         expect(file.content).toContain("LocalCrew-Status: inbox");
+        expect(file.outline.headings[0].trail.join(" > ")).toBe("Remote spec");
         expect(uiHtml).toContain("section-dashboard");
       } finally {
         await api!.close();

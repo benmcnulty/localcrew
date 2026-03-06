@@ -939,6 +939,7 @@ export function chooseResourceForTask(
     telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> };
     lastAssignedByAlias?: Record<string, number>;
     liveMetricsByAlias?: Record<string, LiveDeviceMetrics & { receivedAt: number }>;
+    healthStatuses?: Record<string, "online" | "offline" | "degraded">;
   } = {}
 ): {
   alias: string;
@@ -1102,7 +1103,30 @@ export function chooseResourceForTask(
   }
 
   const classified = classifyTask(task);
-  const scoredRoute = routeTask(classified, resources, telemetryByAlias, undefined, options.lastAssignedByAlias);
+  const scoredRoute = routeTask(
+    classified,
+    resources,
+    telemetryByAlias,
+    options.healthStatuses,
+    options.lastAssignedByAlias
+  );
+
+  // Load-balancing escape hatch: if the scored route chose a top-tier resource
+  // but a mid-tier resource is idle and the top-tier is under load, prefer mid.
+  if (scoredRoute.resource.tier === "top" && mid.length > 0) {
+    const midCandidate = pickLeastLoaded(mid, resourceLoad);
+    const selectedLoad = getResourceLoad(scoredRoute.resource.alias, resourceLoad);
+    const midLoad = midCandidate ? getResourceLoad(midCandidate.alias, resourceLoad) : 999;
+    if (midCandidate && selectedLoad >= 1 && midLoad < selectedLoad) {
+      return {
+        alias: midCandidate.alias,
+        tier: midCandidate.tier,
+        purpose: midCandidate.toolsModel ? "tools" : "default",
+        rationale: `Load-balanced to @${midCandidate.alias} (mid-tier) because @${scoredRoute.resource.alias} already has load ${selectedLoad}.`
+      };
+    }
+  }
+
   const fallbackPurpose =
     classified.taskType === "reasoning" || classified.taskType === "planning"
       ? "reasoning"
@@ -1307,6 +1331,16 @@ export function getEffectiveResourceRole(
   if (profile.alias === primaryOrchestratorAlias) return "primary-orchestrator";
   if (isOrchestratorCapable(profile)) return "orchestrator";
   return "agent";
+}
+
+export function getShipRoleLabel(
+  profile: ResourceProfile,
+  primaryOrchestratorAlias: string
+): "Captain" | "Mate" | "Crew" {
+  const role = getEffectiveResourceRole(profile, primaryOrchestratorAlias);
+  if (role === "primary-orchestrator") return "Captain";
+  if (role === "orchestrator") return "Mate";
+  return "Crew";
 }
 
 export interface NetworkTopologyNode {

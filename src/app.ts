@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { compactConversation } from "./compact.ts";
@@ -62,6 +62,7 @@ import {
   writeInboxDocument,
   writeGeneratedDropboxDocument
 } from "./dropbox.ts";
+import { getHeadingSectionRange, isHeadingReference, syncDocumentNavigation } from "./document-outline.ts";
 import {
   buildAgentChatMessages,
   buildAgentIdentityBlock,
@@ -82,6 +83,7 @@ import {
   detectTaskPurpose,
   getModelProfile,
   getEffectiveResourceRole,
+  getShipRoleLabel,
   getResourceCapacitySummary,
   getOrchestratorResourceAlias,
   getResourceEndpoint,
@@ -112,7 +114,7 @@ import {
   setConversationCompaction
 } from "./session-store.ts";
 import { isSpeechSupported, speakText, type WarnFn } from "./speech.ts";
-import { getStoragePaths, type StoragePaths } from "./storage.ts";
+import { atomicWriteFile, getStoragePaths, type StoragePaths, withFileLock } from "./storage.ts";
 import { appendAuditEvent, loadTelemetrySummary, readRecentAuditEvents } from "./telemetry.ts";
 import type {
   AgentCreateAnswers,
@@ -388,20 +390,166 @@ function parseWebsiteRequest(content: string): { replyText: string; topicOrPath?
   return { replyText, topicOrPath };
 }
 
+type GeneratedFileStage = "active" | "outbox" | "internal";
+type GeneratedFileUpdateMode = "replace" | "replace-section" | "insert-after" | "insert-before" | "append" | "prepend";
+
+type GeneratedFileDirective =
+  | {
+      kind: "write";
+      stage: GeneratedFileStage;
+      filename: string;
+      content: string;
+    }
+  | {
+      kind: "update";
+      stage: GeneratedFileStage;
+      filename: string;
+      mode: GeneratedFileUpdateMode;
+      content: string;
+      anchor?: string;
+    };
+
+function extractDirectiveBlock(body: string, label: string): string | null {
+  const pattern = new RegExp(
+    `(?:^|\\n)${label}\\n([\\s\\S]*?)\\nEND${label}(?=\\n|$)`,
+    "i"
+  );
+  const match = body.match(pattern);
+  return match ? match[1].trimEnd() : null;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) {
+    return 0;
+  }
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const foundAt = haystack.indexOf(needle, index);
+    if (foundAt === -1) {
+      return count;
+    }
+    count += 1;
+    index = foundAt + needle.length;
+  }
+}
+
+function resolveGeneratedUpdateAnchor(
+  currentContent: string,
+  anchor: string,
+  filename: string
+): { index: number; length: number } {
+  const normalizedAnchor = anchor.replaceAll("\r\n", "\n").trimEnd();
+  if (!normalizedAnchor) {
+    throw new Error(`UPDATE for ${filename} requires a non-empty anchor block.`);
+  }
+
+  if (isHeadingReference(normalizedAnchor)) {
+    const { start, heading } = getHeadingSectionRange(currentContent, normalizedAnchor);
+    return {
+      index: start,
+      length: heading.raw.length
+    };
+  }
+
+  const occurrences = countOccurrences(currentContent, normalizedAnchor);
+  if (occurrences === 0) {
+    throw new Error(`UPDATE for ${filename} could not find the requested anchor.`);
+  }
+  if (occurrences > 1) {
+    throw new Error(`UPDATE for ${filename} matched multiple anchors; refusing ambiguous edit.`);
+  }
+
+  return {
+    index: currentContent.indexOf(normalizedAnchor),
+    length: normalizedAnchor.length
+  };
+}
+
+function joinDocumentParts(left: string, right: string): string {
+  const normalizedLeft = left.trimEnd();
+  const normalizedRight = right.trimStart();
+  if (!normalizedLeft) {
+    return normalizedRight;
+  }
+  if (!normalizedRight) {
+    return normalizedLeft;
+  }
+  return `${normalizedLeft}\n${normalizedRight}`;
+}
+
+function applyGeneratedFileDirective(
+  currentContent: string,
+  directive: Extract<GeneratedFileDirective, { kind: "update" }>
+): string {
+  const normalizedCurrent = currentContent.replaceAll("\r\n", "\n");
+  const normalizedDirectiveContent = directive.content.replaceAll("\r\n", "\n").trimEnd();
+  if (!normalizedCurrent.trim()) {
+    throw new Error(
+      `Cannot apply UPDATE to ${directive.filename} because the target file does not exist or is empty.`
+    );
+  }
+
+  if (directive.mode === "append") {
+    return `${joinDocumentParts(normalizedCurrent, normalizedDirectiveContent)}\n`;
+  }
+
+  if (directive.mode === "prepend") {
+    return `${joinDocumentParts(normalizedDirectiveContent, normalizedCurrent)}\n`;
+  }
+
+  const anchor = directive.anchor?.replaceAll("\r\n", "\n").trimEnd();
+  if (!anchor) {
+    throw new Error(`UPDATE for ${directive.filename} requires a non-empty anchor block.`);
+  }
+
+  if (directive.mode === "replace-section") {
+    if (!isHeadingReference(anchor)) {
+      throw new Error(
+        `UPDATE for ${directive.filename} requires SEARCH to use HEADING: ... when mode is replace-section.`
+      );
+    }
+    const { start, end } = getHeadingSectionRange(normalizedCurrent, anchor);
+    return `${normalizedCurrent.slice(0, start)}${normalizedDirectiveContent}\n${normalizedCurrent.slice(end)}`.replace(
+      /\s*$/,
+      "\n"
+    );
+  }
+
+  if (directive.mode === "replace" && isHeadingReference(anchor)) {
+    throw new Error(
+      `UPDATE for ${directive.filename} cannot use HEADING: ... with replace; use replace-section instead.`
+    );
+  }
+
+  const resolvedAnchor = resolveGeneratedUpdateAnchor(normalizedCurrent, anchor, directive.filename);
+  if (directive.mode === "replace") {
+    return `${normalizedCurrent.slice(0, resolvedAnchor.index)}${normalizedDirectiveContent}${normalizedCurrent.slice(
+      resolvedAnchor.index + resolvedAnchor.length
+    )}`.replace(/\s*$/, "\n");
+  }
+
+  if (directive.mode === "insert-before") {
+    return `${normalizedCurrent.slice(0, resolvedAnchor.index)}${normalizedDirectiveContent}\n${normalizedCurrent.slice(
+      resolvedAnchor.index
+    )}`.replace(/\s*$/, "\n");
+  }
+
+  return `${normalizedCurrent.slice(0, resolvedAnchor.index + resolvedAnchor.length)}\n${normalizedDirectiveContent}${normalizedCurrent.slice(
+    resolvedAnchor.index + resolvedAnchor.length
+  )}`.replace(/\s*$/, "\n");
+}
+
 function parseQueuedTasks(content: string): {
   replyText: string;
   queuedTasks: Array<{
     priority: TaskPriority;
     content: string;
     delegationRole?: string;
-    requestedResource?: string;
-    requestedModel?: string;
+      requestedResource?: string;
+      requestedModel?: string;
   }>;
-  fileWrites: Array<{
-    stage: "active" | "outbox" | "internal";
-    filename: string;
-    content: string;
-  }>;
+  fileDirectives: GeneratedFileDirective[];
   scriptRequests: ScriptRequest[];
 } {
   const replyLines: string[] = [];
@@ -412,11 +560,7 @@ function parseQueuedTasks(content: string): {
     requestedResource?: string;
     requestedModel?: string;
   }> = [];
-  const fileWrites: Array<{
-    stage: "active" | "outbox" | "internal";
-    filename: string;
-    content: string;
-  }> = [];
+  const fileDirectives: GeneratedFileDirective[] = [];
 
   // Extract SCRIPT_REQUEST blocks before other parsing
   const scriptRequests = parseScriptRequests(content);
@@ -424,10 +568,49 @@ function parseQueuedTasks(content: string): {
     /(?:^|\n)SCRIPT_REQUEST\[[a-z0-9-]+\]\n[\s\S]*?\nENDSCRIPT(?=\n|$)/gi;
   let workingContent = content.replace(scriptPattern, "\n");
 
+  const updatePattern =
+    /(?:^|\n)UPDATE\[(active|outbox|internal)\]\[([^\]\n]+)\]\[(replace|replace-section|insert-after|insert-before|append|prepend)\]\n([\s\S]*?)\nENDUPDATE(?=\n|$)/gi;
+  for (const updateMatch of workingContent.matchAll(updatePattern)) {
+    const stage = updateMatch[1].toLowerCase() as GeneratedFileStage;
+    const filename = updateMatch[2].trim();
+    const mode = updateMatch[3].toLowerCase() as GeneratedFileUpdateMode;
+    const body = updateMatch[4];
+    const contentBlock = extractDirectiveBlock(body, "CONTENT");
+    if (!contentBlock?.trim()) {
+      continue;
+    }
+    if (mode === "append" || mode === "prepend") {
+      fileDirectives.push({
+        kind: "update",
+        stage,
+        filename,
+        mode,
+        content: contentBlock
+      });
+      continue;
+    }
+
+    const anchorLabel = mode === "replace" || mode === "replace-section" ? "SEARCH" : "ANCHOR";
+    const anchorBlock = extractDirectiveBlock(body, anchorLabel);
+    if (!anchorBlock?.trim()) {
+      continue;
+    }
+    fileDirectives.push({
+      kind: "update",
+      stage,
+      filename,
+      mode,
+      anchor: anchorBlock,
+      content: contentBlock
+    });
+  }
+  workingContent = workingContent.replace(updatePattern, "\n");
+
   const writePattern =
     /(?:^|\n)WRITE\[(active|outbox|internal)\]\[([^\]\n]+)\]\n([\s\S]*?)\nENDWRITE(?=\n|$)/gi;
   for (const writeMatch of workingContent.matchAll(writePattern)) {
-    fileWrites.push({
+    fileDirectives.push({
+      kind: "write",
       stage: writeMatch[1].toLowerCase() as "active" | "outbox" | "internal",
       filename: writeMatch[2].trim(),
       content: writeMatch[3].trimEnd()
@@ -463,7 +646,7 @@ function parseQueuedTasks(content: string): {
   return {
     replyText: replyLines.join("\n").trim(),
     queuedTasks,
-    fileWrites,
+    fileDirectives,
     scriptRequests,
   };
 }
@@ -945,7 +1128,12 @@ export class LocalCrewApp {
   private readonly speakFn: SpeakFn;
   private readonly warn: WarnFn;
   private readonly platform: NodeJS.Platform;
-  private autoCyclePromise: Promise<CommandResult> | null;
+  private activeCycleCount = 0;
+  private static readonly DEFAULT_MAX_PARALLEL_CYCLES = 3;
+  /** Maps resource alias → the task currently being processed by that resource. */
+  private readonly activeTasksByResource = new Map<string, AutoQueueTask>();
+  /** IDs of tasks currently being processed (prevents duplicate dequeue under parallel dispatch). */
+  private readonly processingTaskIds = new Set<number>();
   private apiServerHandle?: { pushDisplayEvent(payload: Record<string, unknown>): void };
   private readonly resourceTelemetry = new Map<string, ResourceTelemetry>();
   /** Tracks when each resource last had a network-level failure (e.g. "fetch failed"). */
@@ -964,8 +1152,6 @@ export class LocalCrewApp {
   private lastHealthPollAt = 0;
   /** Interval between background health polls (5 minutes). */
   private static readonly HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
-  /** Start generating a new backlog when pending queue drops to this depth — prevents idle gaps. */
-  private static readonly QUEUE_REFILL_THRESHOLD = 4;
   /** Cooldown (ms) after a queue fill failure before retrying — prevents fill-fail loops. */
   private static readonly FILL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly QUEUE_FILL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — queue fill prompts are large
@@ -988,7 +1174,6 @@ export class LocalCrewApp {
     this.speakFn = options.speakFn ?? defaultSpeakFn;
     this.warn = options.warn ?? (() => {});
     this.platform = options.platform ?? process.platform;
-    this.autoCyclePromise = null;
     setModelProfile(config.preferences?.modelProfile ?? "auto");
     this.runtime = {
       mode: "command",
@@ -1232,16 +1417,33 @@ export class LocalCrewApp {
   private pushDisplayState(): void {
     const auto = this.systemState.auto;
     const prefs = this.config.preferences;
+    const availableResourceCount = this.getAvailableResourceCount();
+    const desiredPendingDepth = this.getDesiredPendingDepth();
+    const refillThreshold = this.getQueueRefillThreshold();
+    const parallelCycleLimit = this.getEffectiveParallelCycleLimit();
     this.pushDisplayEvent({
       type: "state",
       orchestratorName: this.config.orchestratorName,
+      orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       auto: {
         enabled: auto.enabled,
         pendingCount: auto.pending.length,
         completedCount: auto.totalCompletedCount ?? auto.completed.length,
         failedCount: auto.completed.filter((task) => task.status === "failed").length,
-        busy: this.autoCyclePromise !== null,
+        busy: this.activeCycleCount > 0,
+        availableResourceCount,
+        desiredPendingDepth,
+        refillThreshold,
+        parallelCycleLimit,
+        availableCycleSlots: Math.max(0, parallelCycleLimit - this.activeCycleCount),
+        activeTasks: [...this.activeTasksByResource.values()].map(t => ({
+          id: t.id,
+          content: t.content.replace(/^\{domain:[A-Z]+\}\s*/i, ""),
+          assignedResource: t.assignedResource ?? null,
+          requestedResource: t.requestedResource ?? null,
+          priority: t.priority
+        })),
         nextTask: auto.pending[0]
           ? {
               id: auto.pending[0].id,
@@ -1323,7 +1525,7 @@ export class LocalCrewApp {
   }
 
   isAutoBusy(): boolean {
-    return this.autoCyclePromise !== null;
+    return this.activeCycleCount > 0;
   }
 
   /** Collect all participant + resource aliases for internal-query filtering. */
@@ -1352,8 +1554,73 @@ export class LocalCrewApp {
     return pattern;
   }
 
+  private getConfiguredMaxParallelCycles(): number {
+    return Math.max(
+      1,
+      getEnvNumber(
+        "LOCALCREW_MAX_PARALLEL_CYCLES",
+        LocalCrewApp.DEFAULT_MAX_PARALLEL_CYCLES
+      )
+    );
+  }
+
+  private getSchedulableResourceAliases(): string[] {
+    const aliases = listResources(this.rootDir).map((resource) => resource.alias);
+    if (aliases.length === 0) {
+      return [];
+    }
+    const availableAliases = aliases.filter(
+      (alias) => this.resourceHealth.get(alias)?.status !== "offline"
+    );
+    return availableAliases.length > 0 ? availableAliases : aliases;
+  }
+
+  private getAvailableResourceCount(): number {
+    return this.getSchedulableResourceAliases().length;
+  }
+
+  private getDesiredPendingDepth(): number {
+    return Math.max(2, this.getAvailableResourceCount() * 2);
+  }
+
+  private getQueueRefillThreshold(): number {
+    return Math.max(1, this.getAvailableResourceCount());
+  }
+
+  private getEffectiveParallelCycleLimit(): number {
+    const availableResourceCount = this.getAvailableResourceCount();
+    if (availableResourceCount <= 0) {
+      return 0;
+    }
+    return Math.max(
+      1,
+      Math.min(this.getConfiguredMaxParallelCycles(), availableResourceCount)
+    );
+  }
+
+  private getResourceHealthStatuses(): Record<string, ResourceHealthStatus> {
+    const statuses: Record<string, ResourceHealthStatus> = {};
+    for (const [alias, health] of this.resourceHealth) {
+      statuses[alias] = health.status;
+    }
+    return statuses;
+  }
+
   shouldAutoPulse(): boolean {
-    return this.isAutoMode() && !this.isAutoBusy();
+    return this.isAutoMode() && this.activeCycleCount < this.getEffectiveParallelCycleLimit();
+  }
+
+  /** Returns how many additional parallel task cycles can be dispatched right now. */
+  getAvailableCycleSlots(): number {
+    if (!this.isAutoMode()) return 0;
+    const parallelCycleLimit = this.getEffectiveParallelCycleLimit();
+    const pendingCount = this.systemState.auto.pending.filter(
+      t => !this.processingTaskIds.has(t.id)
+    ).length;
+    return Math.min(
+      Math.max(0, parallelCycleLimit - this.activeCycleCount),
+      pendingCount
+    );
   }
 
   getAutoPulseIntervalMs(): number {
@@ -1444,6 +1711,7 @@ export class LocalCrewApp {
 
   async getStatusSnapshot(): Promise<{
     orchestratorName: string;
+    orchestratorAlias: string;
     mode: ReplMode;
     prompt: string;
     currentEndpoint: string;
@@ -1456,6 +1724,11 @@ export class LocalCrewApp {
       pendingCount: number;
       completedCount: number;
       failedCount: number;
+      availableResourceCount: number;
+      desiredPendingDepth: number;
+      refillThreshold: number;
+      parallelCycleLimit: number;
+      availableCycleSlots: number;
     };
     nextTask?: AutoQueueTask;
     lastCompleted?: AutoQueueTask;
@@ -1477,9 +1750,14 @@ export class LocalCrewApp {
       loadTelemetrySummary(this.rootDir),
       getDropboxSnapshot(this.rootDir)
     ]);
+    const availableResourceCount = this.getAvailableResourceCount();
+    const desiredPendingDepth = this.getDesiredPendingDepth();
+    const refillThreshold = this.getQueueRefillThreshold();
+    const parallelCycleLimit = this.getEffectiveParallelCycleLimit();
 
     return {
       orchestratorName: this.config.orchestratorName,
+      orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       prompt: this.getPrompt(),
       currentEndpoint: this.runtime.currentEndpoint,
@@ -1491,7 +1769,12 @@ export class LocalCrewApp {
         defaultPriority: this.systemState.auto.defaultPriority,
         pendingCount: this.systemState.auto.pending.length,
         completedCount: this.systemState.auto.totalCompletedCount ?? this.systemState.auto.completed.length,
-        failedCount: this.systemState.auto.completed.filter((task) => task.status === "failed").length
+        failedCount: this.systemState.auto.completed.filter((task) => task.status === "failed").length,
+        availableResourceCount,
+        desiredPendingDepth,
+        refillThreshold,
+        parallelCycleLimit,
+        availableCycleSlots: this.getAvailableCycleSlots()
       },
       nextTask: this.sortPendingTasks(this.systemState.auto.pending)[0],
       lastCompleted: this.systemState.auto.completed.at(-1),
@@ -1513,14 +1796,32 @@ export class LocalCrewApp {
     enabled: boolean;
     busy: boolean;
     defaultPriority: TaskPriority;
+    availableResourceCount: number;
+    desiredPendingDepth: number;
+    refillThreshold: number;
+    activeTasks: AutoQueueTask[];
     pending: AutoQueueTask[];
     completed: AutoQueueTask[];
   }> {
+    const activeTasks = [...this.activeTasksByResource.values()].map(task => ({
+      ...task,
+      content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "")
+    }));
+    const activeIds = new Set(activeTasks.map(t => t.id));
     return {
       enabled: this.isAutoMode(),
       busy: this.isAutoBusy(),
       defaultPriority: this.systemState.auto.defaultPriority,
-      pending: this.sortPendingTasks(this.systemState.auto.pending),
+      availableResourceCount: this.getAvailableResourceCount(),
+      desiredPendingDepth: this.getDesiredPendingDepth(),
+      refillThreshold: this.getQueueRefillThreshold(),
+      activeTasks,
+      pending: this.sortPendingTasks(
+        this.systemState.auto.pending.filter(t => !activeIds.has(t.id))
+      ).map(task => ({
+        ...task,
+        content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "")
+      })),
       completed: [...this.systemState.auto.completed].reverse()
     };
   }
@@ -1551,7 +1852,11 @@ export class LocalCrewApp {
   }
 
   async getResourcesSnapshot() {
-    return listResources(this.rootDir);
+    const orchestratorAlias = this.resolveOrchestratorAlias();
+    return listResources(this.rootDir).map(r => ({
+      ...r,
+      shipRole: getShipRoleLabel(r, orchestratorAlias)
+    }));
   }
 
   private speechUnavailableLine(): string {
@@ -2054,7 +2359,7 @@ export class LocalCrewApp {
         );
 
       if (next !== current) {
-        await writeFile(directivesPath, next, "utf8");
+        await atomicWriteFile(directivesPath, next, "utf8");
       }
     } catch (error) {
       this.warn?.(`Failed to sync orchestrator name in directives: ${error instanceof Error ? error.message : String(error)}`);
@@ -2281,26 +2586,36 @@ export class LocalCrewApp {
     ];
   }
 
-  async getExploreTree(): Promise<{ rootPath: string; lines: string[] }> {
+  async getExploreTree(): Promise<{
+    rootPath: string;
+    lines: string[];
+    sitemapPath: string;
+    outlineIndexPath: string;
+  }> {
     const tree = await getInternalFileTree(this.rootDir);
+    const paths = getStoragePaths(this.rootDir);
     return {
       rootPath: tree.rootPath,
+      sitemapPath: paths.documentSitemapPath,
+      outlineIndexPath: paths.documentOutlineIndexPath,
       lines: [
         "Explorer",
         "",
+        "Generated navigation:",
+        `- Sitemap: ${paths.documentSitemapPath}`,
+        `- Outline index: ${paths.documentOutlineIndexPath}`,
+        "",
         ...tree.lines,
         "",
+        "Start with the sitemap for a compact document map, then open a specific file or outline sidecar.",
+        "Use HEADING: Parent > Child selectors in UPDATE anchors when revising markdown incrementally.",
         "Type a full path from .localcrew/system or external-memory and press Enter to open it. Press Esc to return."
       ]
     };
   }
 
-  async readExploreFile(path: string): Promise<{ path: string; content: string }> {
-    const file = await readInternalFile(path, this.rootDir);
-    return {
-      path: file.path,
-      content: file.content
-    };
+  async readExploreFile(path: string) {
+    return readInternalFile(path, this.rootDir);
   }
 
   async searchExploreFiles(query: string) {
@@ -2385,26 +2700,22 @@ export class LocalCrewApp {
   }
 
   private async runAutoCycleLocked(run: () => Promise<CommandResult>): Promise<CommandResult> {
-    if (this.autoCyclePromise) {
-      return {
-        lines: [],
-        errors: [],
-        shouldExit: false
-      };
+    if (this.activeCycleCount >= this.getEffectiveParallelCycleLimit()) {
+      return { lines: [], errors: [], shouldExit: false };
     }
-
-    const cyclePromise = run().finally(() => {
-      this.autoCyclePromise = null;
+    this.activeCycleCount++;
+    return run().finally(() => {
+      this.activeCycleCount--;
     });
-    this.autoCyclePromise = cyclePromise;
-    return cyclePromise;
   }
 
   private async syncSystemFiles(): Promise<void> {
+    const paths = getStoragePaths(this.rootDir);
     await saveFocusTodo(this.systemState.auto.pending, this.rootDir);
-    await writeFile(
-      getStoragePaths(this.rootDir).deviceInventoryPath,
-      `${renderResourceInventory(this.rootDir).trimEnd()}\n`,
+    await atomicWriteFile(
+      paths.deviceInventoryPath,
+      `${renderResourceInventory(this.rootDir).trimEnd()}
+`,
       "utf8"
     );
     const agents = await listAgents(this.rootDir);
@@ -2416,6 +2727,7 @@ export class LocalCrewApp {
       connectedResources: listResources(this.rootDir).map((resource) => resource.alias),
       recentAutoSummary
     });
+    await syncDocumentNavigation(this.rootDir);
   }
 
   getHelpLines(): string[] {
@@ -2721,7 +3033,9 @@ export class LocalCrewApp {
     await clearSystemState(this.rootDir);
     await clearDropboxState(this.rootDir);
     this.systemState = await loadSystemState(this.rootDir);
-    this.autoCyclePromise = null;
+    this.activeCycleCount = 0;
+    this.activeTasksByResource.clear();
+    this.processingTaskIds.clear();
     this.runtime = {
       mode: "command",
       currentEndpoint: this.config.defaultEndpoint
@@ -3980,22 +4294,41 @@ export class LocalCrewApp {
    * (summary, focus-todo, roadmap). Returns null if the filename does not
    * match a known canonical path.
    */
-  private async writeCanonicalMemoryFile(
-    filename: string,
-    content: string
+  private getCanonicalMemoryTarget(
+    filename: string
   ): Promise<{ path: string; relativePath: string } | null> {
     const normalized = filename.replace(/^\/+/, "").toLowerCase();
     const resolver = this.CANONICAL_MEMORY_FILES[normalized];
     if (!resolver) {
-      return null;
+      return Promise.resolve(null);
     }
     const paths = getStoragePaths(this.rootDir);
     const targetPath = resolver(paths);
-    await writeFile(targetPath, `${content.trimEnd()}\n`, "utf8");
-    return {
+    return Promise.resolve({
       path: targetPath,
       relativePath: normalized
-    };
+    });
+  }
+
+  private async writeTextDocumentAtomically(targetPath: string, content: string): Promise<void> {
+    await mkdir(dirname(targetPath), { recursive: true });
+    await atomicWriteFile(targetPath, `${content.trimEnd()}\n`, "utf8");
+  }
+
+  private async applyDirectiveToTarget(
+    targetPath: string,
+    directive: GeneratedFileDirective
+  ): Promise<void> {
+    await withFileLock(targetPath, async () => {
+      if (directive.kind === "write") {
+        await this.writeTextDocumentAtomically(targetPath, directive.content);
+        return;
+      }
+
+      const currentContent = await readFile(targetPath, "utf8").catch(() => "");
+      const nextContent = applyGeneratedFileDirective(currentContent, directive);
+      await this.writeTextDocumentAtomically(targetPath, nextContent);
+    });
   }
 
   private async writeInternalGeneratedDocument(filename: string, content: string): Promise<{
@@ -4011,7 +4344,24 @@ export class LocalCrewApp {
     }
 
     await mkdir(dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, `${content.trimEnd()}\n`, "utf8");
+    await atomicWriteFile(targetPath, `${content.trimEnd()}\n`, "utf8");
+    return {
+      path: targetPath,
+      relativePath: safeRelativePath
+    };
+  }
+
+  private resolveDropboxGeneratedDocumentPath(
+    stage: Extract<GeneratedFileStage, "active" | "outbox">,
+    filename: string
+  ): { path: string; relativePath: string } {
+    const paths = getDropboxPaths(this.rootDir);
+    const safeRelativePath = ensureSafeGeneratedRelativePath(filename);
+    const targetRoot = resolve(stage === "active" ? paths.activeDir : paths.outboxDir);
+    const targetPath = resolve(join(targetRoot, safeRelativePath));
+    if (!targetPath.startsWith(`${targetRoot}/`) && targetPath !== targetRoot) {
+      throw new Error("Dropbox write path must stay inside the requested stage.");
+    }
     return {
       path: targetPath,
       relativePath: safeRelativePath
@@ -4289,11 +4639,7 @@ export class LocalCrewApp {
   }
 
   private async handleGeneratedFileWrites(
-    fileWrites: Array<{
-      stage: "active" | "outbox" | "internal";
-      filename: string;
-      content: string;
-    }>,
+    fileDirectives: GeneratedFileDirective[],
     options: {
       createdBy?: string;
       taskId?: number;
@@ -4314,15 +4660,15 @@ export class LocalCrewApp {
       verified: boolean;
     }> = [];
 
-    for (const fileWrite of fileWrites) {
-      if (!fileWrite.filename.trim()) {
+    for (const fileDirective of fileDirectives) {
+      if (!fileDirective.filename.trim()) {
         continue;
       }
 
       const isAutonomousWrite = Boolean(
         options.createdBy && this.isAutonomousTaskSource(options.createdBy)
       );
-      const safeFilename = fileWrite.filename.replaceAll("\\", "/").trim();
+      const safeFilename = fileDirective.filename.replaceAll("\\", "/").trim();
       if (
         isAutonomousWrite &&
         (AUTONOMOUS_DISALLOWED_FILE_PATH_PATTERN.test(safeFilename) ||
@@ -4335,7 +4681,13 @@ export class LocalCrewApp {
             "",
             "Requested content:",
             "",
-            fileWrite.content.trim() || "(none)"
+            fileDirective.kind === "write"
+              ? fileDirective.content.trim() || "(none)"
+              : [
+                  `Requested update mode: ${fileDirective.mode}`,
+                  "",
+                  fileDirective.content.trim() || "(none)"
+                ].join("\n")
           ].join("\n"),
           createdBy: options.createdBy ?? "orchestrator",
           taskId: options.taskId,
@@ -4354,15 +4706,16 @@ export class LocalCrewApp {
 
       if (
         this.shouldPreferInternalWrite({
-          stage: fileWrite.stage,
+          stage: fileDirective.stage,
           filename: safeFilename,
           createdBy: options.createdBy,
           sourceDocumentRelativePath: options.sourceDocumentRelativePath
         })
       ) {
         // Check if this targets a canonical memory file (summary, focus-todo, roadmap).
-        const canonicalEntry = await this.writeCanonicalMemoryFile(safeFilename, fileWrite.content);
+        const canonicalEntry = await this.getCanonicalMemoryTarget(safeFilename);
         if (canonicalEntry) {
+          await this.applyDirectiveToTarget(canonicalEntry.path, fileDirective);
           await appendAuditEvent(
             {
               timestamp: new Date().toISOString(),
@@ -4387,7 +4740,25 @@ export class LocalCrewApp {
           continue;
         }
 
-        const entry = await this.writeInternalGeneratedDocument(safeFilename, fileWrite.content);
+        const entry =
+          fileDirective.kind === "write"
+            ? await this.writeInternalGeneratedDocument(safeFilename, fileDirective.content)
+            : (() => {
+                const paths = getStoragePaths(this.rootDir);
+                const safeRelativePath = ensureSafeGeneratedRelativePath(safeFilename);
+                const targetPath = resolve(join(paths.orchestratorGeneratedDir, safeRelativePath));
+                const allowedRoot = resolve(paths.orchestratorGeneratedDir);
+                if (!targetPath.startsWith(`${allowedRoot}/`) && targetPath !== allowedRoot) {
+                  throw new Error("Internal write path must stay inside the orchestrator generated directory.");
+                }
+                return {
+                  path: targetPath,
+                  relativePath: safeRelativePath
+                };
+              })();
+        if (fileDirective.kind === "update") {
+          await this.applyDirectiveToTarget(entry.path, fileDirective);
+        }
         await appendAuditEvent(
           {
             timestamp: new Date().toISOString(),
@@ -4412,31 +4783,40 @@ export class LocalCrewApp {
         continue;
       }
 
-      const entry = await writeGeneratedDropboxDocument(
-        fileWrite.stage as "active" | "outbox",
-        fileWrite.filename,
-        fileWrite.content,
-        this.rootDir
-      );
+      const entry =
+        fileDirective.kind === "write"
+          ? await writeGeneratedDropboxDocument(
+              fileDirective.stage as "active" | "outbox",
+              fileDirective.filename,
+              fileDirective.content,
+              this.rootDir
+            )
+          : this.resolveDropboxGeneratedDocumentPath(
+              fileDirective.stage as "active" | "outbox",
+              fileDirective.filename
+            );
+      if (fileDirective.kind === "update") {
+        await this.applyDirectiveToTarget(entry.path, fileDirective);
+      }
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
           kind: "system",
           scope: "dropbox.write",
-          summary: `Wrote ${fileWrite.stage} dropbox file ${entry.relativePath}.`,
+          summary: `${fileDirective.kind === "write" ? "Wrote" : "Updated"} ${fileDirective.stage} dropbox file ${entry.relativePath}.`,
           success: true,
           actor: "orchestrator",
           target: entry.relativePath,
           metadata: {
-            stage: fileWrite.stage,
+            stage: fileDirective.stage,
             path: entry.path
           }
         },
         this.rootDir
       );
-      writtenLines.push(`Wrote ${fileWrite.stage} file: ${entry.path}`);
+      writtenLines.push(`${fileDirective.kind === "write" ? "Wrote" : "Updated"} ${fileDirective.stage} file: ${entry.path}`);
       writes.push({
-        stage: fileWrite.stage,
+        stage: fileDirective.stage,
         path: entry.relativePath,
         verified: true
       });
@@ -4846,7 +5226,7 @@ export class LocalCrewApp {
     let writtenFiles: string[] = [];
     const postProcessErrors: string[] = [];
     try {
-      const writeResult = await this.handleGeneratedFileWrites(parsed.fileWrites, {
+      const writeResult = await this.handleGeneratedFileWrites(parsed.fileDirectives, {
         createdBy: `agent:${agent.slug}`
       });
       writtenFiles = writeResult.lines;
@@ -4889,7 +5269,16 @@ export class LocalCrewApp {
   }
 
   private async fillAutoQueue(): Promise<{ queued: AutoQueueTask[]; notes: string[] }> {
-    if (this.systemState.auto.pending.length > LocalCrewApp.QUEUE_REFILL_THRESHOLD) {
+    const refillThreshold = this.getQueueRefillThreshold();
+    const desiredPendingDepth = this.getDesiredPendingDepth();
+    const remainingQueueCapacity = Math.max(
+      0,
+      desiredPendingDepth - this.systemState.auto.pending.length
+    );
+    if (
+      this.systemState.auto.pending.length > refillThreshold ||
+      remainingQueueCapacity <= 0
+    ) {
       return {
         queued: [],
         notes: []
@@ -4930,7 +5319,8 @@ export class LocalCrewApp {
       agents: agents.map((agent) => `@${agent.slug}`),
       resourceRoster,
       currentDateTime: fillDateTime,
-      recentCompletedTopics: this.getRecentCompletedTopics()
+      recentCompletedTopics: this.getRecentCompletedTopics(),
+      targetTaskCount: remainingQueueCapacity
     });
 
     let draftReply: string;
@@ -5074,7 +5464,8 @@ export class LocalCrewApp {
       draftTasks: draftTaskText,
       reviewFeedback,
       resourceRoster,
-      currentDateTime: fillDateTime
+      currentDateTime: fillDateTime,
+      targetTaskCount: remainingQueueCapacity
     });
 
     let finalReply: string;
@@ -5132,9 +5523,16 @@ export class LocalCrewApp {
       parsedTasks.length > 0
         ? parsedTasks
         : pickFallbackTasks();
+    const tasksToQueue = tasks.slice(0, remainingQueueCapacity);
+    const notes =
+      tasks.length > tasksToQueue.length
+        ? [
+            `Backlog capped at ${desiredPendingDepth} pending task${desiredPendingDepth === 1 ? "" : "s"} based on current resource capacity.`
+          ]
+        : [];
 
-    const queuedResult = await this.queueParsedTasks(tasks, "orchestrator:auto-fill");
-    if (queuedResult.tasks.length > 0 || queuedResult.notes.length > 0) {
+    const queuedResult = await this.queueParsedTasks(tasksToQueue, "orchestrator:auto-fill");
+    if (queuedResult.tasks.length > 0 || queuedResult.notes.length > 0 || notes.length > 0) {
       await appendChangelogEntry(
         reviewerResource
           ? `Auto queue filled after draft/review/finalize consensus between ${this.getOrchestratorName()} and @${reviewerResource.alias}. Verdict: ${reviewVerdict}.`
@@ -5144,279 +5542,331 @@ export class LocalCrewApp {
     }
     return {
       queued: queuedResult.tasks,
-      notes: queuedResult.notes
+      notes: [...notes, ...queuedResult.notes]
     };
   }
 
   private async processNextAutoTask(): Promise<CommandResult> {
-    if (this.systemState.auto.pending.length === 0) {
-      return {
-        lines: ["Auto queue is empty."],
-        errors: [],
-        shouldExit: false
-      };
+    // Filter out tasks already being processed to prevent duplicate dequeue under parallel dispatch.
+    const busyAliases = new Set(this.activeTasksByResource.keys());
+    const available = this.sortPendingTasks(
+      this.systemState.auto.pending.filter(t => !this.processingTaskIds.has(t.id) &&
+        (!t.requestedResource || !busyAliases.has(t.requestedResource)))
+    );
+    let task = available[0];
+    if (!task) {
+      return { lines: [], errors: [], shouldExit: false };
     }
 
-    let [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+    // Eagerly mark as processing to prevent duplicate picks by concurrent cycles.
+    this.processingTaskIds.add(task.id);
     const taskStartedAt = new Date().toISOString();
     const taskStartMs = Date.now();
-    const [documents, agents, telemetrySummary] = await Promise.all([
-      loadSystemDocuments(this.rootDir),
-      listAgents(this.rootDir),
-      loadTelemetrySummary(this.rootDir)
-    ]);
-    const resourceLoad = this.systemState.auto.pending.reduce<Record<string, number>>(
-      (accumulator, pendingTask) => {
-        if (pendingTask.requestedResource) {
-          accumulator[pendingTask.requestedResource] =
-            (accumulator[pendingTask.requestedResource] ?? 0) + 1;
-        }
-        return accumulator;
-      },
-      {}
-    );
-
-    // Merge in network-failure cooldown penalties so recently-failed resources
-    // are deprioritized even for tasks beyond the immediate retry.
-    const networkPenalties = this.getNetworkFailurePenalties();
-    for (const [alias, penalty] of Object.entries(networkPenalties)) {
-      resourceLoad[alias] = (resourceLoad[alias] ?? 0) + penalty;
-    }
-
-    // Parse domain tag and strip it from task content before routing/execution.
-    const taskDomain = parseTaskDomain(task.content);
-    if (taskDomain) {
-      task = { ...task, domain: taskDomain, content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "") };
-    }
-
-    // Build filtered live metrics map (entries within the last 10 minutes only).
-    const TEN_MIN_MS = 10 * 60 * 1000;
-    const now = Date.now();
-    const liveMetricsByAlias: Record<string, LiveDeviceMetrics & { receivedAt: number }> = {};
-    for (const [alias, metrics] of this.liveDeviceMetrics) {
-      if (now - metrics.receivedAt < TEN_MIN_MS) {
-        liveMetricsByAlias[alias] = metrics;
-      }
-    }
-
-    let selection;
-    let routingFallbackWarning: string | null = null;
-
-    // If this is a retry, heavily penalize the resource that previously failed
-    // so the routing engine picks a different one.
-    if (task.lastFailedResource) {
-      resourceLoad[task.lastFailedResource] = (resourceLoad[task.lastFailedResource] ?? 0) + 10;
-    }
-
+    let activeResourceAlias: string | null = null;
     try {
-      selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
-        resourceLoad,
-        primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
-        telemetrySummary,
-        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
-        liveMetricsByAlias
-      });
-    } catch (error) {
-      const invalidRequestedResource = task.requestedResource;
-      selection = chooseResourceForTask(task.content, "auto", this.rootDir, {
-        resourceLoad,
-        primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
-        telemetrySummary,
-        lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
-        liveMetricsByAlias
-      });
-      task.requestedResource = undefined;
-      routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${this.toDisplayResourceAlias(selection.alias)}.`;
-      await appendAuditEvent(
-        {
-          timestamp: new Date().toISOString(),
-          kind: "system",
-          scope: "auto.route.fallback",
-          summary: `Fell back to automatic routing for task #${task.id} after invalid requested resource selection.`,
-          success: true,
-          actor: "orchestrator",
-          target: `task:${task.id}`,
-          metadata: {
-            invalidRequestedResource,
-            error: (error as Error).message,
-            fallbackResource: selection.alias
+      const [documents, agents, telemetrySummary] = await Promise.all([
+        loadSystemDocuments(this.rootDir),
+        listAgents(this.rootDir),
+        loadTelemetrySummary(this.rootDir)
+      ]);
+      const resourceLoad = this.systemState.auto.pending.reduce<Record<string, number>>(
+        (accumulator, pendingTask) => {
+          if (pendingTask.requestedResource) {
+            accumulator[pendingTask.requestedResource] =
+              (accumulator[pendingTask.requestedResource] ?? 0) + 1;
           }
+          return accumulator;
         },
-        this.rootDir
+        {}
       );
-    }
-    // Record assignment time for fairness scoring in future routing decisions.
-    this.resourceLastAssignedAt.set(selection.alias, Date.now());
-    const endpoint = this.getAutoTaskEndpoint(selection);
-    if (task.requestedModel) {
-      endpoint.model = task.requestedModel;
-    }
-    if (!endpoint.model?.trim()) {
-      const recovery = await this.quarantineFailedAutoTask({
-        task,
-        remaining,
-        assignedResource: selection.alias,
-        errorMessage: `No default model configured for resource "${selection.alias}".`,
-        createRecoveryTask: !this.isSafeModeRecoveryTask(task),
-        startedAt: taskStartedAt,
-        taskStartMs
-      });
-      if (recovery.retried) {
+      for (const alias of this.activeTasksByResource.keys()) {
+        resourceLoad[alias] = (resourceLoad[alias] ?? 0) + 1;
+      }
+
+      // Merge in network-failure cooldown penalties so recently-failed resources
+      // are deprioritized even for tasks beyond the immediate retry.
+      const networkPenalties = this.getNetworkFailurePenalties();
+      for (const [alias, penalty] of Object.entries(networkPenalties)) {
+        resourceLoad[alias] = (resourceLoad[alias] ?? 0) + penalty;
+      }
+
+      // Parse domain tag and strip it from task content before routing/execution.
+      const taskDomain = parseTaskDomain(task.content);
+      if (taskDomain) {
+        task = {
+          ...task,
+          domain: taskDomain,
+          content: task.content.replace(/^\{domain:[A-Z]+\}\s*/i, "")
+        };
+      }
+
+      // Build filtered live metrics map (entries within the last 10 minutes only).
+      const TEN_MIN_MS = 10 * 60 * 1000;
+      const now = Date.now();
+      const liveMetricsByAlias: Record<string, LiveDeviceMetrics & { receivedAt: number }> = {};
+      for (const [alias, metrics] of this.liveDeviceMetrics) {
+        if (now - metrics.receivedAt < TEN_MIN_MS) {
+          liveMetricsByAlias[alias] = metrics;
+        }
+      }
+
+      const healthStatuses = this.getResourceHealthStatuses();
+      let selection;
+      let routingFallbackWarning: string | null = null;
+
+      // If this is a retry, heavily penalize the resource that previously failed
+      // so the routing engine picks a different one.
+      if (task.lastFailedResource) {
+        resourceLoad[task.lastFailedResource] = (resourceLoad[task.lastFailedResource] ?? 0) + 10;
+      }
+
+      try {
+        selection = chooseResourceForTask(task.content, task.requestedResource ?? "auto", this.rootDir, {
+          resourceLoad,
+          primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
+          telemetrySummary,
+          lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
+          liveMetricsByAlias,
+          healthStatuses
+        });
+      } catch (error) {
+        const invalidRequestedResource = task.requestedResource;
+        selection = chooseResourceForTask(task.content, "auto", this.rootDir, {
+          resourceLoad,
+          primaryOrchestratorAlias: this.resolveOrchestratorAlias(),
+          telemetrySummary,
+          lastAssignedByAlias: Object.fromEntries(this.resourceLastAssignedAt),
+          liveMetricsByAlias,
+          healthStatuses
+        });
+        task.requestedResource = undefined;
+        routingFallbackWarning = `Ignored unknown requested resource "${invalidRequestedResource}" and fell back to automatic routing on @${this.toDisplayResourceAlias(selection.alias)}.`;
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "auto.route.fallback",
+            summary: `Fell back to automatic routing for task #${task.id} after invalid requested resource selection.`,
+            success: true,
+            actor: "orchestrator",
+            target: `task:${task.id}`,
+            metadata: {
+              invalidRequestedResource,
+              error: (error as Error).message,
+              fallbackResource: selection.alias
+            }
+          },
+          this.rootDir
+        );
+      }
+
+      let endpoint = this.getAutoTaskEndpoint(selection);
+      if (task.requestedModel) {
+        endpoint.model = task.requestedModel;
+      }
+      if (!endpoint.model?.trim()) {
+        const recovery = await this.quarantineFailedAutoTask({
+          task,
+          remaining: this.systemState.auto.pending.filter(t => t.id !== task.id),
+          assignedResource: selection.alias,
+          errorMessage: `No default model configured for resource "${selection.alias}".`,
+          createRecoveryTask: !this.isSafeModeRecoveryTask(task),
+          startedAt: taskStartedAt,
+          taskStartMs
+        });
+        if (recovery.retried) {
+          return {
+            lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (no model). Retrying on another resource.`],
+            errors: [],
+            shouldExit: false
+          };
+        }
         return {
-          lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (no model). Retrying on another resource.`],
-          errors: [],
+          lines: recovery.recoveryTask
+            ? [
+                `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+              ]
+            : [`Quarantined failed safe mode recovery task #${task.id}.`],
+          errors: [
+            `Auto task #${task.id} could not resolve a model for @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}).`
+          ],
           shouldExit: false
         };
       }
-      return {
-        lines: recovery.recoveryTask
-          ? [
-              `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
-            ]
-          : [`Quarantined failed safe mode recovery task #${task.id}.`],
-        errors: [
-          `Auto task #${task.id} could not resolve a model for @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}).`
-        ],
-        shouldExit: false
-      };
-    }
-    const extraContextBlocks = await this.getAutoTaskExtraContext(task);
 
-    // Inject domain-specific agent identity block at the front of context blocks.
-    if (task.domain) {
-      const identityBlock = await buildAgentIdentityBlock(task.domain, this.rootDir);
-      if (identityBlock) {
-        extraContextBlocks.unshift(identityBlock);
-      }
-    }
-
-    // Context budget pre-flight: estimate whether the prompt will fit within
-    // the selected resource's context window. If it doesn't fit, attempt to
-    // reroute to the resource with the highest available context window.
-    const systemContextChars =
-      (documents.directives?.length ?? 0) +
-      (documents.inventory?.length ?? 0) +
-      (documents.roadmap?.length ?? 0) +
-      (documents.focusTodo?.length ?? 0) +
-      (documents.changelog?.length ?? 0) +
-      (documents.orchestratorSummary?.length ?? 0);
-    const budgetCheck = checkContextBudget(task.content, selection.alias, this.rootDir, {
-      systemContextChars
-    });
-    if (!budgetCheck.fits) {
-      const highestCtxResource = findHighestContextResource(this.rootDir);
-      if (highestCtxResource && highestCtxResource.alias !== selection.alias) {
-        const rerouteCheck = checkContextBudget(task.content, highestCtxResource.alias, this.rootDir, {
-          systemContextChars
-        });
-        if (rerouteCheck.fits) {
-          const originalAlias = selection.alias;
-          selection.alias = highestCtxResource.alias;
-          selection.tier = highestCtxResource.tier;
-          selection.rationale = `Rerouted from ${originalAlias} (context budget exceeded: ${budgetCheck.estimatedPromptTokens}/${budgetCheck.availableTokens} tokens) to ${highestCtxResource.alias} (${rerouteCheck.availableTokens} tokens available).`;
-          const rerouteEndpoint = this.getAutoTaskEndpoint(selection);
-          if (rerouteEndpoint.model?.trim()) {
-            Object.assign(endpoint, rerouteEndpoint);
-            await appendAuditEvent(
-              {
-                timestamp: new Date().toISOString(),
-                kind: "system",
-                scope: "auto.route.context-budget-reroute",
-                summary: `Rerouted task #${task.id} from ${originalAlias} to ${highestCtxResource.alias} due to context budget overflow.`,
-                success: true,
-                actor: "orchestrator",
-                target: `task:${task.id}`,
-                metadata: {
-                  originalResource: originalAlias,
-                  originalMaxContext: budgetCheck.maxContextTokens,
-                  estimatedPromptTokens: budgetCheck.estimatedPromptTokens,
-                  newResource: highestCtxResource.alias,
-                  newMaxContext: rerouteCheck.maxContextTokens
-                }
-              },
-              this.rootDir
-            );
+      // Context budget pre-flight: estimate whether the prompt will fit within
+      // the selected resource's context window. If it doesn't fit, attempt to
+      // reroute to the resource with the highest available context window.
+      const systemContextChars =
+        (documents.directives?.length ?? 0) +
+        (documents.inventory?.length ?? 0) +
+        (documents.roadmap?.length ?? 0) +
+        (documents.focusTodo?.length ?? 0) +
+        (documents.changelog?.length ?? 0) +
+        (documents.orchestratorSummary?.length ?? 0);
+      const budgetCheck = checkContextBudget(task.content, selection.alias, this.rootDir, {
+        systemContextChars
+      });
+      let contextBudgetRerouteAudit:
+        | {
+            originalAlias: string;
+            originalMaxContext: number;
+            estimatedPromptTokens: number;
+            newAlias: string;
+            newMaxContext: number;
+          }
+        | null = null;
+      if (!budgetCheck.fits) {
+        const highestCtxResource = findHighestContextResource(this.rootDir);
+        if (highestCtxResource && highestCtxResource.alias !== selection.alias) {
+          const rerouteCheck = checkContextBudget(task.content, highestCtxResource.alias, this.rootDir, {
+            systemContextChars
+          });
+          if (rerouteCheck.fits) {
+            const originalAlias = selection.alias;
+            selection.alias = highestCtxResource.alias;
+            selection.tier = highestCtxResource.tier;
+            selection.rationale = `Rerouted from ${originalAlias} (context budget exceeded: ${budgetCheck.estimatedPromptTokens}/${budgetCheck.availableTokens} tokens) to ${highestCtxResource.alias} (${rerouteCheck.availableTokens} tokens available).`;
+            const rerouteEndpoint = this.getAutoTaskEndpoint(selection);
+            if (rerouteEndpoint.model?.trim()) {
+              endpoint = {
+                ...rerouteEndpoint,
+                model: task.requestedModel ?? rerouteEndpoint.model
+              };
+              contextBudgetRerouteAudit = {
+                originalAlias,
+                originalMaxContext: budgetCheck.maxContextTokens,
+                estimatedPromptTokens: budgetCheck.estimatedPromptTokens,
+                newAlias: highestCtxResource.alias,
+                newMaxContext: rerouteCheck.maxContextTokens
+              };
+            }
           }
         }
       }
-    }
 
-    // Pre-flight: ask the model to reason briefly about the task before executing.
-    // Failure is non-fatal — we log it and proceed without the context block.
-    const preflightContext = await this.runTaskPreflight({
-      task,
-      documents,
-      endpoint,
-      resourceAlias: selection.alias
-    });
-    if (preflightContext) {
-      extraContextBlocks.push(preflightContext);
-    }
-    if (task.parentTaskId && task.parentResultSummary) {
-      extraContextBlocks.push(
-        `Prior task output (task #${task.parentTaskId}):\n${task.parentResultSummary}`
-      );
-    }
-    const preflightGoal = preflightContext ? extractPreflightGoal(preflightContext) : null;
+      this.resourceLastAssignedAt.set(selection.alias, Date.now());
+      const activeTask: AutoQueueTask = {
+        ...task,
+        assignedResource: selection.alias,
+        assignedModel: endpoint.model,
+        startedAt: taskStartedAt
+      };
+      activeResourceAlias = selection.alias;
+      this.activeTasksByResource.set(activeResourceAlias, activeTask);
 
-    const resourceProfile = getResourceProfile(selection.alias, this.rootDir);
+      if (contextBudgetRerouteAudit) {
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: "auto.route.context-budget-reroute",
+            summary: `Rerouted task #${task.id} from ${contextBudgetRerouteAudit.originalAlias} to ${contextBudgetRerouteAudit.newAlias} due to context budget overflow.`,
+            success: true,
+            actor: "orchestrator",
+            target: `task:${task.id}`,
+            metadata: {
+              originalResource: contextBudgetRerouteAudit.originalAlias,
+              originalMaxContext: contextBudgetRerouteAudit.originalMaxContext,
+              estimatedPromptTokens: contextBudgetRerouteAudit.estimatedPromptTokens,
+              newResource: contextBudgetRerouteAudit.newAlias,
+              newMaxContext: contextBudgetRerouteAudit.newMaxContext
+            }
+          },
+          this.rootDir
+        );
+      }
 
-    // Add delegation context when task is routed to a sub-orchestrator
-    if (selection.delegateToOrchestrator && selection.availableSubordinates && selection.availableSubordinates.length > 0) {
-      task.delegatedOrchestrator = selection.delegateToOrchestrator;
-      task.subordinateResources = selection.availableSubordinates;
-      const subordinateDetails = selection.availableSubordinates.map((alias) => {
-        try {
-          const sub = getResourceProfile(alias, this.rootDir);
-          return `  - @${alias} (${sub.label}): ${sub.tier} tier, ${sub.maxContextTokens ?? "?"} ctx, model: ${sub.defaultModel}`;
-        } catch {
-          return `  - @${alias}: unknown`;
+      const extraContextBlocks = await this.getAutoTaskExtraContext(task);
+
+      // Inject domain-specific agent identity block at the front of context blocks.
+      if (task.domain) {
+        const identityBlock = await buildAgentIdentityBlock(task.domain, this.rootDir);
+        if (identityBlock) {
+          extraContextBlocks.unshift(identityBlock);
         }
+      }
+
+      // Pre-flight: ask the model to reason briefly about the task before executing.
+      // Failure is non-fatal — we log it and proceed without the context block.
+      const preflightContext = await this.runTaskPreflight({
+        task: activeTask,
+        documents,
+        endpoint,
+        resourceAlias: selection.alias
       });
-      extraContextBlocks.push([
-        "## Sub-Orchestrator Delegation",
-        `You are operating as a sub-orchestrator for this task. You have been delegated this complex assignment by the primary orchestrator (@${this.resolveOrchestratorAlias()}).`,
-        `You may coordinate the following subordinate agent resources to help complete this task:`,
-        ...subordinateDetails,
-        "",
-        "Use these subordinates for structured, indexing, and smaller sub-tasks while you handle reasoning, coordination, and synthesis.",
-        "Report your final result clearly. The primary orchestrator will integrate your output."
-      ].join("\n"));
-    }
+      if (preflightContext) {
+        extraContextBlocks.push(preflightContext);
+      }
+      if (task.parentTaskId && task.parentResultSummary) {
+        extraContextBlocks.push(
+          `Prior task output (task #${task.parentTaskId}):\n${task.parentResultSummary}`
+        );
+      }
+      const preflightGoal = preflightContext ? extractPreflightGoal(preflightContext) : null;
 
-    const outgoingMessages = buildAutoTaskMessages({
-      directives: documents.directives,
-      inventory: documents.inventory,
-      roadmap: documents.roadmap,
-      focusTodo: documents.focusTodo,
-      changelog: documents.changelog,
-      orchestratorSummary: documents.orchestratorSummary,
-      orchestratorName: this.getOrchestratorName(),
-      agents: agents.map((agent) => `@${agent.slug}`),
-      task: task.content,
-      priority: task.priority,
-      createdBy: task.createdBy,
-      resourceAlias: selection.alias,
-      resourceRationale: selection.rationale,
-      resourceRoster: this.getResourceRosterText(),
-      extraContextBlocks,
-      currentDateTime: formatCurrentDateTime(),
-      maxContextTokens: resourceProfile.maxContextTokens,
-      dailySessionContext: this.getDailySessionContext()
-    });
+      const resourceProfile = getResourceProfile(selection.alias, this.rootDir);
 
-    this.emitTaskEvent({
-      type: "task-start",
-      taskId: task.id,
-      resourceAlias: selection.alias,
-      model: endpoint.model,
-      taskContent: task.content
-    });
+      // Add delegation context when task is routed to a sub-orchestrator.
+      if (
+        selection.delegateToOrchestrator &&
+        selection.availableSubordinates &&
+        selection.availableSubordinates.length > 0
+      ) {
+        task.delegatedOrchestrator = selection.delegateToOrchestrator;
+        task.subordinateResources = selection.availableSubordinates;
+        const subordinateDetails = selection.availableSubordinates.map((alias) => {
+          try {
+            const sub = getResourceProfile(alias, this.rootDir);
+            return `  - @${alias} (${sub.label}): ${sub.tier} tier, ${sub.maxContextTokens ?? "?"} ctx, model: ${sub.defaultModel}`;
+          } catch {
+            return `  - @${alias}: unknown`;
+          }
+        });
+        extraContextBlocks.push([
+          "## Sub-Orchestrator Delegation",
+          `You are operating as a sub-orchestrator for this task. You have been delegated this complex assignment by the primary orchestrator (@${this.resolveOrchestratorAlias()}).`,
+          "You may coordinate the following subordinate agent resources to help complete this task:",
+          ...subordinateDetails,
+          "",
+          "Use these subordinates for structured, indexing, and smaller sub-tasks while you handle reasoning, coordination, and synthesis.",
+          "Report your final result clearly. The primary orchestrator will integrate your output."
+        ].join("\n"));
+      }
 
-    let rawReply: string;
-    let modelEvalCount = 0;
-    try {
-      const modelResult = await this.callModel({
+      const outgoingMessages = buildAutoTaskMessages({
+        directives: documents.directives,
+        inventory: documents.inventory,
+        roadmap: documents.roadmap,
+        focusTodo: documents.focusTodo,
+        changelog: documents.changelog,
+        orchestratorSummary: documents.orchestratorSummary,
+        orchestratorName: this.getOrchestratorName(),
+        agents: agents.map((agent) => `@${agent.slug}`),
+        task: task.content,
+        priority: task.priority,
+        createdBy: task.createdBy,
+        resourceAlias: selection.alias,
+        resourceRationale: selection.rationale,
+        resourceRoster: this.getResourceRosterText(),
+        extraContextBlocks,
+        currentDateTime: formatCurrentDateTime(),
+        maxContextTokens: resourceProfile.maxContextTokens,
+        dailySessionContext: this.getDailySessionContext()
+      });
+
+      this.emitTaskEvent({
+        type: "task-start",
+        taskId: task.id,
+        resourceAlias: selection.alias,
+        model: endpoint.model,
+        taskContent: task.content
+      });
+
+      let rawReply: string;
+      let modelEvalCount = 0;
+      try {
+        const modelResult = await this.callModel({
           scope: "auto.task",
           actor: "orchestrator",
           endpoint,
@@ -5425,237 +5875,255 @@ export class LocalCrewApp {
           messages: outgoingMessages,
           summary: `Processing auto task #${task.id}.`
         });
-      rawReply = modelResult.text;
-      modelEvalCount = modelResult.evalCount ?? 0;
-      rawReply = await this.resolveExternalTools({
-        scope: "auto.task",
-        actor: "orchestrator",
-        endpoint,
-        resourceAlias: selection.alias,
-        target: `task:${task.id}`,
-        messages: outgoingMessages,
-        rawReply
-      });
-    } catch (error) {
-      const errorMessage = (error as Error).message;
-      const recovery = await this.quarantineFailedAutoTask({
-        task,
-        remaining,
-        assignedResource: selection.alias,
-        assignedModel: endpoint.model,
-        errorMessage,
-        createRecoveryTask: !this.isSafeModeRecoveryTask(task),
-        startedAt: taskStartedAt,
-        taskStartMs
-      });
-      if (recovery.retried) {
+        rawReply = modelResult.text;
+        modelEvalCount = modelResult.evalCount ?? 0;
+        rawReply = await this.resolveExternalTools({
+          scope: "auto.task",
+          actor: "orchestrator",
+          endpoint,
+          resourceAlias: selection.alias,
+          target: `task:${task.id}`,
+          messages: outgoingMessages,
+          rawReply
+        });
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        const recovery = await this.quarantineFailedAutoTask({
+          task,
+          remaining: this.systemState.auto.pending.filter(t => t.id !== task.id),
+          assignedResource: selection.alias,
+          assignedModel: endpoint.model,
+          errorMessage,
+          createRecoveryTask: !this.isSafeModeRecoveryTask(task),
+          startedAt: taskStartedAt,
+          taskStartMs
+        });
+        this.emitTaskEvent({
+          type: "task-complete",
+          taskId: task.id,
+          resourceAlias: selection.alias,
+          status: "failed",
+          qualitySignals: null,
+          durationMs: Date.now() - taskStartMs,
+          tokenCount: 0
+        });
+        if (recovery.retried) {
+          return {
+            lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)}: ${errorMessage}. Retrying on another resource.`],
+            errors: [],
+            shouldExit: false
+          };
+        }
         return {
-          lines: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)}: ${errorMessage}. Retrying on another resource.`],
-          errors: [],
+          lines: recovery.recoveryTask
+            ? [
+                `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
+              ]
+            : [`Quarantined failed safe mode recovery task #${task.id}.`],
+          errors: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}): ${errorMessage}`],
           shouldExit: false
         };
       }
-      return {
-        lines: recovery.recoveryTask
-          ? [
-              `Quarantined failed auto task #${task.id} and queued safe mode recovery task #${recovery.recoveryTask.id}.`
-            ]
-          : [`Quarantined failed safe mode recovery task #${task.id}.`],
-        errors: [`Auto task #${task.id} failed on @${this.toDisplayResourceAlias(selection.alias)} (${endpoint.baseUrl}): ${errorMessage}`],
-        shouldExit: false
-      };
-    }
 
-    const parsed = parseQueuedTasks(rawReply);
-    const replyText = parsed.replyText || "(No direct result text.)";
-    const postProcessErrors: string[] = [];
-    let writtenFiles: string[] = [];
-    let writeDetails: Array<{ stage: "active" | "outbox" | "internal"; path: string; verified: boolean }> = [];
-    try {
-      const writeResult = await this.handleGeneratedFileWrites(parsed.fileWrites, {
-        createdBy: task.createdBy,
-        taskId: task.id,
-        sourceDocumentRelativePath: task.sourceDocumentRelativePath
-      });
-      writtenFiles = writeResult.lines;
-      writeDetails = writeResult.writes;
-    } catch (error) {
-      postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
-    }
-    // Process any script requests from the auto task
-    let scriptLines: string[] = [];
-    if (parsed.scriptRequests.length > 0) {
+      const parsed = parseQueuedTasks(rawReply);
+      const replyText = parsed.replyText || "(No direct result text.)";
+      const postProcessErrors: string[] = [];
+      let writtenFiles: string[] = [];
+      let writeDetails: Array<{ stage: "active" | "outbox" | "internal"; path: string; verified: boolean }> = [];
       try {
-        const scriptResult = await this.handleScriptRequests(parsed.scriptRequests, {
+        const writeResult = await this.handleGeneratedFileWrites(parsed.fileDirectives, {
           createdBy: task.createdBy,
           taskId: task.id,
+          sourceDocumentRelativePath: task.sourceDocumentRelativePath
         });
-        scriptLines = scriptResult.lines;
+        writtenFiles = writeResult.lines;
+        writeDetails = writeResult.writes;
       } catch (error) {
-        postProcessErrors.push(`Script execution warning: ${(error as Error).message}`);
+        postProcessErrors.push(`Dropbox write warning: ${(error as Error).message}`);
       }
-    }
-    const verifiedWriteCount = writtenFiles.length;
-    const verification = verifyTaskOutput({
-      task,
-      output: replyText,
-      preflightGoal,
-      claimedWriteCount: parsed.fileWrites.length,
-      verifiedWriteCount,
-      postProcessErrors
-    });
-    const taskCompletedAt = new Date().toISOString();
-    const completedTask: AutoQueueTask = {
-      ...task,
-      status: verification.passed ? "completed" : "failed",
-      startedAt: taskStartedAt,
-      completedAt: taskCompletedAt,
-      durationMs: Date.now() - taskStartMs,
-      assignedResource: selection.alias,
-      assignedModel: endpoint.model,
-      result: replyText,
-      qualityVerification: verification,
-      ...(verification.passed
-        ? {}
-        : { errorMessage: `Task output verification failed: ${verification.reason}` })
-    };
 
-    this.systemState = {
-      ...this.systemState,
-      auto: {
-        ...this.systemState.auto,
-        pending: remaining,
-        completed: [...this.systemState.auto.completed, completedTask].slice(
-          -AUTO_COMPLETED_TASK_LIMIT
-        ),
-        totalCompletedCount: (this.systemState.auto.totalCompletedCount ?? 0) + 1
+      // Process any script requests from the auto task.
+      let scriptLines: string[] = [];
+      if (parsed.scriptRequests.length > 0) {
+        try {
+          const scriptResult = await this.handleScriptRequests(parsed.scriptRequests, {
+            createdBy: task.createdBy,
+            taskId: task.id,
+          });
+          scriptLines = scriptResult.lines;
+        } catch (error) {
+          postProcessErrors.push(`Script execution warning: ${(error as Error).message}`);
+        }
       }
-    };
 
-    // Track daily session progress if active.
-    if (this.systemState.auto.dailySession && !this.systemState.auto.dailySession.completedAt) {
+      const verifiedWriteCount = writtenFiles.length;
+      const verification = verifyTaskOutput({
+        task,
+        output: replyText,
+        preflightGoal,
+        claimedWriteCount: parsed.fileDirectives.length,
+        verifiedWriteCount,
+        postProcessErrors
+      });
+      const taskCompletedAt = new Date().toISOString();
+      const completedTask: AutoQueueTask = {
+        ...task,
+        status: verification.passed ? "completed" : "failed",
+        startedAt: taskStartedAt,
+        completedAt: taskCompletedAt,
+        durationMs: Date.now() - taskStartMs,
+        assignedResource: selection.alias,
+        assignedModel: endpoint.model,
+        result: replyText,
+        qualityVerification: verification,
+        ...(verification.passed
+          ? {}
+          : { errorMessage: `Task output verification failed: ${verification.reason}` })
+      };
+
       this.systemState = {
         ...this.systemState,
         auto: {
           ...this.systemState.auto,
-          dailySession: recordDailyTaskCompletion(
-            this.systemState.auto.dailySession,
-            !!completedTask.errorMessage
-          )
+          pending: this.systemState.auto.pending.filter(t => t.id !== task.id),
+          completed: [...this.systemState.auto.completed, completedTask].slice(
+            -AUTO_COMPLETED_TASK_LIMIT
+          ),
+          totalCompletedCount: (this.systemState.auto.totalCompletedCount ?? 0) + 1
         }
       };
-    }
 
-    await this.persistSystemState();
+      // Track daily session progress if active.
+      if (this.systemState.auto.dailySession && !this.systemState.auto.dailySession.completedAt) {
+        this.systemState = {
+          ...this.systemState,
+          auto: {
+            ...this.systemState.auto,
+            dailySession: recordDailyTaskCompletion(
+              this.systemState.auto.dailySession,
+              !!completedTask.errorMessage
+            )
+          }
+        };
+      }
 
-    // Auto-save daily work result: when a daily-work task completes successfully
-    // and the model didn't emit a proper WRITE[internal][daily-work.md] block,
-    // save the result directly to daily-work.md to prevent re-queuing loop.
-    if (
-      completedTask.createdBy === "orchestrator:daily-work" &&
-      completedTask.status === "completed" &&
-      completedTask.result
-    ) {
-      const alreadyWrote = writeDetails.some(
-        (w) => w.path === "daily-work.md" || w.path.endsWith("/daily-work.md")
-      );
-      if (!alreadyWrote) {
-        try {
-          await saveDailyWork(completedTask.result, this.rootDir);
-        } catch {
-          // Non-fatal — the staleness dedup will still prevent loops.
+      await this.persistSystemState();
+
+      // Auto-save daily work result: when a daily-work task completes successfully
+      // and the model didn't emit a proper file directive for daily-work.md,
+      // save the result directly to daily-work.md to prevent re-queuing loop.
+      if (
+        completedTask.createdBy === "orchestrator:daily-work" &&
+        completedTask.status === "completed" &&
+        completedTask.result
+      ) {
+        const alreadyWrote = writeDetails.some(
+          (w) => w.path === "daily-work.md" || w.path.endsWith("/daily-work.md")
+        );
+        if (!alreadyWrote) {
+          try {
+            await saveDailyWork(completedTask.result, this.rootDir);
+          } catch {
+            // Non-fatal — the staleness dedup will still prevent loops.
+          }
         }
       }
-    }
 
-    const queuedResult = verification.passed
-      ? await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed", {
-          parentTaskId: completedTask.id,
-          parentResultSummary: completedTask.result
-        })
-      : {
-          tasks: [],
-          notes: [
-            `Suppressed ${parsed.queuedTasks.length} follow-up task${parsed.queuedTasks.length === 1 ? "" : "s"} because task #${completedTask.id} failed quality verification.`
-          ]
-        };
-    const queued = queuedResult.tasks;
-    for (const write of writeDetails) {
-      this.emitTaskEvent({
-        type: "task-write",
-        taskId: task.id,
-        stage: write.stage,
-        path: write.path,
-        verified: write.verified
-      });
-    }
-    let movedSourceLine: string | null = null;
-    if (task.sourceDocumentRelativePath) {
-      try {
-        const moved = await moveActiveDocumentToOutbox(task.sourceDocumentRelativePath, this.rootDir);
-        movedSourceLine = `Moved source document to outbox: ${moved.path}`;
-        await appendAuditEvent(
-          {
-            timestamp: new Date().toISOString(),
-            kind: "system",
-            scope: "dropbox.complete",
-            summary: `Moved source document ${task.sourceDocumentRelativePath} from active to outbox after task #${task.id}.`,
-            success: true,
-            actor: "orchestrator",
-            target: task.sourceDocumentRelativePath,
-            metadata: {
-              taskId: task.id,
-              outboxPath: moved.path
-            }
-          },
-          this.rootDir
-        );
-      } catch (error) {
-        postProcessErrors.push(`Dropbox completion warning: ${(error as Error).message}`);
+      const queuedResult = verification.passed
+        ? await this.queueParsedTasks(parsed.queuedTasks, "orchestrator:auto-processed", {
+            parentTaskId: completedTask.id,
+            parentResultSummary: completedTask.result
+          })
+        : {
+            tasks: [],
+            notes: [
+              `Suppressed ${parsed.queuedTasks.length} follow-up task${parsed.queuedTasks.length === 1 ? "" : "s"} because task #${completedTask.id} failed quality verification.`
+            ]
+          };
+      const queued = queuedResult.tasks;
+      for (const write of writeDetails) {
+        this.emitTaskEvent({
+          type: "task-write",
+          taskId: task.id,
+          stage: write.stage,
+          path: write.path,
+          verified: write.verified
+        });
       }
-    }
-    await appendChangelogEntry(
-      `${verification.passed ? "Completed" : "Failed"} auto task #${task.id} on ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
-      this.rootDir
-    );
 
-    // Check whether the model signaled daily work complete.
-    let dailyDigestLine: string | null = null;
-    if (/^DAILY_COMPLETE\s*$/m.test(rawReply)) {
-      dailyDigestLine = await this.finishDailyWork();
-    }
-    this.emitTaskEvent({
-      type: "task-complete",
-      taskId: completedTask.id,
-      resourceAlias: selection.alias,
-      status: completedTask.status === "failed" ? "failed" : "completed",
-      qualitySignals: completedTask.qualityVerification?.signals ?? null,
-      durationMs: completedTask.durationMs ?? 0,
-      tokenCount: modelEvalCount
-    });
-    this.pushDisplayState();
+      let movedSourceLine: string | null = null;
+      if (task.sourceDocumentRelativePath) {
+        try {
+          const moved = await moveActiveDocumentToOutbox(task.sourceDocumentRelativePath, this.rootDir);
+          movedSourceLine = `Moved source document to outbox: ${moved.path}`;
+          await appendAuditEvent(
+            {
+              timestamp: new Date().toISOString(),
+              kind: "system",
+              scope: "dropbox.complete",
+              summary: `Moved source document ${task.sourceDocumentRelativePath} from active to outbox after task #${task.id}.`,
+              success: true,
+              actor: "orchestrator",
+              target: task.sourceDocumentRelativePath,
+              metadata: {
+                taskId: task.id,
+                outboxPath: moved.path
+              }
+            },
+            this.rootDir
+          );
+        } catch (error) {
+          postProcessErrors.push(`Dropbox completion warning: ${(error as Error).message}`);
+        }
+      }
+      await appendChangelogEntry(
+        `${verification.passed ? "Completed" : "Failed"} auto task #${task.id} on ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}. Queued ${queued.length} follow-up task${queued.length === 1 ? "" : "s"} and wrote ${writtenFiles.length} file${writtenFiles.length === 1 ? "" : "s"}.`,
+        this.rootDir
+      );
 
-    return {
-      lines: [
-        `${this.getOrchestratorName()} ${verification.passed ? "completed" : "failed"} #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}.`,
-        replyText,
-        ...(verification.passed ? [] : [`Verification: ${verification.reason}`]),
-        ...(routingFallbackWarning ? [routingFallbackWarning] : []),
-        ...writtenFiles,
-        ...scriptLines,
-        ...queuedResult.notes,
-        ...(movedSourceLine ? [movedSourceLine] : []),
-        ...queued.map(
-          (queuedTask) =>
-            `Queued #${queuedTask.id} [${queuedTask.priority}]${queuedTask.delegationRole ? ` {${queuedTask.delegationRole}}` : ""}${
-              this.formatRequestedResource(queuedTask.requestedResource)
-            }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
-        ),
-        ...(dailyDigestLine ? [dailyDigestLine] : [])
-      ],
-      errors: postProcessErrors,
-      shouldExit: false
-    };
+      // Check whether the model signaled daily work complete.
+      let dailyDigestLine: string | null = null;
+      if (/^DAILY_COMPLETE\s*$/m.test(rawReply)) {
+        dailyDigestLine = await this.finishDailyWork();
+      }
+      this.emitTaskEvent({
+        type: "task-complete",
+        taskId: completedTask.id,
+        resourceAlias: selection.alias,
+        status: completedTask.status === "failed" ? "failed" : "completed",
+        qualitySignals: completedTask.qualityVerification?.signals ?? null,
+        durationMs: completedTask.durationMs ?? 0,
+        tokenCount: modelEvalCount
+      });
+
+      return {
+        lines: [
+          `${this.getOrchestratorName()} ${verification.passed ? "completed" : "failed"} #${task.id} [${task.priority}]${task.delegationRole ? ` {${task.delegationRole}}` : ""} via ${this.formatResourceRoutingTarget(selection.alias, endpoint.model)}.`,
+          replyText,
+          ...(verification.passed ? [] : [`Verification: ${verification.reason}`]),
+          ...(routingFallbackWarning ? [routingFallbackWarning] : []),
+          ...writtenFiles,
+          ...scriptLines,
+          ...queuedResult.notes,
+          ...(movedSourceLine ? [movedSourceLine] : []),
+          ...queued.map(
+            (queuedTask) =>
+              `Queued #${queuedTask.id} [${queuedTask.priority}]${queuedTask.delegationRole ? ` {${queuedTask.delegationRole}}` : ""}${
+                this.formatRequestedResource(queuedTask.requestedResource)
+              }${queuedTask.requestedModel ? `/${queuedTask.requestedModel}` : ""}: ${queuedTask.content}`
+          ),
+          ...(dailyDigestLine ? [dailyDigestLine] : [])
+        ],
+        errors: postProcessErrors,
+        shouldExit: false
+      };
+    } finally {
+      if (activeResourceAlias) {
+        this.activeTasksByResource.delete(activeResourceAlias);
+        this.pushDisplayState();
+      }
+      this.processingTaskIds.delete(task.id);
+    }
   }
 
   async runIdleCycle(): Promise<CommandResult> {
@@ -5719,7 +6187,7 @@ export class LocalCrewApp {
           }
         }
 
-        if (this.systemState.auto.pending.length <= LocalCrewApp.QUEUE_REFILL_THRESHOLD) {
+        if (this.systemState.auto.pending.length <= this.getQueueRefillThreshold()) {
           const ingested = await this.ingestNextInboxDocumentTask();
           if (ingested) {
             const processed = await this.processNextAutoTask();
@@ -5759,7 +6227,9 @@ export class LocalCrewApp {
     } catch (error) {
       let recoveryLine: string | undefined;
       if (this.systemState.auto.pending.length > 0) {
-        const [task, ...remaining] = this.sortPendingTasks(this.systemState.auto.pending);
+        const [task, ...remaining] = this.sortPendingTasks(
+          this.systemState.auto.pending.filter(t => !this.processingTaskIds.has(t.id))
+        );
         const recovery = await this.quarantineFailedAutoTask({
           task,
           remaining,

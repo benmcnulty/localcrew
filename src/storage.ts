@@ -17,6 +17,10 @@ export interface StoragePaths {
   orchestratorMemoryDir: string;
   orchestratorMemoryIndexPath: string;
   orchestratorMemorySummaryPath: string;
+  navigationDir: string;
+  navigationOutlinesDir: string;
+  documentSitemapPath: string;
+  documentOutlineIndexPath: string;
   directivesPath: string;
   roadmapPath: string;
   focusTodoPath: string;
@@ -39,6 +43,8 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
   const orchestratorDir = join(secureDir, "orchestrator");
   const orchestratorGeneratedDir = join(orchestratorDir, "generated");
   const orchestratorMemoryDir = join(orchestratorDir, "memory");
+  const navigationDir = join(orchestratorDir, "navigation");
+  const navigationOutlinesDir = join(navigationDir, "outlines");
   const telemetryDir = join(orchestratorDir, "telemetry");
   const agentsDir = join(secureDir, "agents");
 
@@ -56,6 +62,10 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     orchestratorMemoryDir,
     orchestratorMemoryIndexPath: join(orchestratorMemoryDir, "index.json"),
     orchestratorMemorySummaryPath: join(orchestratorMemoryDir, "summary.md"),
+    navigationDir,
+    navigationOutlinesDir,
+    documentSitemapPath: join(navigationDir, "document-sitemap.md"),
+    documentOutlineIndexPath: join(navigationDir, "document-outline-index.json"),
     directivesPath: join(orchestratorDir, "directives.md"),
     roadmapPath: join(orchestratorDir, "roadmap.md"),
     focusTodoPath: join(orchestratorDir, "focus-todo.md"),

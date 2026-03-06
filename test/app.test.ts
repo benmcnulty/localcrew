@@ -90,10 +90,11 @@ async function seedResourceInventory(rootDir: string): Promise<void> {
 }
 
 /**
- * Pre-seeds the auto queue with enough low-priority padding tasks to exceed
- * QUEUE_REFILL_THRESHOLD (4), so runIdleCycle skips queue-fill and goes
- * straight to processNextAutoTask.  Uses high IDs (900+) and sets lastTaskId
- * to 0 so user-queued tasks still start from 1.
+ * Pre-seeds the auto queue with enough low-priority padding tasks to stay
+ * above the dynamic refill threshold in the default 4-resource test network,
+ * so runIdleCycle skips queue-fill and goes straight to processNextAutoTask.
+ * Uses high IDs (900+) and sets lastTaskId to 0 so user-queued tasks still
+ * start from 1.
  */
 async function seedPaddingTasks(rootDir: string): Promise<void> {
   const paths = getStoragePaths(rootDir);
@@ -398,7 +399,9 @@ describe("LocalCrewApp", () => {
         kind: "explore"
       });
       expect(tree.lines.some((line) => line.includes("focus-todo.md"))).toBe(true);
+      expect(tree.sitemapPath).toContain("document-sitemap.md");
       expect(file.content).toContain("Refine routing policy using measured queue pressure");
+      expect(file.outline?.headings[0]?.trail.join(" > ")).toBe("In Focus Todo");
     });
   });
 
@@ -570,6 +573,220 @@ describe("LocalCrewApp", () => {
           process.env.LOCALCREW_ORCHESTRATOR_NAME = previousName;
         }
       }
+    });
+  });
+
+  test("caps auto-filled pending work at twice the available resource count", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      let callCount = 0;
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return makeChatResponse(
+              Array.from(
+                { length: 12 },
+                (_, index) => `[medium] Draft backlog item ${index + 1}.`
+              ).join("\n")
+            );
+          }
+          if (callCount === 2) {
+            return makeChatResponse("Looks good.\nVERDICT: approve");
+          }
+          return makeChatResponse(
+            Array.from(
+              { length: 10 },
+              (_, index) => `[medium] Final backlog item ${index + 1}.`
+            ).join("\n")
+          );
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const queue = await app.getQueueSnapshot();
+      const systemState = await loadSystemState(rootDir);
+
+      expect(queue.availableResourceCount).toBe(4);
+      expect(queue.desiredPendingDepth).toBe(8);
+      expect(result.lines[0]).toContain("filled the queue with 8 self-improvement tasks.");
+      expect(systemState.auto.pending).toHaveLength(8);
+    });
+  });
+
+  test("exposes assigned resources on active tasks while work is in flight", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 5,
+              totalCompletedCount: 0,
+              pending: [
+                {
+                  id: 1,
+                  content: "Draft a detailed delegation plan for the queue.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:manual",
+                  status: "queued",
+                  requestedResource: "workhorse"
+                },
+                ...Array.from({ length: 4 }, (_, index) => ({
+                  id: 2 + index,
+                  content: `Padding task ${index + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued"
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      let preflightInFlight = false;
+      let releasePreflight: (response: Response) => void = () => {
+        throw new Error("Expected a blocked preflight resolver.");
+      };
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (input) => {
+          if (String(input).endsWith("/api/tags")) {
+            return new Response("{}", { status: 200 });
+          }
+          if (preflightInFlight) {
+            return makeChatResponse("Completed the requested draft.");
+          }
+          return new Promise<Response>((resolve) => {
+            preflightInFlight = true;
+            releasePreflight = resolve;
+          });
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const cyclePromise = app.runIdleCycle();
+
+      let queue = await app.getQueueSnapshot();
+      for (let attempt = 0; attempt < 20 && queue.activeTasks.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        queue = await app.getQueueSnapshot();
+      }
+
+      expect(queue.activeTasks).toEqual([
+        expect.objectContaining({
+          id: 1,
+          assignedResource: "workhorse"
+        })
+      ]);
+
+      if (!preflightInFlight) {
+        throw new Error("Expected the preflight call to be in flight.");
+      }
+      releasePreflight(makeChatResponse("Preflight approved."));
+      await cyclePromise;
+    });
+  });
+
+  test("distributes concurrent auto tasks across idle top-tier resources", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 5,
+              totalCompletedCount: 0,
+              pending: [
+                {
+                  id: 1,
+                  content: "Draft a detailed delegation plan for the queue.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:manual",
+                  status: "queued"
+                },
+                {
+                  id: 2,
+                  content: "Draft a detailed delegation plan for the queue.",
+                  priority: "medium",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:manual",
+                  status: "queued"
+                },
+                ...Array.from({ length: 3 }, (_, index) => ({
+                  id: 3 + index,
+                  content: `Padding task ${index + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued"
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      const preflightResolvers: Array<(response: Response) => void> = [];
+      let fetchCallCount = 0;
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (input) => {
+          if (String(input).endsWith("/api/tags")) {
+            return new Response("{}", { status: 200 });
+          }
+          fetchCallCount += 1;
+          if (fetchCallCount <= 2) {
+            return new Promise<Response>((resolve) => {
+              preflightResolvers.push(resolve);
+            });
+          }
+          return makeChatResponse("Completed the requested draft.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const [firstCycle, secondCycle] = [app.runIdleCycle(), app.runIdleCycle()];
+
+      let queue = await app.getQueueSnapshot();
+      for (let attempt = 0; attempt < 20 && queue.activeTasks.length < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        queue = await app.getQueueSnapshot();
+      }
+
+      expect(queue.activeTasks).toHaveLength(2);
+      expect(queue.activeTasks.map((task) => task.assignedResource).sort()).toEqual([
+        "orchestrator",
+        "workhorse"
+      ]);
+
+      preflightResolvers.forEach((resolve) => resolve(makeChatResponse("Preflight approved.")));
+      await Promise.all([firstCycle, secondCycle]);
     });
   });
 
@@ -1337,6 +1554,320 @@ describe("LocalCrewApp", () => {
       expect(dropbox.active).toHaveLength(0);
       expect(dropbox.outbox).toHaveLength(0);
       expect(internalFile).toContain("# Failure Summary");
+    });
+  });
+
+  test("updates canonical memory files through targeted UPDATE directives", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+      await writeFile(paths.orchestratorMemorySummaryPath, "# Summary\n\n- Old detail\n", "utf8");
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 6,
+              pending: [
+                {
+                  id: 1,
+                  content: "Refine the summary bullet while preserving the rest of the document.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Updated the summary.",
+              "UPDATE[internal][summary.md][replace]",
+              "SEARCH",
+              "- Old detail",
+              "ENDSEARCH",
+              "CONTENT",
+              "- New detail",
+              "ENDCONTENT",
+              "ENDUPDATE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const updatedSummary = await readFile(paths.orchestratorMemorySummaryPath, "utf8");
+      const state = await loadSystemState(rootDir);
+
+      expect(result.errors).toEqual([]);
+      expect(updatedSummary).toContain("- New detail");
+      expect(updatedSummary).not.toContain("- Old detail");
+      expect(state.auto.completed.at(-1)?.status).toBe("completed");
+    });
+  });
+
+  test("fails ambiguous UPDATE anchors instead of overwriting canonical memory", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+      const originalSummary = [
+        "# Summary",
+        "",
+        "## Section",
+        "- First item",
+        "",
+        "## Section",
+        "- Second item"
+      ].join("\n");
+      await writeFile(paths.orchestratorMemorySummaryPath, `${originalSummary}\n`, "utf8");
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 6,
+              pending: [
+                {
+                  id: 1,
+                  content: "Add a note under the matching section without damaging the rest of the file.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Tried to update the summary.",
+              "UPDATE[internal][summary.md][insert-after]",
+              "ANCHOR",
+              "## Section",
+              "ENDANCHOR",
+              "CONTENT",
+              "- Inserted note",
+              "ENDCONTENT",
+              "ENDUPDATE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const updatedSummary = await readFile(paths.orchestratorMemorySummaryPath, "utf8");
+      expect(result.lines.some((line) => line.includes("failed #1"))).toBe(true);
+      expect(result.lines.some((line) => line.includes("artifactsVerified=no"))).toBe(true);
+      expect(updatedSummary).toBe(`${originalSummary}\n`);
+    });
+  });
+
+  test("supports HEADING selectors for targeted markdown inserts", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+      const originalSummary = [
+        "# Summary",
+        "",
+        "## Alpha",
+        "",
+        "### Shared",
+        "- Alpha note",
+        "",
+        "## Beta",
+        "",
+        "### Shared",
+        "- Beta note"
+      ].join("\n");
+      await writeFile(paths.orchestratorMemorySummaryPath, `${originalSummary}\n`, "utf8");
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 6,
+              pending: [
+                {
+                  id: 1,
+                  content: "Add a note under the beta shared heading without touching the alpha section.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Updated the targeted section.",
+              "UPDATE[internal][summary.md][insert-after]",
+              "ANCHOR",
+              "HEADING: Beta > Shared",
+              "ENDANCHOR",
+              "CONTENT",
+              "- Beta addition",
+              "ENDCONTENT",
+              "ENDUPDATE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const updatedSummary = await readFile(paths.orchestratorMemorySummaryPath, "utf8");
+
+      expect(result.errors).toEqual([]);
+      expect(updatedSummary).toContain("- Beta addition\n- Beta note");
+      expect(updatedSummary).not.toContain("- Beta addition\n- Alpha note");
+    });
+  });
+
+  test("supports replace-section for markdown documents", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const paths = getStoragePaths(rootDir);
+      await mkdir(paths.systemDir, { recursive: true });
+      await mkdir(paths.orchestratorMemoryDir, { recursive: true });
+      const originalSummary = [
+        "# Summary",
+        "",
+        "## Current",
+        "- Old status",
+        "",
+        "## Next",
+        "- Keep this"
+      ].join("\n");
+      await writeFile(paths.orchestratorMemorySummaryPath, `${originalSummary}\n`, "utf8");
+      await writeFile(
+        paths.systemStatePath,
+        `${JSON.stringify(
+          {
+            auto: {
+              enabled: false,
+              defaultPriority: "high",
+              lastTaskId: 6,
+              pending: [
+                {
+                  id: 1,
+                  content: "Refresh only the current section of the summary.",
+                  priority: "high",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "orchestrator:auto-fill",
+                  status: "queued"
+                },
+                ...Array.from({ length: 5 }, (_, i) => ({
+                  id: 2 + i,
+                  content: `Padding task ${i + 1}`,
+                  priority: "low",
+                  createdAt: "2026-03-01T00:00:00.000Z",
+                  createdBy: "test:padding",
+                  status: "queued",
+                }))
+              ],
+              completed: []
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () =>
+          makeChatResponse(
+            [
+              "Replaced the section.",
+              "UPDATE[internal][summary.md][replace-section]",
+              "SEARCH",
+              "HEADING: Current",
+              "ENDSEARCH",
+              "CONTENT",
+              "## Current",
+              "- New status",
+              "ENDCONTENT",
+              "ENDUPDATE"
+            ].join("\n")
+          ),
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.runIdleCycle();
+      const updatedSummary = await readFile(paths.orchestratorMemorySummaryPath, "utf8");
+
+      expect(result.errors).toEqual([]);
+      expect(updatedSummary).toContain("## Current\n- New status");
+      expect(updatedSummary).toContain("## Next\n- Keep this");
+      expect(updatedSummary).not.toContain("- Old status");
     });
   });
 
