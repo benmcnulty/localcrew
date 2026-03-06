@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
+import { getDocumentOutlineForFile, type DocumentOutlineEntry } from "./document-outline.ts";
 import { getLocalExternalMemoryDir } from "./external-memory.ts";
 import { getStoragePaths } from "./storage.ts";
 
@@ -81,7 +82,7 @@ export async function getInternalFileTree(rootDir = process.cwd()): Promise<Inte
 export async function readInternalFile(
   requestedPath: string,
   rootDir = process.cwd()
-): Promise<InternalFileDetail & { content: string }> {
+): Promise<InternalFileDetail & { content: string; outline?: DocumentOutlineEntry | null }> {
   const allowedRoots = [
     resolve(getStoragePaths(rootDir).systemDir),
     resolve(getLocalExternalMemoryDir(rootDir))
@@ -113,7 +114,10 @@ export async function readInternalFile(
     relativePath: relative(matchedRoot, resolvedPath),
     content,
     size: fileStat.size,
-    modifiedAt: fileStat.mtime.toISOString()
+    modifiedAt: fileStat.mtime.toISOString(),
+    ...(resolvedPath.toLowerCase().endsWith(".md")
+      ? { outline: await getDocumentOutlineForFile(resolvedPath, rootDir) }
+      : {})
   };
 }
 
@@ -126,6 +130,8 @@ export async function getInternalFileDetails(
     roadmap: paths.roadmapPath,
     focusTodo: paths.focusTodoPath,
     changelog: paths.changelogPath,
+    documentSitemap: paths.documentSitemapPath,
+    documentOutlineIndex: paths.documentOutlineIndexPath,
     inventory: paths.deviceInventoryPath,
     telemetrySummary: paths.telemetrySummaryPath,
     auditLog: paths.auditLogPath,
@@ -155,7 +161,7 @@ export async function getInternalFileDetails(
 const MAX_SEARCH_MATCHES = 100;
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // Skip files > 512 KB
 
-async function collectTextFiles(dir: string): Promise<string[]> {
+async function collectTextFiles(dir: string, ignoredRoots: string[] = []): Promise<string[]> {
   const files: string[] = [];
 
   async function walk(current: string): Promise<void> {
@@ -168,6 +174,9 @@ async function collectTextFiles(dir: string): Promise<string[]> {
 
     for (const entry of entries) {
       const child = resolve(current, entry.name);
+      if (ignoredRoots.some((ignored) => child === ignored || child.startsWith(`${ignored}${sep}`))) {
+        continue;
+      }
       if (entry.isDirectory()) {
         await walk(child);
       } else if (entry.isFile()) {
@@ -193,8 +202,10 @@ export async function searchInternalFiles(
     return { query, matches: [], truncated: false };
   }
 
-  const systemRoot = resolve(getStoragePaths(rootDir).systemDir);
+  const paths = getStoragePaths(rootDir);
+  const systemRoot = resolve(paths.systemDir);
   const externalRoot = resolve(getLocalExternalMemoryDir(rootDir));
+  const navigationRoot = resolve(paths.navigationDir);
   const roots = [
     { path: systemRoot, label: "system" },
     { path: externalRoot, label: "external-memory" },
@@ -204,7 +215,7 @@ export async function searchInternalFiles(
   const rootFiles = await Promise.all(
     roots.map(async (root) => ({
       root,
-      files: await collectTextFiles(root.path),
+      files: await collectTextFiles(root.path, root.label === "system" ? [navigationRoot] : []),
     })),
   );
 

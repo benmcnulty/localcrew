@@ -24,6 +24,9 @@ Local runtime state lives in `.localcrew/` and is intentionally ignored by git.
 - `.localcrew/sessions.json`: shared chat transcript and compaction state
 - `.localcrew/system/state.json`: auto queue and completion history
 - `.localcrew/system/secure/orchestrator/*.md`: orchestrator directives, roadmap, focus todo, changelog, workflow, inventory
+- `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md`: generated markdown sitemap for compact document traversal
+- `.localcrew/system/secure/orchestrator/navigation/document-outline-index.json`: machine-readable outline index for explorer and tooling
+- `.localcrew/system/secure/orchestrator/navigation/outlines/*`: generated per-document heading outline sidecars
 - `.localcrew/system/secure/orchestrator/telemetry/audit-log.jsonl`: append-only transaction log
 - `.localcrew/system/secure/orchestrator/telemetry/summary.json`: indexed telemetry summary for fast reads
 - `.localcrew/system/secure/agents/*`: per-agent specs and memory
@@ -90,7 +93,7 @@ Current observability surfaces:
 
 - `/status`: point-in-time orchestration summary
 - `/hud`: live terminal dashboard with `status`, `queue`, `metrics`, and `detail` tabs
-- `/explore`: internal and external-memory file browser with full-text search
+- `/explore`: internal and external-memory file browser with full-text search, generated sitemap access, and heading-outline references
 - local HTTP API for browser-based status, queue, telemetry, audit, explorer, search, command, and edit flows
 - local HTTP API for browser-based participant/resource config, direct chat, and orchestrator profile editing
 - browser UI served at `/ui` from the same local API

@@ -1506,6 +1506,30 @@ async function renderParticipants(participants, resources) {
   }
 }
 
+function formatExploreFileOutput(file) {
+  const lines = [
+    file.path,
+    "relative: " + file.relativePath,
+    "updated: " + file.modifiedAt,
+    "size: " + file.size + " bytes"
+  ];
+
+  if (file.outline && Array.isArray(file.outline.headings) && file.outline.headings.length > 0) {
+    lines.push("");
+    lines.push("Heading references:");
+    file.outline.headings.forEach((heading) => {
+      const trail = Array.isArray(heading.trail) ? heading.trail.join(" > ") : heading.text;
+      lines.push("- HEADING: " + trail + " (line " + heading.line + ")");
+    });
+  }
+
+  lines.push("");
+  lines.push("----- CONTENT -----");
+  lines.push("");
+  lines.push(file.content);
+  return lines.join("\\n");
+}
+
 async function refreshView() {
   const [status, chatConfig, dropbox, resources] = await Promise.all([
     getJson("/api/status"),
@@ -1564,11 +1588,16 @@ async function refreshView() {
     if (els.treeOutput) els.treeOutput.textContent = tree.lines.join("\\n");
     if (!state.selectedFilePath && els.fileOutput) {
       els.fileOutput.textContent = [
+        "Explorer navigation:",
+        "  sitemap: " + tree.sitemapPath,
+        "  outline index: " + tree.outlineIndexPath,
+        "",
         "Dropbox:",
         "  inbox:  " + dropbox.inbox.length,
         "  active: " + dropbox.active.length,
         "  outbox: " + dropbox.outbox.length,
         "",
+        "Open the sitemap first when you need the compact document map.",
         "Enter a full path above to open a file."
       ].join("\\n");
     }
@@ -1749,7 +1778,7 @@ els.fileOpenForm.addEventListener("submit", async (event) => {
   try {
     const file = await getJson("/api/explore/file?path=" + encodeURIComponent(fullPath));
     state.selectedFilePath = fullPath;
-    if (els.fileOutput) els.fileOutput.textContent = file.path + "\\n\\n" + file.content;
+    if (els.fileOutput) els.fileOutput.textContent = formatExploreFileOutput(file);
   } catch (error) {
     if (els.fileOutput) els.fileOutput.textContent = String(error);
   }
