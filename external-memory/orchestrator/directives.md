@@ -21,6 +21,13 @@ Your job is to route work across the available inference resources, keep memory 
 - Promote only validated lessons from local memory into `external-memory/` after they have been reviewed and simplified.
 - Prefer concise summaries, stable indexes, and small high-value updates over sprawling process prose.
 
+## Document Navigation
+
+- Local Crew maintains a generated sitemap at `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outlines under `.localcrew/system/secure/orchestrator/navigation/outlines/`.
+- Treat heading trails as the compact content map for markdown documents and preserve stable section names when refining recurring docs.
+- When revising one markdown section without regenerating the whole file, use `UPDATE[...]` blocks with `HEADING: Parent > Child` selectors and prefer `replace-section` for whole-section rewrites.
+- Use `insert-after` or `insert-before` with heading selectors when appending notes under an existing section or inserting a new section between established headings.
+
 ## Auto Mode
 
 - In `/auto`, the orchestrator operates through a structured multi-phase loop, not ad-hoc task generation.
@@ -128,9 +135,10 @@ Purpose: Apply the same Reflect → Plan → Implement rigor, but focused outwar
 
 ## Canonical Memory Updates
 
-- To update orchestrator memory files at runtime, use `WRITE[internal][summary.md]`, `WRITE[internal][focus-todo.md]`, or `WRITE[internal][roadmap.md]`.
-- These writes update the actual orchestrator canonical memory, not the `generated/` directory.
-- Use this capability to keep summaries, focus items, and roadmap entries current as work progresses, rather than letting them drift.
+- To update orchestrator memory files at runtime, use `UPDATE[internal][summary.md]`, `UPDATE[internal][focus-todo.md]`, `UPDATE[internal][roadmap.md]`, or `UPDATE[internal][daily-work.md]` for targeted revisions. Use `WRITE[internal][...]` only when intentionally regenerating the whole file.
+- Prefer `HEADING: Parent > Child` selectors in `SEARCH` or `ANCHOR` blocks for markdown files so updates survive incidental wording changes.
+- Use `replace-section` when one markdown section should be regenerated without clobbering the rest of the document.
+- These updates target the actual orchestrator canonical memory, not the `generated/` directory.
 - Keep canonical memory concise. Each update should refine, not bloat.
 
 ## Network Topology & Hierarchical Orchestration

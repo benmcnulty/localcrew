@@ -101,3 +101,33 @@ Ship the next production-readiness iteration from `staging` without disturbing t
   - tighten `/display` and CLI parity using the new queue/status capacity fields
   - verify Playwright execution against isolated staging on `4311`
   - decide whether to propagate the new capacity metrics into the CLI watch output
+
+
+### 2026-03-06 Outline Navigation Pass
+
+- Added `src/document-outline.ts` as the markdown outline/navigation module.
+- Added runtime navigation storage under `.localcrew/system/secure/orchestrator/navigation/`:
+  - `document-sitemap.md`
+  - `document-outline-index.json`
+  - per-document outline sidecars under `navigation/outlines/`
+- Extended explorer file reads to include outline metadata and explorer tree responses to advertise sitemap/index paths.
+- Added heading-aware markdown update support:
+  - `HEADING: Parent > Child` selectors in `ANCHOR` / `SEARCH`
+  - `replace-section` mode for whole-section markdown rewrites
+  - suffix-trail matching when a unique trailing heading path is sufficient
+- Serialized document-navigation sync to avoid concurrent outline rebuild races and excluded generated navigation artifacts from full-text search results.
+- Updated preserved guidance docs and added committed map docs:
+  - `docs/document-navigation.md`
+  - `docs/documentation-map.md`
+  - aligned `external-memory/README.md`, `external-memory/orchestrator/directives.md`, `docs/architecture.md`, and `docs/setup.md`
+- Expanded regression coverage for:
+  - document outline generation
+  - explorer outline metadata
+  - heading-based incremental updates
+  - `replace-section` document updates
+
+### 2026-03-06 Validation Refresh
+
+- `bunx tsc --noEmit` ✅
+- `npm test` ✅ (`757 pass / 0 fail`)
+- `bunx playwright test --list` ✅ (`21 tests discovered`)

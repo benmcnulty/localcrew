@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { compactConversation } from "./compact.ts";
@@ -62,6 +62,7 @@ import {
   writeInboxDocument,
   writeGeneratedDropboxDocument
 } from "./dropbox.ts";
+import { getHeadingSectionRange, isHeadingReference, syncDocumentNavigation } from "./document-outline.ts";
 import {
   buildAgentChatMessages,
   buildAgentIdentityBlock,
@@ -390,7 +391,7 @@ function parseWebsiteRequest(content: string): { replyText: string; topicOrPath?
 }
 
 type GeneratedFileStage = "active" | "outbox" | "internal";
-type GeneratedFileUpdateMode = "replace" | "insert-after" | "insert-before" | "append" | "prepend";
+type GeneratedFileUpdateMode = "replace" | "replace-section" | "insert-after" | "insert-before" | "append" | "prepend";
 
 type GeneratedFileDirective =
   | {
@@ -433,6 +434,38 @@ function countOccurrences(haystack: string, needle: string): number {
   }
 }
 
+function resolveGeneratedUpdateAnchor(
+  currentContent: string,
+  anchor: string,
+  filename: string
+): { index: number; length: number } {
+  const normalizedAnchor = anchor.replaceAll("\r\n", "\n").trimEnd();
+  if (!normalizedAnchor) {
+    throw new Error(`UPDATE for ${filename} requires a non-empty anchor block.`);
+  }
+
+  if (isHeadingReference(normalizedAnchor)) {
+    const { start, heading } = getHeadingSectionRange(currentContent, normalizedAnchor);
+    return {
+      index: start,
+      length: heading.raw.length
+    };
+  }
+
+  const occurrences = countOccurrences(currentContent, normalizedAnchor);
+  if (occurrences === 0) {
+    throw new Error(`UPDATE for ${filename} could not find the requested anchor.`);
+  }
+  if (occurrences > 1) {
+    throw new Error(`UPDATE for ${filename} matched multiple anchors; refusing ambiguous edit.`);
+  }
+
+  return {
+    index: currentContent.indexOf(normalizedAnchor),
+    length: normalizedAnchor.length
+  };
+}
+
 function joinDocumentParts(left: string, right: string): string {
   const normalizedLeft = left.trimEnd();
   const normalizedRight = right.trimStart();
@@ -450,6 +483,7 @@ function applyGeneratedFileDirective(
   directive: Extract<GeneratedFileDirective, { kind: "update" }>
 ): string {
   const normalizedCurrent = currentContent.replaceAll("\r\n", "\n");
+  const normalizedDirectiveContent = directive.content.replaceAll("\r\n", "\n").trimEnd();
   if (!normalizedCurrent.trim()) {
     throw new Error(
       `Cannot apply UPDATE to ${directive.filename} because the target file does not exist or is empty.`
@@ -457,11 +491,11 @@ function applyGeneratedFileDirective(
   }
 
   if (directive.mode === "append") {
-    return `${joinDocumentParts(normalizedCurrent, directive.content)}\n`;
+    return `${joinDocumentParts(normalizedCurrent, normalizedDirectiveContent)}\n`;
   }
 
   if (directive.mode === "prepend") {
-    return `${joinDocumentParts(directive.content, normalizedCurrent)}\n`;
+    return `${joinDocumentParts(normalizedDirectiveContent, normalizedCurrent)}\n`;
   }
 
   const anchor = directive.anchor?.replaceAll("\r\n", "\n").trimEnd();
@@ -469,29 +503,40 @@ function applyGeneratedFileDirective(
     throw new Error(`UPDATE for ${directive.filename} requires a non-empty anchor block.`);
   }
 
-  const occurrences = countOccurrences(normalizedCurrent, anchor);
-  if (occurrences === 0) {
-    throw new Error(`UPDATE for ${directive.filename} could not find the requested anchor.`);
-  }
-  if (occurrences > 1) {
-    throw new Error(`UPDATE for ${directive.filename} matched multiple anchors; refusing ambiguous edit.`);
+  if (directive.mode === "replace-section") {
+    if (!isHeadingReference(anchor)) {
+      throw new Error(
+        `UPDATE for ${directive.filename} requires SEARCH to use HEADING: ... when mode is replace-section.`
+      );
+    }
+    const { start, end } = getHeadingSectionRange(normalizedCurrent, anchor);
+    return `${normalizedCurrent.slice(0, start)}${normalizedDirectiveContent}\n${normalizedCurrent.slice(end)}`.replace(
+      /\s*$/,
+      "\n"
+    );
   }
 
-  const anchorIndex = normalizedCurrent.indexOf(anchor);
+  if (directive.mode === "replace" && isHeadingReference(anchor)) {
+    throw new Error(
+      `UPDATE for ${directive.filename} cannot use HEADING: ... with replace; use replace-section instead.`
+    );
+  }
+
+  const resolvedAnchor = resolveGeneratedUpdateAnchor(normalizedCurrent, anchor, directive.filename);
   if (directive.mode === "replace") {
-    return `${normalizedCurrent.slice(0, anchorIndex)}${directive.content}${normalizedCurrent.slice(
-      anchorIndex + anchor.length
+    return `${normalizedCurrent.slice(0, resolvedAnchor.index)}${normalizedDirectiveContent}${normalizedCurrent.slice(
+      resolvedAnchor.index + resolvedAnchor.length
     )}`.replace(/\s*$/, "\n");
   }
 
   if (directive.mode === "insert-before") {
-    return `${normalizedCurrent.slice(0, anchorIndex)}${directive.content}\n${normalizedCurrent.slice(
-      anchorIndex
+    return `${normalizedCurrent.slice(0, resolvedAnchor.index)}${normalizedDirectiveContent}\n${normalizedCurrent.slice(
+      resolvedAnchor.index
     )}`.replace(/\s*$/, "\n");
   }
 
-  return `${normalizedCurrent.slice(0, anchorIndex + anchor.length)}\n${directive.content}${normalizedCurrent.slice(
-    anchorIndex + anchor.length
+  return `${normalizedCurrent.slice(0, resolvedAnchor.index + resolvedAnchor.length)}\n${normalizedDirectiveContent}${normalizedCurrent.slice(
+    resolvedAnchor.index + resolvedAnchor.length
   )}`.replace(/\s*$/, "\n");
 }
 
@@ -524,7 +569,7 @@ function parseQueuedTasks(content: string): {
   let workingContent = content.replace(scriptPattern, "\n");
 
   const updatePattern =
-    /(?:^|\n)UPDATE\[(active|outbox|internal)\]\[([^\]\n]+)\]\[(replace|insert-after|insert-before|append|prepend)\]\n([\s\S]*?)\nENDUPDATE(?=\n|$)/gi;
+    /(?:^|\n)UPDATE\[(active|outbox|internal)\]\[([^\]\n]+)\]\[(replace|replace-section|insert-after|insert-before|append|prepend)\]\n([\s\S]*?)\nENDUPDATE(?=\n|$)/gi;
   for (const updateMatch of workingContent.matchAll(updatePattern)) {
     const stage = updateMatch[1].toLowerCase() as GeneratedFileStage;
     const filename = updateMatch[2].trim();
@@ -545,7 +590,7 @@ function parseQueuedTasks(content: string): {
       continue;
     }
 
-    const anchorLabel = mode === "replace" ? "SEARCH" : "ANCHOR";
+    const anchorLabel = mode === "replace" || mode === "replace-section" ? "SEARCH" : "ANCHOR";
     const anchorBlock = extractDirectiveBlock(body, anchorLabel);
     if (!anchorBlock?.trim()) {
       continue;
@@ -2314,7 +2359,7 @@ export class LocalCrewApp {
         );
 
       if (next !== current) {
-        await writeFile(directivesPath, next, "utf8");
+        await atomicWriteFile(directivesPath, next, "utf8");
       }
     } catch (error) {
       this.warn?.(`Failed to sync orchestrator name in directives: ${error instanceof Error ? error.message : String(error)}`);
@@ -2541,26 +2586,36 @@ export class LocalCrewApp {
     ];
   }
 
-  async getExploreTree(): Promise<{ rootPath: string; lines: string[] }> {
+  async getExploreTree(): Promise<{
+    rootPath: string;
+    lines: string[];
+    sitemapPath: string;
+    outlineIndexPath: string;
+  }> {
     const tree = await getInternalFileTree(this.rootDir);
+    const paths = getStoragePaths(this.rootDir);
     return {
       rootPath: tree.rootPath,
+      sitemapPath: paths.documentSitemapPath,
+      outlineIndexPath: paths.documentOutlineIndexPath,
       lines: [
         "Explorer",
         "",
+        "Generated navigation:",
+        `- Sitemap: ${paths.documentSitemapPath}`,
+        `- Outline index: ${paths.documentOutlineIndexPath}`,
+        "",
         ...tree.lines,
         "",
+        "Start with the sitemap for a compact document map, then open a specific file or outline sidecar.",
+        "Use HEADING: Parent > Child selectors in UPDATE anchors when revising markdown incrementally.",
         "Type a full path from .localcrew/system or external-memory and press Enter to open it. Press Esc to return."
       ]
     };
   }
 
-  async readExploreFile(path: string): Promise<{ path: string; content: string }> {
-    const file = await readInternalFile(path, this.rootDir);
-    return {
-      path: file.path,
-      content: file.content
-    };
+  async readExploreFile(path: string) {
+    return readInternalFile(path, this.rootDir);
   }
 
   async searchExploreFiles(query: string) {
@@ -2655,10 +2710,12 @@ export class LocalCrewApp {
   }
 
   private async syncSystemFiles(): Promise<void> {
+    const paths = getStoragePaths(this.rootDir);
     await saveFocusTodo(this.systemState.auto.pending, this.rootDir);
-    await writeFile(
-      getStoragePaths(this.rootDir).deviceInventoryPath,
-      `${renderResourceInventory(this.rootDir).trimEnd()}\n`,
+    await atomicWriteFile(
+      paths.deviceInventoryPath,
+      `${renderResourceInventory(this.rootDir).trimEnd()}
+`,
       "utf8"
     );
     const agents = await listAgents(this.rootDir);
@@ -2670,6 +2727,7 @@ export class LocalCrewApp {
       connectedResources: listResources(this.rootDir).map((resource) => resource.alias),
       recentAutoSummary
     });
+    await syncDocumentNavigation(this.rootDir);
   }
 
   getHelpLines(): string[] {

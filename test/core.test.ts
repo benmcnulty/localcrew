@@ -727,6 +727,8 @@ describe("message assembly", () => {
     expect(agentSystemPrompt).toContain("You are Reviewer (@reviewer)");
     expect(agentSystemPrompt).toContain("QUEUE[medium]: task");
     expect(agentSystemPrompt).toContain("UPDATE[stage][path][replace]");
+    expect(agentSystemPrompt).toContain("replace-section");
+    expect(agentSystemPrompt).toContain("HEADING: Parent > Child");
     expect(agentSystemPrompt).toContain("WRITE[outbox] or UPDATE[outbox]");
   });
 
@@ -752,6 +754,8 @@ describe("message assembly", () => {
     expect(autoTaskSystemPrompt).toContain("You are Aster, the orchestrator identity.");
     expect(autoTaskSystemPrompt).toContain("QUEUE[high]: task");
     expect(autoTaskSystemPrompt).toContain("UPDATE[stage][path][replace]");
+    expect(autoTaskSystemPrompt).toContain("replace-section");
+    expect(autoTaskSystemPrompt).toContain("HEADING: Parent > Child");
     expect(autoTaskSystemPrompt).toContain("Prefer UPDATE[internal][summary.md]");
 
     expect(autoTaskMessages.at(-1)).toEqual({
