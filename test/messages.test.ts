@@ -330,8 +330,8 @@ describe("buildQueueFillMessages – domain tags", () => {
   test("requests 10-12 tasks across five domains", () => {
     const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
     const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
-    expect(allSystem).toContain("10-12 tasks");
-    expect(allSystem).toContain("five domains");
+    expect(allSystem).toContain("Generate exactly 8 tasks");
+    expect(allSystem).toContain("If the target count is at least 5, include every domain at least once");
   });
 });
 
@@ -344,6 +344,6 @@ describe("buildQueueFillFinalizeMessages – domain tags", () => {
     });
     const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
     expect(allSystem).toContain("domain");
-    expect(allSystem).toContain("6-8 tasks");
+    expect(allSystem).toContain("Finalize exactly 6 tasks");
   });
 });

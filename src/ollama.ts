@@ -196,6 +196,7 @@ export async function chatWithOllamaDetailed(
     prompt_eval_duration?: unknown;
     eval_count?: unknown;
     eval_duration?: unknown;
+    done_reason?: unknown;
   };
 
   if (typeof body.message?.content !== "string" || body.message.content.trim() === "") {

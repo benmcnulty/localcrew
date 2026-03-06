@@ -3080,8 +3080,8 @@ export function getDisplayHtml(): string {
       taskEl.textContent='Auto mode \u2014 scanning queue\u2026';taskEl.style.color='var(--muted2)';
     } else{taskEl.textContent='Idle \u2014 '+mode+' mode';taskEl.style.color='var(--muted)';}
 
-    var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0;
-    el('dqfrac').textContent=pending+' pending \u00b7 '+fmt(completed)+' done';
+    var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0,targetPending=(data.auto&&data.auto.desiredPendingDepth)||0;
+    el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
     // Bar shows pending queue depth: wider = more backlog. Fades out when idle.
     var barPct=pending>0?Math.min(100,pending*10):0;
     el('dqfill').style.width=barPct+'%';
@@ -3305,7 +3305,7 @@ export function getDisplayHtml(): string {
     var lastCompleted=auto.lastCompleted||null;
     var taskEl=el('dtask');
     if(activeTasks.length>0){
-      taskEl.textContent=activeTasks.length===1?'1 task in progress':activeTasks.length+' tasks in progress';
+      taskEl.textContent=String(activeTasks[0].content||'Task in progress');
       taskEl.style.color='var(--n-amber)';
     } else if(nextTask&&nextTask.content){
       taskEl.textContent=nextTask.content;
@@ -3335,12 +3335,20 @@ export function getDisplayHtml(): string {
           metaEl.style.display='none';metaEl.innerHTML='';
         }
       } else {
-        metaEl.style.display='none';metaEl.innerHTML='';
+        var leadTask=activeTasks[0]||{};
+        var leadRes=leadTask.assignedResource||leadTask.requestedResource||'?';
+        var leadPri=leadTask.priority?String(leadTask.priority).toUpperCase():'MEDIUM';
+        var activeSummary=activeTasks.length===1?'IN PROGRESS':String(activeTasks.length)+' IN PROGRESS';
+        metaEl.style.display='';
+        metaEl.innerHTML='<span class="dtask-pri dtask-pri-'+(leadTask.priority||'medium')+'">'+esc(activeSummary)+'</span>'
+          +' <span class="dtask-res">@'+esc(leadRes)+'</span>'
+          +' <span class="dtask-pri dtask-pri-'+(leadTask.priority||'medium')+'">'+esc(leadPri)+'</span>'
+          +(activeTasks.length>1?' <span class="dtask-res">+'+esc(String(activeTasks.length-1))+' more</span>':'');
       }
     }
 
-    var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0);
-    el('dqfrac').textContent=pending+' pending \u00b7 '+fmt(completed)+' done';
+    var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),targetPending=Number(auto.desiredPendingDepth||0);
+    el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
     var barPct2=pending>0?Math.min(100,pending*10):0;
     el('dqfill').style.width=barPct2+'%';
     setVal('ddone',fmt(completed));

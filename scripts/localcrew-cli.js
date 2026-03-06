@@ -52,25 +52,31 @@ function fmt(n) {
 
 function printStatus(data) {
   const auto = data.auto ?? {};
+  const capacityLine =
+    auto.availableResourceCount != null || auto.parallelCycleLimit != null
+      ? `  Capacity     : ${auto.availableResourceCount ?? "?"} resources  Slots: ${auto.availableCycleSlots ?? 0}/${auto.parallelCycleLimit ?? 0}`
+      : null;
   const lines = [
     `\x1b[1mLocalCrew Status\x1b[0m`,
     `  Orchestrator : ${data.orchestratorName ?? "?"} (@${data.orchestratorAlias ?? "?"})`,
     `  Mode         : /${data.mode ?? "?"}`,
     `  Auto busy    : ${auto.busy ? "\x1b[33mYES\x1b[0m" : "no"}`,
-    `  Pending      : ${auto.pendingCount ?? 0}  Completed: ${fmt(auto.completedCount ?? 0)}`,
+    `  Pending      : ${auto.pendingCount ?? 0}${auto.desiredPendingDepth ? ` / ${auto.desiredPendingDepth} target` : ""}  Completed: ${fmt(auto.completedCount ?? 0)}`,
     `  Priority     : ${auto.defaultPriority ?? "?"}`,
     `  Model profile: ${data.modelProfile ?? "?"}`,
-  ];
+    capacityLine
+  ].filter(Boolean);
   console.log(lines.join("\n"));
 }
 
 function printQueue(data) {
   const active = data.activeTasks ?? [];
   const pending = data.pending ?? [];
-  console.log(`\x1b[1mQueue\x1b[0m  (${active.length} active, ${pending.length} pending)`);
+  const target = data.desiredPendingDepth ? ` / target ${data.desiredPendingDepth}` : "";
+  console.log(`\x1b[1mQueue\x1b[0m  (${active.length} active, ${pending.length} pending${target})`);
   for (const t of active) {
     const res = t.assignedResource ?? t.requestedResource ?? "?";
-    console.log(`  \x1b[33m▶ [ACTIVE] @${res}\x1b[0m — ${t.content.slice(0, 120)}`);
+    console.log(`  \x1b[33m▶ [ACTIVE] @${res} [${t.priority ?? "?"}]\x1b[0m — ${t.content.slice(0, 120)}`);
   }
   for (let i = 0; i < pending.length; i++) {
     const t = pending[i];
