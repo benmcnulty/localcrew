@@ -21,7 +21,7 @@ export interface PortalSnapshot {
   autoBusy: boolean;
   autoEnabled: boolean;
   orchestratorName: string;
-  resources: Array<{ alias: string; label: string; tier?: string; baseUrl: string }>;
+  resources: Array<{ alias: string; label: string; tier?: string }>;
   capacitySummary?: string;
 }
 

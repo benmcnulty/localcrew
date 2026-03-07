@@ -2,7 +2,7 @@
 
 Date: 2026-03-06
 Branch: `staging`
-Worktree: `/Users/ben/dev/localcrew-staging`
+Worktree: `localcrew-staging`
 
 ## Objective
 
