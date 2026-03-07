@@ -12,6 +12,10 @@ ollama-profile-*.json
 # OS artifacts
 .DS_Store
 
+# Development screenshots
+display-*.png
+display-*.jpg
+
 # Log files
 *.log
 firebase-debug.log

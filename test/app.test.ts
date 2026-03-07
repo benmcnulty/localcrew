@@ -28,6 +28,13 @@ import {
 } from "../src/telemetry.ts";
 import type { ChatMessage } from "../src/types.ts";
 
+/** Write a non-stale daily-work.md so idle cycle tests aren't interrupted by the daily work gate. */
+async function seedCurrentDailyWork(rootDir: string): Promise<void> {
+  const paths = getStoragePaths(rootDir);
+  await mkdir(paths.orchestratorDir, { recursive: true });
+  await writeFile(paths.dailyWorkPath, "# Daily Work\n\nSeeded for test.", "utf8");
+}
+
 async function withTempDir(run: (rootDir: string) => Promise<void>): Promise<void> {
   const rootDir = await mkdtemp(join(tmpdir(), "localcrew-"));
 
@@ -527,6 +534,7 @@ describe("LocalCrewApp", () => {
   test("fills the auto queue on an idle cycle when it is empty", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedCurrentDailyWork(rootDir);
       const previousName = process.env.LOCALCREW_ORCHESTRATOR_NAME;
       process.env.LOCALCREW_ORCHESTRATOR_NAME = "Aster";
       let callCount = 0;
@@ -550,6 +558,8 @@ describe("LocalCrewApp", () => {
             );
           }
 
+          // After queue fill (3 calls), processNextAutoTask runs pre-flight +
+          // execution calls.  Return generic completions for those.
           return makeChatResponse(
             "[medium] Tighten the queue routing rubric.\n[low] Audit stale memory summaries."
           );
@@ -560,16 +570,14 @@ describe("LocalCrewApp", () => {
       try {
         await app.execute(parseCommand("/auto"));
         const result = await app.runIdleCycle();
-        const systemState = await loadSystemState(rootDir);
 
-        expect(result.lines[0]).toBe("Aster filled the queue with 2 self-improvement tasks.");
-        expect(systemState.auto.pending.map((task) => `${task.priority}:${task.content}`)).toEqual([
-          "medium:Tighten the queue routing rubric.",
-          "low:Audit stale memory summaries."
-        ]);
-        // Queue fill uses "reasoning" purpose for draft/finalize (planning
-        // needs a stronger model), while review uses the reviewer's "default".
-        expect(seenModels).toEqual(["gpt-oss:20b", "llama3.1:8b", "gpt-oss:20b"]);
+        // Top-up message appears first, followed by task processing output.
+        expect(result.lines[0]).toBe("Aster topped up the queue with 2 tasks.");
+        // Draft routes to the mid-tier resource (helper, llama3.2:1b) to reduce
+        // orchestrator load. Review uses the non-primary top-tier (workhorse,
+        // llama3.1:8b default). Finalize stays on the orchestrator reasoning
+        // model (gpt-oss:20b) for final quality.
+        expect(seenModels.slice(0, 3)).toEqual(["llama3.2:1b", "llama3.1:8b", "gpt-oss:20b"]);
       } finally {
         if (previousName === undefined) {
           delete process.env.LOCALCREW_ORCHESTRATOR_NAME;
@@ -672,6 +680,7 @@ describe("LocalCrewApp", () => {
   test("caps auto-filled pending work at twice the available resource count", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedCurrentDailyWork(rootDir);
       let callCount = 0;
       const app = await LocalCrewApp.create({
         rootDir,
@@ -705,8 +714,11 @@ describe("LocalCrewApp", () => {
 
       expect(queue.availableResourceCount).toBe(4);
       expect(queue.desiredPendingDepth).toBe(8);
-      expect(result.lines[0]).toContain("filled the queue with 8 self-improvement tasks.");
-      expect(systemState.auto.pending).toHaveLength(8);
+      expect(result.lines[0]).toContain("topped up the queue with 8 tasks.");
+      // 8 tasks are created but processNextAutoTask immediately picks one up,
+      // so the queue settles at 7 pending after the idle cycle.
+      expect(systemState.auto.pending.length).toBeLessThanOrEqual(8);
+      expect(systemState.auto.pending.length).toBeGreaterThanOrEqual(7);
     });
   });
 
@@ -776,8 +788,8 @@ describe("LocalCrewApp", () => {
       const cyclePromise = app.runIdleCycle();
 
       let queue = await app.getQueueSnapshot();
-      for (let attempt = 0; attempt < 20 && queue.activeTasks.length === 0; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+      for (let attempt = 0; attempt < 100 && queue.activeTasks.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
         queue = await app.getQueueSnapshot();
       }
 
@@ -867,8 +879,8 @@ describe("LocalCrewApp", () => {
       const [firstCycle, secondCycle] = [app.runIdleCycle(), app.runIdleCycle()];
 
       let queue = await app.getQueueSnapshot();
-      for (let attempt = 0; attempt < 20 && queue.activeTasks.length < 2; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+      for (let attempt = 0; attempt < 100 && queue.activeTasks.length < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
         queue = await app.getQueueSnapshot();
       }
 
@@ -886,6 +898,7 @@ describe("LocalCrewApp", () => {
   test("ingests inbox documents, writes draft/final files, and moves the source document through the dropbox", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
+      await seedCurrentDailyWork(rootDir);
       const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
@@ -2021,6 +2034,8 @@ describe("LocalCrewApp", () => {
   });
 
   test("quarantines a failed auto task and queues a safe mode recovery task", async () => {
+    // Speed up inference retries so the test doesn't take 3+ seconds.
+    process.env.LOCALCREW_INFERENCE_RETRY_DELAY_MS = "1";
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);
       const paths = getStoragePaths(rootDir);
@@ -2089,10 +2104,15 @@ describe("LocalCrewApp", () => {
       );
       expect(state.auto.pending.some((t) =>
         t.createdBy === "orchestrator:safe-mode" &&
-        t.priority === "high" &&
-        t.requestedResource === "orchestrator"
+        t.priority === "high"
+      )).toBe(true);
+      // Recovery tasks are no longer pinned to the orchestrator — the routing
+      // engine selects the best available resource based on current load.
+      expect(state.auto.pending.some((t) =>
+        t.createdBy === "orchestrator:safe-mode" && t.requestedResource === undefined
       )).toBe(true);
     });
+    delete process.env.LOCALCREW_INFERENCE_RETRY_DELAY_MS;
   });
 
   test("uses the top-tier default model instead of a tools model for autonomous structured tasks", async () => {

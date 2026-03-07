@@ -167,6 +167,13 @@ describe("API server", () => {
           },
           body: JSON.stringify({ input: "/login" })
         }).then((response) => response.json());
+        const loginResponse = await fetch(`${api!.url}/api/login`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({})
+        }).then((response) => response.json());
 
         const inboxWrite = await fetch(`${api!.url}/api/dropbox/inbox`, {
           method: "POST",
@@ -312,7 +319,8 @@ describe("API server", () => {
         expect(hud.tab).toBe("metrics");
         expect(Array.isArray(hud.lines)).toBe(true);
         expect(chatConfig.orchestratorName).toBe("Aster");
-        expect(commandResponse.result.lines[0]).toContain("Remote login is not implemented");
+        expect(commandResponse.result.lines[0]).toContain("benlive.tv");
+        expect(loginResponse.result.lines[0]).toContain("benlive.tv");
         expect(inboxWrite.result.lines[0]).toContain("Wrote inbox document");
         expect(resourceAdd.result.lines[0]).toContain("Added resource @overflow");
         expect(resourceRefresh.result.lines[0]).toContain("Refreshed @overflow");

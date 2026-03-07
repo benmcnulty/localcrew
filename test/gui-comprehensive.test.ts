@@ -404,11 +404,9 @@ describe("Display CSS: 5K breakpoint values", () => {
   });
 
   test("5K has scaled Matrix depth sizes", () => {
-    expect(displayHtml).toContain("min-width:5120px)");
-    // Check largest depth at 5K
-    expect(displayHtml).toContain(
-      'data-depth="6"]{--mx-size:6rem}',
-    );
+    // Canvas renderer scales depth sizes dynamically via mxSizeCanvas
+    expect(displayHtml).toContain("mxSizeCanvas");
+    expect(displayHtml).toContain("w>=5120?2.0");
   });
 
   test("5K has scaled Daily content", () => {
@@ -657,8 +655,8 @@ describe("Display JS: Matrix engine", () => {
   });
 
   test("Matrix has column depth tiers", () => {
-    expect(displayHtml).toContain("data-depth");
-    expect(displayHtml).toContain("--mx-size");
+    expect(displayHtml).toContain("mxDepths");
+    expect(displayHtml).toContain("renderSize");
   });
 });
 
@@ -779,30 +777,35 @@ describe("JavaScript syntax validation", () => {
 
 // ─── Matrix Animation Robustness ──────────────────────────────────────────────
 
-describe("Matrix animation robustness", () => {
-  test("MX state object tracks burst timers array", () => {
-    expect(displayHtml).toContain("burstTimers:[]");
+describe("Matrix animation robustness (Canvas 2D)", () => {
+  test("MX state object tracks columns array", () => {
+    expect(displayHtml).toContain("columns:[]");
   });
 
-  test("mxStart stores burst setTimeout IDs in burstTimers", () => {
-    expect(displayHtml).toContain("MX.burstTimers.push(setTimeout(mxSpawn");
+  test("mxStart spawns initial burst of columns", () => {
+    expect(displayHtml).toContain("mxSpawnCol()");
+    expect(displayHtml).toContain("burst");
   });
 
-  test("mxStop clears burst timers and resets buffer", () => {
-    expect(displayHtml).toContain("MX.burstTimers.forEach");
-    expect(displayHtml).toContain("clearTimeout(t)");
-    expect(displayHtml).toContain("MX.burstTimers=[]");
+  test("mxStop cancels animation frame and clears buffer", () => {
+    expect(displayHtml).toContain("cancelAnimationFrame(MX.raf)");
+    expect(displayHtml).toContain("MX.columns=[]");
     expect(displayHtml).toContain("MX.buf=[]");
     expect(displayHtml).toContain("MX.bufIdx=0");
   });
 
-  test("mxStop clears the interval timer", () => {
-    expect(displayHtml).toContain("clearInterval(MX.timer)");
+  test("mxStart uses requestAnimationFrame", () => {
+    expect(displayHtml).toContain("requestAnimationFrame(mxFrame)");
   });
 
-  test("mxStop removes all column DOM elements", () => {
-    expect(displayHtml).toContain("MX.cols.forEach");
-    expect(displayHtml).toContain("MX.cols.clear()");
+  test("mxFrame renders with Canvas 2D context", () => {
+    expect(displayHtml).toContain("ctx.fillText");
+    expect(displayHtml).toContain("ctx.fillRect");
+  });
+
+  test("mxSizeCanvas handles device pixel ratio", () => {
+    expect(displayHtml).toContain("devicePixelRatio");
+    expect(displayHtml).toContain("setTransform");
   });
 });
 

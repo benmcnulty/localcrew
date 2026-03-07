@@ -566,8 +566,17 @@ async function buildApiResponse(
   }
 
   if (request.method === "POST" && request.url.pathname === "/api/login") {
-    return jsonResponse(501, {
-      error: "Remote login is not implemented in Local Crew yet. See the remote portal docs and handoff spec."
+    const body = parseJsonBody<{ token?: unknown }>(request.bodyText);
+    if (body.token !== undefined && typeof body.token !== "string") {
+      return jsonResponse(400, { error: "The token field must be a string when provided." });
+    }
+
+    const trimmedToken = typeof body.token === "string" ? body.token.trim() : "";
+    return jsonResponse(200, {
+      result: await app.execute({
+        type: "login",
+        ...(trimmedToken ? { token: trimmedToken } : {})
+      })
     });
   }
 

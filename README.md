@@ -340,6 +340,17 @@ LOCALCREW_API_TOKEN=your-secret         # optional Bearer token for auth
 LOCALCREW_API_CORS_ORIGIN=http://...    # allowed CORS origin
 ```
 
+## Remote Portal
+
+Connect Local Crew to your account at [benlive.tv/port](https://benlive.tv/port) for a remote HUD, task submission, and orchestrator visibility from any browser.
+
+```bash
+/login          # Show portal URL and instructions
+/login <token>  # Connect using a device token from the portal
+```
+
+Get a token: sign in at benlive.tv/port → Connect Local Crew → copy the 8-character token.
+
 ## Billboard Display
 
 The `/display` endpoint serves a full-screen neon dashboard designed for TV or monitor wallboard use. It auto-connects to the SSE stream and shows orchestrator status, metric tiles, current task, auto log feed, and per-resource status bars.

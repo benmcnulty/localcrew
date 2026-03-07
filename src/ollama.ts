@@ -4,19 +4,47 @@ import { ANTHROPIC_VERSION, trimTrailingSlash } from "./utils.ts";
 
 export type FetchFn = typeof fetch;
 
+const MAX_INFERENCE_RETRIES = 2;
+/** Default retry delay. Override with LOCALCREW_INFERENCE_RETRY_DELAY_MS for testing. */
+function getInferenceRetryDelayMs(): number {
+  return getEnvNumber("LOCALCREW_INFERENCE_RETRY_DELAY_MS", 1500);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Returns true if the error is a transient network/server failure that is
+ * safe to retry. Never retries user-initiated cancellations.
+ */
+function isTransientFetchError(error: unknown, userSignal?: AbortSignal): boolean {
+  if (!(error instanceof Error)) return false;
+  // User explicitly aborted — do not retry.
+  if (error.name === "AbortError" && userSignal?.aborted) return false;
+  // Timeout AbortError (not user-initiated) — safe to retry.
+  if (error.name === "AbortError") return true;
+  // Network errors: ECONNREFUSED, fetch failed, DNS failures, etc.
+  if (error.name === "TypeError") return true;
+  // HTTP 5xx server errors.
+  if (/^HTTP 5\d\d/.test(error.message)) return true;
+  return false;
+}
+
 /**
  * Default timeout for inference fetch calls (milliseconds).
  * Override with LOCALCREW_FETCH_TIMEOUT_MS env var.
  * 0 disables the timeout entirely.
  */
 export function getFetchTimeoutMs(): number {
-  return getEnvNumber("LOCALCREW_FETCH_TIMEOUT_MS", 120_000);
+  return getEnvNumber("LOCALCREW_FETCH_TIMEOUT_MS", 180_000);
 }
 
-function makeFetchSignal(overrideMs?: number): AbortSignal | undefined {
+function makeFetchSignal(overrideMs?: number, externalSignal?: AbortSignal): AbortSignal | undefined {
   const timeoutMs = overrideMs ?? getFetchTimeoutMs();
-  if (timeoutMs <= 0) return undefined;
-  return AbortSignal.timeout(timeoutMs);
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  if (timeoutSignal && externalSignal) return AbortSignal.any([timeoutSignal, externalSignal]);
+  return timeoutSignal ?? externalSignal;
 }
 
 export interface EndpointModelEntry {
@@ -38,7 +66,8 @@ export async function chatWithOllamaDetailed(
   endpoint: EndpointConfig,
   messages: ChatMessage[],
   fetchFn: FetchFn = fetch,
-  timeoutMs?: number
+  timeoutMs?: number,
+  abortSignal?: AbortSignal
 ): Promise<OllamaChatResult> {
   const headers: Record<string, string> = {
     "content-type": "application/json"
@@ -53,6 +82,14 @@ export async function chatWithOllamaDetailed(
     }
   }
 
+  let lastError: Error = new Error("Inference failed");
+  for (let attempt = 0; attempt <= MAX_INFERENCE_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await sleep(getInferenceRetryDelayMs());
+      console.warn(`[LocalCrew] Retrying inference (attempt ${attempt}/${MAX_INFERENCE_RETRIES}, model=${endpoint.model})…`);
+    }
+    try {
+
   if (endpoint.apiStyle === "openai") {
     const response = await fetchFn(`${trimTrailingSlash(endpoint.baseUrl)}/v1/chat/completions`, {
       method: "POST",
@@ -62,7 +99,7 @@ export async function chatWithOllamaDetailed(
         messages,
         stream: false
       }),
-      signal: makeFetchSignal(timeoutMs)
+      signal: makeFetchSignal(timeoutMs, abortSignal)
     });
 
     if (!response.ok) {
@@ -119,7 +156,7 @@ export async function chatWithOllamaDetailed(
         ...(systemText ? { system: systemText } : {}),
         messages: anthropicMessages
       }),
-      signal: makeFetchSignal(timeoutMs)
+      signal: makeFetchSignal(timeoutMs, abortSignal)
     });
 
     if (!response.ok) {
@@ -180,7 +217,7 @@ export async function chatWithOllamaDetailed(
       stream: false,
       options: { num_ctx: numCtx }
     }),
-    signal: makeFetchSignal(timeoutMs)
+    signal: makeFetchSignal(timeoutMs, abortSignal)
   });
 
   if (!response.ok) {
@@ -218,7 +255,13 @@ export async function chatWithOllamaDetailed(
       : {}),
     ...(typeof body.eval_count === "number" ? { evalCount: body.eval_count } : {}),
     ...(typeof body.eval_duration === "number" ? { evalDuration: body.eval_duration } : {})
-  };
+    };
+    } catch (error) {
+      lastError = error as Error;
+      if (!isTransientFetchError(error, abortSignal)) throw error;
+    }
+  }
+  throw lastError;
 }
 
 export async function chatWithOllama(

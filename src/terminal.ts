@@ -375,6 +375,7 @@ export const COMMAND_DEFS: CommandDef[] = [
   { name: "/rename", params: "<oldAlias> <newAlias>", description: "Rename a participant" },
   { name: "/reset", params: "", description: "Reset the current conversation, agent memory, or auto run state" },
   { name: "/resource", params: "list | add | edit | refresh | remove", description: "Manage resources" },
+  { name: "/restart-server", params: "", description: "Restart the web server" },
   { name: "/sound", params: "[on | off]", description: "Toggle speech audio" },
   { name: "/status", params: "", description: "Show system status" },
   { name: "/stop", params: "", description: "Stop autonomous processing" },

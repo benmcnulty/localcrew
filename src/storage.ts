@@ -33,6 +33,7 @@ export interface StoragePaths {
   agentsDir: string;
   agentsIndexPath: string;
   dailyWorkPath: string;
+  dailyWorkArchiveDir: string;
 }
 
 export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
@@ -78,6 +79,7 @@ export function getStoragePaths(rootDir = process.cwd()): StoragePaths {
     agentsDir,
     agentsIndexPath: join(agentsDir, "index.json"),
     dailyWorkPath: join(orchestratorDir, "daily-work.md"),
+    dailyWorkArchiveDir: join(orchestratorDir, "daily-work-archive"),
   };
 }
 

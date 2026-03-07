@@ -83,8 +83,9 @@ describe("parseCommand — simple commands reject extra args", () => {
     expect(() => parseCommand("/explore deep")).toThrow(CommandParseError);
   });
 
-  test("/login rejects extra args", () => {
-    expect(() => parseCommand("/login admin")).toThrow(CommandParseError);
+  test("/login accepts one optional token arg", () => {
+    expect(parseCommand("/login abc12345")).toEqual({ type: "login", token: "abc12345" });
+    expect(() => parseCommand("/login tok1 tok2")).toThrow(CommandParseError);
   });
 
   test("/auto rejects extra args", () => {

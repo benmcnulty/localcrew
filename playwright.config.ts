@@ -9,7 +9,8 @@ const playwrightPort = Number(
 const baseURL = configuredBaseUrl || `http://127.0.0.1:${playwrightPort}`;
 
 export default defineConfig({
-  testDir: "./test/playwright",
+  testDir: "./e2e",
+  testMatch: "**/*.e2e.ts",
   use: {
     baseURL,
   },

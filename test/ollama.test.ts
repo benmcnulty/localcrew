@@ -94,8 +94,8 @@ describe("Fetch timeout", () => {
     expect(receivedSignal).toBeInstanceOf(AbortSignal);
   });
 
-  test("getFetchTimeoutMs returns default of 120000", () => {
-    expect(getFetchTimeoutMs()).toBe(120_000);
+  test("getFetchTimeoutMs returns default of 180000", () => {
+    expect(getFetchTimeoutMs()).toBe(180_000);
   });
 });
 

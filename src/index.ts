@@ -482,7 +482,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     rootDir,
     warn
   });
-  const apiServer = await startApiServer(app, {
+  let apiServer = await startApiServer(app, {
     rootDir,
     warn
   });
@@ -542,8 +542,10 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
         });
       }
       const result = await firstCycle;
+      app.recordIdleCycle(result.lines.length === 0 && result.errors.length === 0);
       renderBackgroundResult(readline, getPromptOnly, result);
     } catch (error) {
+      app.recordIdleCycle(false);
       renderBackgroundResult(readline, getPromptOnly, {
         lines: [],
         errors: [`Pulse recovered from an unexpected failure: ${(error as Error).message}`],
@@ -552,9 +554,16 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     }
   };
 
-  const pulseTimer = setInterval(() => {
-    void pulse();
-  }, app.getAutoPulseIntervalMs());
+  // Use recursive setTimeout so the interval adapts to idle backoff pressure.
+  let pulseTimer: ReturnType<typeof setTimeout> | undefined;
+  const schedulePulse = (): void => {
+    pulseTimer = setTimeout(() => {
+      void pulse().finally(() => {
+        if (!pulseShutdown) schedulePulse();
+      });
+    }, app.getEffectivePulseIntervalMs());
+  };
+  schedulePulse();
 
   try {
     // ── Startup banner ──────────────────────────────────────────────────
@@ -614,6 +623,22 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
         const message =
           error instanceof CommandParseError ? error.message : (error as Error).message;
         writeLine(stderr, errorText(message));
+        continue;
+      }
+
+      // Handle server restart directly in the REPL (server lifecycle is not owned by app).
+      if (command.type === "restartServer") {
+        if (apiServer) {
+          writeLine(stdout, "Restarting web server…");
+          await apiServer.close();
+        }
+        apiServer = await startApiServer(app, { rootDir, warn });
+        if (apiServer) {
+          app.setApiServerHandle(apiServer);
+          writeLine(stdout, `Web server restarted at ${apiServer.url}`);
+        } else {
+          writeLine(stderr, errorText("Web server could not be started (API not enabled)."));
+        }
         continue;
       }
 
@@ -685,7 +710,7 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
     }
   } finally {
     pulseShutdown = true;
-    clearInterval(pulseTimer);
+    clearTimeout(pulseTimer);
     if (apiServer) {
       await apiServer.close();
     }

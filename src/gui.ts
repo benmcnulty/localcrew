@@ -2317,10 +2317,10 @@ export function getDisplayHtml(): string {
     }
     .dres-card[data-busy="1"] .dres-status { opacity: 0.9; color: var(--n-amber); }
 
-    /* Colorblind-friendly status shapes */
-    .ddot-green::after { content: "●"; }
-    .ddot-amber::after { content: "▲"; }
-    .ddot-red::after   { content: "■"; }
+    /* Colorblind-friendly status shapes — purely visual, no leaked text */
+    .ddot-green { border-radius: 50%; }
+    .ddot-amber { border-radius: 2px; clip-path: polygon(50% 0%, 100% 100%, 0% 100%); }
+    .ddot-red   { border-radius: 2px; }
 
     /* Busy device pulse animation */
     @keyframes device-pulse {
@@ -2476,7 +2476,9 @@ export function getDisplayHtml(): string {
     .dgauge-container { flex: 1; min-height: 0; max-height: clamp(160px, 50vh, 300px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
     #dgauge { width: 100%; height: 100%; display: block; }
     .dgauge-val-text {
-      font-size: 22px; font-weight: 800; fill: var(--n-blue);
+      /* font-size intentionally omitted — set as SVG attribute so it scales
+         with the viewBox coordinate system instead of staying fixed in CSS px. */
+      font-weight: 800; fill: var(--n-blue);
       font-family: "SF Mono","Fira Code",ui-monospace,monospace;
       filter: drop-shadow(0 0 5px var(--n-blue));
     }
@@ -2567,6 +2569,19 @@ export function getDisplayHtml(): string {
     .dlog + .dlog { opacity: 0.4; }
     .dlog + .dlog + .dlog { opacity: 0.15; }
     .dlog + .dlog + .dlog + .dlog { display: none; }
+    /* HD: show up to 5 items */
+    @media (min-width: 1920px) {
+      .dlog + .dlog { opacity: 0.55; }
+      .dlog + .dlog + .dlog { opacity: 0.3; }
+      .dlog + .dlog + .dlog + .dlog { display: flex; opacity: 0.15; }
+      .dlog + .dlog + .dlog + .dlog + .dlog { display: flex; opacity: 0.07; }
+      .dlog + .dlog + .dlog + .dlog + .dlog + .dlog { display: none; }
+    }
+    /* 4K: show up to 7 items */
+    @media (min-width: 3840px) {
+      .dlog + .dlog + .dlog + .dlog + .dlog + .dlog { display: flex; opacity: 0.05; }
+      .dlog + .dlog + .dlog + .dlog + .dlog + .dlog + .dlog { display: flex; opacity: 0.03; }
+    }
     .dlog-time {
       font-family: "SF Mono",ui-monospace,monospace; color: var(--muted2);
       flex-shrink: 0; font-size: var(--fs-xs);
@@ -2639,85 +2654,8 @@ export function getDisplayHtml(): string {
       content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
       background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.35) 100%);
     }
-    #matrix-canvas { position: absolute; inset: 0; z-index: 1; overflow: hidden; contain: paint; }
-
-    /* Falling column */
-    .mx-col {
-      position: absolute; top: 0;
-      display: flex; flex-direction: column; align-items: center;
-      font-family: "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace;
-      line-height: 1.15; pointer-events: none;
-      will-change: transform;
-      transform: translateY(calc(-1 * var(--mx-height)));
-      animation: mxFall var(--mx-dur) var(--mx-ease, cubic-bezier(0.16, 0, 0.34, 1)) both;
-      font-size: var(--mx-size); opacity: var(--mx-opacity); filter: blur(var(--mx-blur));
-      /* Trail gradient mask — fade top, bright head at bottom */
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.06) 4%, rgba(0,0,0,0.25) 18%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 75%, white 95%);
-      mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.06) 4%, rgba(0,0,0,0.25) 18%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 75%, white 95%);
-    }
-    @keyframes mxFall {
-      from { transform: translateY(calc(-1 * var(--mx-height))); }
-      to   { transform: translateY(100vh); }
-    }
-
-    /* Character glyph — phosphor green with CRT bloom */
-    .mx-ch {
-      display: block;
-      color: #00ff41;
-      text-shadow:
-        0 0 0.06em #00ff41,
-        0 0 0.18em rgba(0,255,65,0.65),
-        0 0 0.45em rgba(0,200,50,0.3),
-        0 0 0.9em rgba(0,150,30,0.15),
-        0 0 1.6em rgba(0,100,20,0.06);
-    }
-    /* Head character — bright white-green leading edge */
-    .mx-ch:last-child {
-      color: #ccffdd;
-      text-shadow:
-        0 0 0.06em #ffffff,
-        0 0 0.15em #ddffee,
-        0 0 0.35em #00ff41,
-        0 0 0.7em rgba(0,255,65,0.65),
-        0 0 1.3em rgba(0,255,65,0.35),
-        0 0 2.2em rgba(0,200,50,0.15);
-    }
-
-    /* Depth tiers — parallax through size, opacity, and defocus */
-    .mx-col[data-depth="0"]{--mx-size:0.62rem;--mx-opacity:0.12;--mx-blur:1.5px}
-    .mx-col[data-depth="1"]{--mx-size:0.74rem;--mx-opacity:0.18;--mx-blur:1.1px}
-    .mx-col[data-depth="2"]{--mx-size:0.88rem;--mx-opacity:0.28;--mx-blur:0.7px}
-    .mx-col[data-depth="3"]{--mx-size:1.04rem;--mx-opacity:0.42;--mx-blur:0.35px}
-    .mx-col[data-depth="4"]{--mx-size:1.22rem;--mx-opacity:0.6;--mx-blur:0.15px}
-    .mx-col[data-depth="5"]{--mx-size:1.44rem;--mx-opacity:0.8;--mx-blur:0px}
-    .mx-col[data-depth="6"]{--mx-size:1.72rem;--mx-opacity:0.95;--mx-blur:0px}
-    @media(min-width:1920px){
-      .mx-col[data-depth="0"]{--mx-size:0.92rem}
-      .mx-col[data-depth="1"]{--mx-size:1.08rem}
-      .mx-col[data-depth="2"]{--mx-size:1.32rem}
-      .mx-col[data-depth="3"]{--mx-size:1.58rem}
-      .mx-col[data-depth="4"]{--mx-size:1.86rem}
-      .mx-col[data-depth="5"]{--mx-size:2.18rem}
-      .mx-col[data-depth="6"]{--mx-size:2.6rem}
-    }
-    @media(min-width:3840px){
-      .mx-col[data-depth="0"]{--mx-size:1.6rem}
-      .mx-col[data-depth="1"]{--mx-size:1.9rem}
-      .mx-col[data-depth="2"]{--mx-size:2.3rem}
-      .mx-col[data-depth="3"]{--mx-size:2.8rem}
-      .mx-col[data-depth="4"]{--mx-size:3.4rem}
-      .mx-col[data-depth="5"]{--mx-size:4rem}
-      .mx-col[data-depth="6"]{--mx-size:4.8rem}
-    }
-    @media(min-width:5120px){
-      .mx-col[data-depth="0"]{--mx-size:2rem}
-      .mx-col[data-depth="1"]{--mx-size:2.4rem}
-      .mx-col[data-depth="2"]{--mx-size:2.9rem}
-      .mx-col[data-depth="3"]{--mx-size:3.5rem}
-      .mx-col[data-depth="4"]{--mx-size:4.2rem}
-      .mx-col[data-depth="5"]{--mx-size:5rem}
-      .mx-col[data-depth="6"]{--mx-size:6rem}
-    }
+    #matrix-canvas { position: absolute; inset: 0; z-index: 1; }
+    #matrix-canvas canvas { display: block; width: 100%; height: 100%; }
 
     /* Glass close button — translucent with blocked depth shading */
     .mx-close {
@@ -2889,6 +2827,20 @@ export function getDisplayHtml(): string {
       color: rgba(255,191,0,0.4); font-size: 1.1rem;
     }
     .daily-empty .daily-empty-icon { font-size: 3rem; margin-bottom: 16px; }
+    .daily-archive-nav {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-bottom: 28px; padding-bottom: 20px;
+      border-bottom: 1px solid rgba(255,191,0,0.1);
+    }
+    .daily-archive-btn {
+      background: rgba(255,191,0,0.06); border: 1px solid rgba(255,191,0,0.15);
+      color: rgba(255,191,0,0.55); border-radius: 4px;
+      padding: 4px 12px; font-size: 0.78rem; cursor: pointer;
+      font-family: inherit; letter-spacing: 0.03em;
+      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+    .daily-archive-btn:hover { background: rgba(255,191,0,0.12); border-color: rgba(255,191,0,0.3); color: #ffbf00; }
+    .daily-archive-btn.active { background: rgba(255,191,0,0.16); border-color: rgba(255,191,0,0.4); color: #ffbf00; font-weight: 700; }
     @media(min-width:1920px){
       .daily-content{max-width:1200px;padding:80px 60px 100px}
       .daily-header h1{font-size:3.2rem}
@@ -2928,16 +2880,16 @@ export function getDisplayHtml(): string {
 
   <div id="dbody">
     <section id="dpnet" class="dpanel">
-      <h2 class="dpanel-title">&#x25cf; Network</h2>
+      <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><circle cx="4" cy="8" r="2.2" fill="currentColor" opacity="0.7"/><circle cx="12" cy="8" r="2.2" fill="currentColor" opacity="0.7"/><line x1="6.2" y1="8" x2="9.8" y2="8" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><circle cx="8" cy="3.5" r="2.2" fill="currentColor" opacity="0.7"/><line x1="5" y1="6" x2="7" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><line x1="11" y1="6" x2="9" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.5"/></svg>Network</h2>
       <div id="dres-grid"></div>
       <div class="dmini-row">
         <div class="dmini"><div id="drescnt" class="dmini-val">&mdash;</div><div class="dmini-lbl">Online</div></div>
-        <div class="dmini"><div id="ddone" class="dmini-val">&mdash;</div><div class="dmini-lbl">Done</div></div>
+        <div class="dmini"><div id="dbusy-count" class="dmini-val">0</div><div class="dmini-lbl">Busy</div></div>
       </div>
     </section>
 
     <section id="dpmain" class="dpanel">
-      <h2 class="dpanel-title">&#x25cf; Current Focus</h2>
+      <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>Current Focus</h2>
       <div class="dtask-card">
         <div class="dtask-label">
           <span class="ddot ddot-blue" id="dtask-dot"></span>
@@ -2952,7 +2904,7 @@ export function getDisplayHtml(): string {
             <span class="dsub">Queue</span>
             <span id="dqfrac">0 pending &middot; 0 done</span>
           </div>
-          <div class="dtrack"><div id="dqfill" style="width:0%"></div></div>
+          <div class="dtrack"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
           <div id="dqlist"></div>
         </div>
         <div class="dpmain-gauge">
@@ -2982,7 +2934,7 @@ export function getDisplayHtml(): string {
                 <path id="dgauge-track" fill="none" stroke="rgba(0,212,255,0.1)" stroke-width="10" stroke-linecap="round"/>
                 <path id="dgauge-fill" fill="none" stroke="url(#gauge-grad)" stroke-width="10" stroke-linecap="round" pathLength="100" filter="url(#neon-glow)" style="transition:stroke-dashoffset 1.2s ease"/>
                 <g id="dgauge-ticks"></g>
-                <text id="dgauge-val" class="dgauge-val-text" x="100" y="95" text-anchor="middle">&mdash;</text>
+                <text id="dgauge-val" class="dgauge-val-text" x="100" y="95" text-anchor="middle" font-size="22">&mdash;</text>
               </svg>
             </div>
             <span id="dtpmlbl" style="display:none"></span>
@@ -2992,12 +2944,8 @@ export function getDisplayHtml(): string {
     </section>
 
     <section id="dpmet" class="dpanel">
-      <h2 class="dpanel-title">&#x25cf; Metrics</h2>
+      <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><rect x="1" y="9" width="3" height="6" rx="0.8" fill="currentColor" opacity="0.5"/><rect x="5.5" y="5" width="3" height="10" rx="0.8" fill="currentColor" opacity="0.7"/><rect x="10" y="1" width="3" height="14" rx="0.8" fill="currentColor" opacity="0.9"/></svg>Metrics</h2>
       <div class="dstat-group">
-        <div class="dstat-row dstat-row-done">
-          <div id="dtasksdone" class="dstat-val mv-done">&mdash;</div>
-          <div class="dstat-lbl">Tasks<br>Done</div>
-        </div>
         <div class="dstat-row dstat-row-events">
           <div id="devents" class="dstat-val mv-events">&mdash;</div>
           <div class="dstat-lbl">Audit<br>Events</div>
@@ -3023,7 +2971,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <div id="matrix-overlay">
-  <div id="matrix-canvas"></div>
+  <canvas id="matrix-canvas"></canvas>
   <button id="mx-close" class="mx-close" type="button" aria-label="Exit Matrix view">&#x2715;</button>
 </div>
 
@@ -3037,6 +2985,7 @@ export function getDisplayHtml(): string {
         <span id="daily-stale-badge" class="daily-stale" style="display:none">STALE</span>
       </div>
     </div>
+    <div id="daily-archive-nav" class="daily-archive-nav" style="display:none"></div>
     <div id="daily-body" class="daily-body">
       <div class="daily-empty">
         <div class="daily-empty-icon">&#x1F4CB;</div>
@@ -3111,10 +3060,12 @@ export function getDisplayHtml(): string {
 
     var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0,targetPending=(data.auto&&data.auto.desiredPendingDepth)||0;
     el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
-    // Bar shows pending queue depth: wider = more backlog. Fades out when idle.
-    var barPct=pending>0?Math.min(100,pending*10):0;
+    var barPct=targetPending>0?Math.min(100,Math.round(pending/targetPending*100)):(pending>0?Math.min(100,pending*10):0);
     el('dqfill').style.width=barPct+'%';
-    setVal('ddone',fmt(completed));setVal('dtasksdone',fmt(completed));
+    var pctEl=el('dqpct');if(pctEl)pctEl.textContent=barPct>0?barPct+'%':'';
+    setVal('dtasksdone',fmt(completed));
+    var busyCount=Object.keys(ST.busyResources).length;
+    setVal('dbusy-count',String(busyCount));
 
     var tel=data.telemetry;
     if(tel){
@@ -3378,10 +3329,11 @@ export function getDisplayHtml(): string {
 
     var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),targetPending=Number(auto.desiredPendingDepth||0);
     el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
-    var barPct2=pending>0?Math.min(100,pending*10):0;
+    var barPct2=targetPending>0?Math.min(100,Math.round(pending/targetPending*100)):(pending>0?Math.min(100,pending*10):0);
     el('dqfill').style.width=barPct2+'%';
-    setVal('ddone',fmt(completed));
-    setVal('dtasksdone',fmt(completed));
+    var pctEl2=el('dqpct');if(pctEl2)pctEl2.textContent=barPct2>0?barPct2+'%':'';
+    var busyCount2=Object.keys(ST.busyResources).length;
+    setVal('dbusy-count',String(busyCount2));
 
     if(Array.isArray(d.activeResources)){
       setVal('drescnt',String(d.activeResources.length));
@@ -3620,10 +3572,11 @@ export function getDisplayHtml(): string {
     }
   }
 
-  // ── Matrix Mode Engine ────────────────────────────────────────────
-  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,timer:null,cols:new Set(),maxCols:30,burstTimers:[]};
+  // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
+  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,raf:null,columns:[],maxCols:30,lastSpawn:0,spawnRate:100};
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
+  MX.ctx=MX.cvs?MX.cvs.getContext('2d'):null;
   MX.closeEl=document.getElementById('mx-close');
 
   function mxFeedText(t){
@@ -3642,78 +3595,111 @@ export function getDisplayHtml(): string {
     if(MX.buf.length>0){var c=MX.buf[MX.bufIdx%MX.buf.length];MX.bufIdx++;return c;}
     return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
   }
-  function mxPull(n){
-    var out=[];
-    for(var i=0;i<n;i++)out.push(mxGetChar());
-    return out;
+
+  // Depth tiers: fontSize, opacity, blur (0=far, 6=near)
+  var mxDepths=[
+    {size:10,alpha:0.12},{size:12,alpha:0.18},{size:14,alpha:0.28},
+    {size:16,alpha:0.42},{size:19,alpha:0.6},{size:23,alpha:0.8},{size:28,alpha:0.95}
+  ];
+
+  function mxSizeCanvas(){
+    if(!MX.cvs)return;
+    var dpr=window.devicePixelRatio||1;
+    // Fall back to window dimensions if the overlay hasn't been laid out yet.
+    var w=MX.cvs.clientWidth||window.innerWidth;
+    var h=MX.cvs.clientHeight||window.innerHeight;
+    if(!w||!h)return; // nothing to size yet
+    MX.cvs.width=w*dpr;
+    MX.cvs.height=h*dpr;
+    if(MX.ctx)MX.ctx.setTransform(dpr,0,0,dpr,0,0);
+    // Scale depth sizes based on viewport width
+    var scale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.4:1.0;
+    for(var d=0;d<mxDepths.length;d++){
+      mxDepths[d].renderSize=mxDepths[d].size*scale;
+    }
   }
 
-  function mxSpawn(){
-    if(!MX.on||MX.cols.size>=MX.maxCols)return;
+  function mxSpawnCol(){
+    if(MX.columns.length>=MX.maxCols)return;
     var depth=Math.floor(Math.random()*7);
-    // Keep columns long enough to read as real top-down streams (avoid pop-in flicker)
+    var tier=mxDepths[depth];
     var count=Math.floor(8+Math.random()*21);
-    var x=Math.random()*96+2;
-    // Narrowed duration variance to avoid abrupt fast/slow outliers
-    var dur=7.2-depth*0.28+Math.random()*2.4;
-    var easing='cubic-bezier(0.16,0,0.34,1)';
-    var chars=mxPull(count);
-    var col=document.createElement('div');
-    col.className='mx-col';
-    col.setAttribute('data-depth',String(depth));
-    col.style.left=x+'%';
-    col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
-    col.style.setProperty('--mx-height',(count*1.15).toFixed(2)+'em');
-    col.style.setProperty('--mx-ease',easing);
-    for(var i=0;i<chars.length;i++){
-      var sp=document.createElement('span');
-      sp.className='mx-ch';
-      sp.textContent=chars[i];
-      col.appendChild(sp);
-    }
-    MX.cvs.appendChild(col);
-    MX.cols.add(col);
-    col.addEventListener('animationend',function(){
-      if(col.parentNode)col.parentNode.removeChild(col);
-      MX.cols.delete(col);
-    });
+    var chars=[];
+    for(var i=0;i<count;i++)chars.push(mxGetChar());
+    var x=Math.random()*96+2; // percent
+    var speed=(0.3+depth*0.12+Math.random()*0.25); // px per frame (faster for near columns)
+    MX.columns.push({x:x,y:-(count*tier.renderSize*1.15),speed:speed,chars:chars,depth:depth,fontSize:tier.renderSize,alpha:tier.alpha});
   }
 
-  // Spawn a group of nearby columns for a "panel" effect
-  function mxSpawnGroup(){
-    var groupSize=Math.floor(2+Math.random()*4); // 2-5 columns
-    var baseX=Math.random()*80+5;
-    for(var g=0;g<groupSize;g++){
-      if(MX.cols.size>=MX.maxCols)break;
-      var depth=Math.floor(Math.random()*7);
-      var count=Math.floor(8+Math.random()*21);
-      var x=baseX+g*(1.5+Math.random()*2); // each column slightly offset
-      if(x>96)x=96;
-      var dur=7.2-depth*0.28+Math.random()*2.4;
-      var easing='cubic-bezier(0.16,0,0.34,1)';
-      var chars=mxPull(count);
-      var col=document.createElement('div');
-      col.className='mx-col';
-      col.setAttribute('data-depth',String(depth));
-      col.style.left=x+'%';
-      col.style.setProperty('--mx-dur',dur.toFixed(1)+'s');
-      col.style.setProperty('--mx-height',(count*1.15).toFixed(2)+'em');
-      col.style.setProperty('--mx-ease',easing);
-      // Stagger start within group for natural feel
-      col.style.animationDelay=(g*0.04+Math.random()*0.08).toFixed(2)+'s';
-      for(var ci=0;ci<chars.length;ci++){
-        var sp=document.createElement('span');
-        sp.className='mx-ch';
-        sp.textContent=chars[ci];
-        col.appendChild(sp);
-      }
-      MX.cvs.appendChild(col);
-      MX.cols.add(col);
-      col.addEventListener('animationend',function(){
-        var c=this;if(c.parentNode)c.parentNode.removeChild(c);
-        MX.cols.delete(c);
-      });
+  function mxFrame(ts){
+    if(!MX.on){MX.raf=null;return;}
+    var ctx=MX.ctx;
+    if(!ctx||!MX.cvs){MX.raf=null;return;}
+    var w=MX.cvs.clientWidth;
+    var h=MX.cvs.clientHeight;
+
+    // Spawn new columns at the configured rate
+    if(!MX.lastSpawn)MX.lastSpawn=ts;
+    if(ts-MX.lastSpawn>=MX.spawnRate){
+      var toSpawn=Math.random()<0.2?Math.floor(2+Math.random()*4):1;
+      for(var s=0;s<toSpawn;s++)mxSpawnCol();
+      MX.lastSpawn=ts;
     }
+
+    // Clear with translucent black for trail effect (use canvas buffer dimensions,
+    // not clientWidth/clientHeight, so HiDPI displays clear the full buffer).
+    ctx.fillStyle='rgba(0,0,0,0.12)';
+    ctx.fillRect(0,0,MX.cvs.width,MX.cvs.height);
+
+    ctx.textBaseline='top';
+    ctx.fontFamily='"SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace';
+
+    var alive=[];
+    for(var ci=0;ci<MX.columns.length;ci++){
+      var col=MX.columns[ci];
+      var tier=mxDepths[col.depth];
+      var fs=tier.renderSize;
+      var lineH=fs*1.15;
+      var px=col.x*w/100;
+
+      ctx.font=fs+'px "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace';
+
+      // Draw characters with trail gradient (top chars dimmer, bottom brighter)
+      for(var chi=0;chi<col.chars.length;chi++){
+        var cy=col.y+chi*lineH;
+        if(cy<-lineH||cy>h)continue;
+        var trailFrac=chi/(col.chars.length-1||1); // 0=top, 1=bottom
+        var charAlpha=col.alpha*(0.06+trailFrac*0.94);
+        var isHead=chi===col.chars.length-1;
+
+        if(isHead){
+          // Head: bright white-green with glow
+          ctx.globalAlpha=Math.min(col.alpha+0.2,1.0);
+          ctx.shadowColor='#00ff41';
+          ctx.shadowBlur=fs*0.6;
+          ctx.fillStyle='#ccffdd';
+          ctx.fillText(col.chars[chi],px,cy);
+          ctx.shadowBlur=0;
+        }else{
+          // Trail: phosphor green with bloom
+          ctx.globalAlpha=charAlpha;
+          ctx.shadowColor='rgba(0,255,65,0.5)';
+          ctx.shadowBlur=fs*0.3;
+          ctx.fillStyle='#00ff41';
+          ctx.fillText(col.chars[chi],px,cy);
+          ctx.shadowBlur=0;
+        }
+      }
+
+      // Advance position
+      col.y+=col.speed;
+      // Remove if fully past viewport
+      if(col.y>h+lineH){/* dead */}else{alive.push(col);}
+    }
+    ctx.globalAlpha=1.0;
+    MX.columns=alive;
+
+    MX.raf=requestAnimationFrame(mxFrame);
   }
 
   function mxStart(){
@@ -3724,25 +3710,38 @@ export function getDisplayHtml(): string {
     var vw=window.innerWidth;
     var rawCols=Math.floor(vw/28);
     MX.maxCols=Math.max(8,Math.min(rawCols,80));
-    var rate=Math.max(60,Math.round(220-vw/30));
-    var burst=Math.floor(MX.maxCols*0.4);
-    MX.burstTimers=[];
-    for(var i=0;i<burst;i++)MX.burstTimers.push(setTimeout(mxSpawn,i*25));
-    MX.timer=setInterval(function(){
-      if(Math.random()<0.2){mxSpawnGroup();}else{mxSpawn();}
-    },rate);
+    MX.spawnRate=Math.max(60,Math.round(220-vw/30));
+    MX.lastSpawn=0;
+    // Defer canvas sizing by one frame so the overlay has committed its layout
+    // and clientWidth/clientHeight are non-zero before we read them.
+    requestAnimationFrame(function(){
+      mxSizeCanvas();
+      if(MX.ctx&&MX.cvs){
+        MX.ctx.clearRect(0,0,MX.cvs.width,MX.cvs.height);
+      }
+      // Initial burst
+      var burst=Math.floor(MX.maxCols*0.4);
+      for(var i=0;i<burst;i++)mxSpawnCol();
+      MX.raf=requestAnimationFrame(mxFrame);
+    });
   }
 
   function mxStop(){
     MX.on=false;
     MX.overlay.classList.remove('active');
-    if(MX.timer){clearInterval(MX.timer);MX.timer=null;}
-    MX.burstTimers.forEach(function(t){clearTimeout(t);});
-    MX.burstTimers=[];
-    MX.cols.forEach(function(c){if(c.parentNode)c.parentNode.removeChild(c);});
-    MX.cols.clear();
+    if(MX.raf){cancelAnimationFrame(MX.raf);MX.raf=null;}
+    MX.columns=[];
     MX.buf=[];MX.bufIdx=0;
+    // Clear canvas using buffer dimensions, not CSS pixel dimensions.
+    if(MX.ctx&&MX.cvs){
+      MX.ctx.clearRect(0,0,MX.cvs.width,MX.cvs.height);
+    }
   }
+
+  // Resize canvas on window resize
+  window.addEventListener('resize',function(){
+    if(MX.on)mxSizeCanvas();
+  });
 
   function mxProcessEvent(msg){
     if(!msg)return;
@@ -3771,6 +3770,7 @@ export function getDisplayHtml(): string {
   DAILY.bodyEl=document.getElementById('daily-body');
   DAILY.updatedEl=document.getElementById('daily-updated');
   DAILY.staleEl=document.getElementById('daily-stale-badge');
+  DAILY.archiveNavEl=document.getElementById('daily-archive-nav');
 
   function mdToHtml(md){
     if(!md)return'';
@@ -3796,6 +3796,64 @@ export function getDisplayHtml(): string {
     return'<p>'+h+'</p>';
   }
 
+  function dailyIsGuidance(c){
+    return c.indexOf('Generate a comprehensive Daily Work markdown document')!==-1
+      ||c.indexOf('Output ONLY the markdown document')!==-1
+      ||c.indexOf('This is a high-priority system task')!==-1;
+  }
+
+  function dailyShowContent(content,updatedAt,stale){
+    var c=content||'';
+    if(!c||dailyIsGuidance(c)){
+      DAILY.bodyEl.innerHTML='<div class="daily-empty"><div class="daily-empty-icon">&#x1F4CB;</div>Daily briefing document is pending generation.<br>The system will produce it during the next auto cycle.</div>';
+      DAILY.updatedEl.textContent='';
+      DAILY.staleEl.style.display='none';
+      return;
+    }
+    DAILY.bodyEl.innerHTML=mdToHtml(c);
+    if(updatedAt){
+      var dt=new Date(updatedAt);
+      DAILY.updatedEl.textContent='Updated '+dt.toLocaleString();
+    }else{
+      DAILY.updatedEl.textContent='';
+    }
+    DAILY.staleEl.style.display=stale?'inline-block':'none';
+  }
+
+  function dailyBuildArchiveNav(d){
+    var nav=DAILY.archiveNavEl;
+    if(!nav)return;
+    var archives=d.archives||[];
+    if(archives.length===0){nav.style.display='none';nav.innerHTML='';return;}
+    nav.style.display='flex';
+    var html='';
+    // "Current" button — always first
+    html+='<button class="daily-archive-btn active" data-idx="-1">Current</button>';
+    for(var i=0;i<archives.length;i++){
+      var ts=archives[i].updatedAt?new Date(archives[i].updatedAt).toLocaleDateString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Archive '+(i+1);
+      html+='<button class="daily-archive-btn" data-idx="'+i+'">'+ts+'</button>';
+    }
+    nav.innerHTML=html;
+    // Attach click handlers
+    var btns=nav.querySelectorAll('.daily-archive-btn');
+    for(var b=0;b<btns.length;b++){
+      (function(btn){
+        btn.addEventListener('click',function(){
+          var idx=parseInt(btn.getAttribute('data-idx'),10);
+          for(var x=0;x<btns.length;x++)btns[x].classList.remove('active');
+          btn.classList.add('active');
+          if(idx===-1){
+            // Show current document
+            dailyShowContent(d.content,d.updatedAt,d.stale);
+          }else{
+            var arc=d.archives[idx];
+            if(arc)dailyShowContent(arc.content,arc.updatedAt,false);
+          }
+        });
+      })(btns[b]);
+    }
+  }
+
   function dailyFetch(){
     fetch('/api/daily-work')
       .then(function(r){return r.json()})
@@ -3804,26 +3862,11 @@ export function getDisplayHtml(): string {
           DAILY.bodyEl.innerHTML='<div class="daily-empty"><div class="daily-empty-icon">&#x1F4CB;</div>No daily work document yet.<br>Enter auto mode to generate one.</div>';
           DAILY.updatedEl.textContent='';
           DAILY.staleEl.style.display='none';
+          if(DAILY.archiveNavEl){DAILY.archiveNavEl.style.display='none';DAILY.archiveNavEl.innerHTML='';}
           return;
         }
-        // Detect if content is guidance/template rather than real generated data.
-        // The guidance template contains instructional language, not actual briefing content.
-        var c=d.content||'';
-        var isGuidance=c.indexOf('Generate a comprehensive Daily Work markdown document')!==-1
-          ||c.indexOf('Output ONLY the markdown document')!==-1
-          ||c.indexOf('This is a high-priority system task')!==-1;
-        if(isGuidance){
-          DAILY.bodyEl.innerHTML='<div class="daily-empty"><div class="daily-empty-icon">&#x1F4CB;</div>Daily briefing document is pending generation.<br>The system will produce it during the next auto cycle.</div>';
-          DAILY.updatedEl.textContent='';
-          DAILY.staleEl.style.display='none';
-          return;
-        }
-        DAILY.bodyEl.innerHTML=mdToHtml(c);
-        if(d.updatedAt){
-          var dt=new Date(d.updatedAt);
-          DAILY.updatedEl.textContent='Updated '+dt.toLocaleString();
-        }
-        DAILY.staleEl.style.display=d.stale?'inline-block':'none';
+        dailyBuildArchiveNav(d);
+        dailyShowContent(d.content,d.updatedAt,d.stale);
       })
       .catch(function(){
         DAILY.bodyEl.innerHTML='<div class="daily-empty"><div class="daily-empty-icon">&#x26A0;</div>Failed to load daily work document.</div>';

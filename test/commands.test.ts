@@ -85,7 +85,8 @@ describe("parseCommand", () => {
       type: "explore"
     });
     expect(parseCommand("/login")).toEqual({
-      type: "login"
+      type: "login",
+      token: undefined
     });
   });
 
