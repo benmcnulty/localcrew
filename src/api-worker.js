@@ -14,7 +14,7 @@ function getApiToken() {
 function getRequestApiToken(request, reqUrl) {
   const authHeader = request.headers.authorization || request.headers.Authorization || "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  return bearerToken || (reqUrl.searchParams.get("token") || "");
+  return bearerToken;
 }
 
 function writeJson(response, statusCode, body) {

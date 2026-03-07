@@ -112,6 +112,48 @@ afterEach(() => {
 });
 
 describe("API server", () => {
+  test("requires the Bearer header for protected routes when API auth is enabled", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-secret-token";
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        speakFn: () => {}
+      });
+
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        const viaQuery = await fetch(`${api!.url}/api/command?token=test-secret-token`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ input: "/help" })
+        });
+        expect(viaQuery.status).toBe(401);
+
+        const viaHeader = await fetch(`${api!.url}/api/command`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer test-secret-token"
+          },
+          body: JSON.stringify({ input: "/help" })
+        });
+        expect(viaHeader.status).toBe(200);
+      } finally {
+        await api?.close();
+      }
+    });
+  });
+
   test(
     "serves status, telemetry, queue, agents, hud, UI, and write actions over HTTP",
     async () => {

@@ -274,6 +274,20 @@ export function getGuiHtml(): string {
           <!-- Settings -->
           <section id="section-settings" hidden>
             <div class="card">
+              <div class="card-title">API Authentication</div>
+              <p class="section-note">Store a Local Crew API token in this browser session for protected admin actions. This token is never read from the URL.</p>
+              <form id="api-token-form">
+                <div class="field-group">
+                  <label class="field-label">Session API token</label>
+                  <input id="api-token-input" name="apiToken" type="password" autocomplete="off" placeholder="Paste LOCALCREW_API_TOKEN">
+                </div>
+                <div class="command-buttons" style="margin-top:8px">
+                  <button type="submit">Save Token</button>
+                  <button type="button" id="api-token-clear" class="btn-ghost">Clear Token</button>
+                </div>
+              </form>
+            </div>
+            <div class="card">
               <div class="card-title">Orchestrator Identity</div>
               <p id="orchestrator-summary" class="section-note"></p>
               <form id="orchestrator-form">
@@ -1162,7 +1176,10 @@ const els = {
   topoUndelegateBtn: document.getElementById("topo-undelegate-btn"),
   guideTopicOutput: document.getElementById("guide-topic-output"),
   guideHelpOutput: document.getElementById("guide-help-output"),
-  guideHelpRefresh: document.getElementById("guide-help-refresh")
+  guideHelpRefresh: document.getElementById("guide-help-refresh"),
+  apiTokenForm: document.getElementById("api-token-form"),
+  apiTokenInput: document.getElementById("api-token-input"),
+  apiTokenClear: document.getElementById("api-token-clear")
 };
 
 function selectSection(name) {
@@ -1176,18 +1193,11 @@ function selectSection(name) {
 }
 
 function initializeApiToken() {
-  const url = new URL(window.location.href);
-  const queryToken = url.searchParams.get("token") || "";
   const storedToken = window.sessionStorage.getItem("localCrewApiToken") || "";
-  const token = queryToken || storedToken;
-
-  if (queryToken) {
-    window.sessionStorage.setItem("localCrewApiToken", queryToken);
-    url.searchParams.delete("token");
-    window.history.replaceState({}, document.title, url.toString());
+  state.apiToken = storedToken;
+  if (els.apiTokenInput) {
+    els.apiTokenInput.value = storedToken;
   }
-
-  state.apiToken = token;
 }
 
 function buildApiHeaders(extraHeaders) {
@@ -1721,6 +1731,40 @@ els.orchestratorForm.addEventListener("submit", async (event) => {
     renderResult(payload);
     await refreshView();
   } catch (error) {
+    if (els.resultOutput) els.resultOutput.textContent = String(error);
+  }
+});
+
+// API token form
+els.apiTokenForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const token = els.apiTokenInput.value.trim();
+  state.apiToken = token;
+  if (token) {
+    window.sessionStorage.setItem("localCrewApiToken", token);
+  } else {
+    window.sessionStorage.removeItem("localCrewApiToken");
+  }
+  if (els.resultOutput) {
+    els.resultOutput.textContent = token
+      ? "Stored API token for this browser session."
+      : "Cleared API token for this browser session.";
+  }
+  try { await refreshView(); } catch (error) {
+    if (els.resultOutput) els.resultOutput.textContent = String(error);
+  }
+});
+
+els.apiTokenClear.addEventListener("click", async () => {
+  state.apiToken = "";
+  if (els.apiTokenInput) {
+    els.apiTokenInput.value = "";
+  }
+  window.sessionStorage.removeItem("localCrewApiToken");
+  if (els.resultOutput) {
+    els.resultOutput.textContent = "Cleared API token for this browser session.";
+  }
+  try { await refreshView(); } catch (error) {
     if (els.resultOutput) els.resultOutput.textContent = String(error);
   }
 });
