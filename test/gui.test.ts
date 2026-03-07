@@ -5,14 +5,19 @@ import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getDisplayHtml, getGuiScript } from "../src/gui.ts";
+import { getDisplayHtml, getGuiHtml, getGuiScript } from "../src/gui.ts";
 
 describe("Local UI auth wiring", () => {
-  test("propagates an API token from the URL into subsequent API requests", () => {
+  test("stores an API token in session storage and sends it as a Bearer header", () => {
     const script = getGuiScript();
+    const html = getGuiHtml();
 
+    expect(html).toContain('id="api-token-form"');
+    expect(html).toContain('id="api-token-input"');
+    expect(html).toContain('id="api-token-clear"');
     expect(script).toContain('window.sessionStorage.getItem("localCrewApiToken")');
-    expect(script).toContain('window.sessionStorage.setItem("localCrewApiToken", queryToken)');
+    expect(script).toContain('window.sessionStorage.setItem("localCrewApiToken", token)');
+    expect(script).not.toContain('url.searchParams.get("token")');
     expect(script).toContain('headers.authorization = "Bearer " + state.apiToken');
   });
 });

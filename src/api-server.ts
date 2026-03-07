@@ -98,7 +98,7 @@ function getApiToken(): string | undefined {
 function getRequestApiToken(request: ApiRequest): string {
   const authHeader = request.headers?.authorization ?? request.headers?.Authorization ?? "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  return bearerToken || (request.url.searchParams.get("token") ?? "");
+  return bearerToken;
 }
 
 function corsHeaders(): Record<string, string> {
