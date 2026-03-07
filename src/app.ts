@@ -1913,7 +1913,6 @@ export class LocalCrewApp {
       alias: r.alias,
       label: r.label,
       tier: r.tier,
-      baseUrl: r.baseUrl,
     }));
     return {
       mode: status.mode,

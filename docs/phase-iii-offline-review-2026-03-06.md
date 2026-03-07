@@ -6,7 +6,7 @@ PR: `staging -> dev` (`#1`)
 
 ## Review Status
 
-I could not post directly to GitHub from this environment because `gh auth status` reports an invalid token for `benmcnulty`.
+I could not post directly to GitHub from this environment because `gh auth status` reports an invalid token for the configured account.
 
 Evidence used:
 
