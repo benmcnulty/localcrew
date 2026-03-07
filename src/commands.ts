@@ -30,7 +30,7 @@ function usage(command: string): string {
     case "/explore":
       return "Usage: /explore";
     case "/login":
-      return "Usage: /login";
+      return "Usage: /login [token]";
     case "/end":
       return "Usage: /end";
     case "/help":
@@ -81,6 +81,8 @@ function usage(command: string): string {
       return "Usage: /topology | /topology assign <alias> <role> | /topology delegate <orchestrator> <agent> | /topology undelegate <orchestrator> <agent>";
     case "/exit":
       return "Usage: /exit";
+    case "/restart-server":
+      return "Usage: /restart-server";
     default:
       return "Unknown command.";
   }
@@ -333,10 +335,10 @@ export function parseCommand(input: string): Command {
       }
       return { type: "explore" };
     case "/login":
-      if (rest.length > 0) {
-        throw new CommandParseError(usage("/login"));
+      if (rest.length > 1) {
+        throw new CommandParseError(usage("/login [token]"));
       }
-      return { type: "login" };
+      return { type: "login", token: rest[0] };
     case "/end":
       if (rest.length > 0) {
         throw new CommandParseError(usage("/end"));
@@ -746,6 +748,11 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/exit"));
       }
       return { type: "exit" };
+    case "/restart-server":
+      if (rest.length > 0) {
+        throw new CommandParseError(usage("/restart-server"));
+      }
+      return { type: "restartServer" };
     case "/promote":
       if (rest.length !== 1) {
         throw new CommandParseError(usage("/promote"));

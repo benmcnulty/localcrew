@@ -498,9 +498,16 @@ async function resolveSetupOptions(setup) {
   console.log("");
   console.log("Weather & location (used for the WEATHER tool in autonomous mode).");
   const existingZip = existingPrefs.zipCode ?? existingPrefs.city ?? "";
-  const zipDefault = existingZip || guessZipFromTimezone();
-  const zipHint = zipDefault ? "" : " (optional, press Enter to skip)";
-  const zipAnswer = await promptWithPrefill(`Zip code or city${zipHint}: `, zipDefault);
+  const hasExistingZip = existingZip.trim() !== "";
+  const wantWeather = await promptYesNo(
+    "Configure a weather location for the weather tool?",
+    hasExistingZip || Boolean(guessZipFromTimezone())
+  );
+  let zipAnswer = "";
+  if (wantWeather) {
+    const zipDefault = existingZip || guessZipFromTimezone();
+    zipAnswer = await promptWithPrefill("Zip code or city: ", zipDefault);
+  }
 
   console.log("");
   console.log("Job opportunity surfacing — the autonomous network will search for aligned roles each session.");
@@ -509,11 +516,21 @@ async function resolveSetupOptions(setup) {
     : true;
   const jobSearchEnabled = await promptYesNo("Include job search in daily autonomous sessions?", jobDefault);
 
+  // Build location preferences:
+  // - Weather declined → clear any existing zipCode/city so the tool hint is suppressed.
+  // - Weather enabled with input → store the location as zipCode.
+  // - Weather enabled but no input → leave existing values untouched (omit the key).
+  const locationPrefs = !wantWeather
+    ? { zipCode: undefined, city: undefined }
+    : zipAnswer.trim()
+      ? { zipCode: zipAnswer.trim() }
+      : {};
+
   return {
     ...nextSetup,
     name: promptedName || initialName,
     preferences: {
-      ...(zipAnswer.trim() ? { zipCode: zipAnswer.trim() } : {}),
+      ...locationPrefs,
       jobSearchEnabled
     }
   };

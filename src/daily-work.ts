@@ -8,7 +8,7 @@
  * - Expose a snapshot for the API / display overlay
  */
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,9 +56,9 @@ export async function loadDailyWork(
   }
   try {
     const raw = await readFile(docPath, "utf8");
-    const stat = await import("node:fs/promises").then((m) => m.stat(docPath));
-    const updatedAt = stat.mtime.toISOString();
-    const ageMs = Date.now() - stat.mtime.getTime();
+    const fileStat = await stat(docPath);
+    const updatedAt = fileStat.mtime.toISOString();
+    const ageMs = Date.now() - fileStat.mtime.getTime();
     return {
       content: raw,
       updatedAt,
@@ -71,16 +71,75 @@ export async function loadDailyWork(
 
 /**
  * Write (or overwrite) the daily work document.
+ * If a previous document exists it is archived before being replaced.
  */
 export async function saveDailyWork(
   content: string,
   rootDir = process.cwd(),
 ): Promise<void> {
-  const docPath = getDailyWorkPath(rootDir);
-  // Ensure parent directory exists.
-  const { mkdir } = await import("node:fs/promises");
+  const paths = getStoragePaths(rootDir);
+  const docPath = paths.dailyWorkPath;
   await mkdir(join(docPath, ".."), { recursive: true });
+
+  // Archive the existing document before overwriting.
+  if (existsSync(docPath)) {
+    try {
+      const fileStat = await stat(docPath);
+      const ts = fileStat.mtime.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      await mkdir(paths.dailyWorkArchiveDir, { recursive: true });
+      const existingContent = await readFile(docPath, "utf8");
+      await writeFile(join(paths.dailyWorkArchiveDir, `daily-work-${ts}.md`), existingContent, "utf8");
+    } catch {
+      // Archive failure is non-fatal — proceed with save.
+    }
+  }
+
   await atomicWriteFile(docPath, content);
+}
+
+// ---------------------------------------------------------------------------
+// Archive
+// ---------------------------------------------------------------------------
+
+export interface DailyWorkArchiveEntry {
+  filename: string;
+  updatedAt: string;
+  content: string;
+}
+
+/** Maximum number of archive entries surfaced via the API. */
+const MAX_ARCHIVE_ENTRIES = 10;
+
+/**
+ * Load archived daily work documents, newest first, up to MAX_ARCHIVE_ENTRIES.
+ */
+export async function loadDailyWorkArchives(
+  rootDir = process.cwd(),
+): Promise<DailyWorkArchiveEntry[]> {
+  const paths = getStoragePaths(rootDir);
+  const archiveDir = paths.dailyWorkArchiveDir;
+  if (!existsSync(archiveDir)) return [];
+  try {
+    const files = (await readdir(archiveDir))
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .reverse()
+      .slice(0, MAX_ARCHIVE_ENTRIES);
+    const entries: DailyWorkArchiveEntry[] = [];
+    for (const filename of files) {
+      try {
+        const filePath = join(archiveDir, filename);
+        const content = await readFile(filePath, "utf8");
+        const fileStat = await stat(filePath);
+        entries.push({ filename, updatedAt: fileStat.mtime.toISOString(), content });
+      } catch {
+        // Skip unreadable files.
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -205,18 +264,23 @@ export interface DailyWorkSnapshot {
   updatedAt: string | null;
   stale: boolean;
   intervalMs: number;
+  archives: DailyWorkArchiveEntry[];
 }
 
 export async function getDailyWorkSnapshot(
   rootDir = process.cwd(),
   intervalMs = DEFAULT_DAILY_WORK_INTERVAL_MS,
 ): Promise<DailyWorkSnapshot> {
-  const doc = await loadDailyWork(rootDir, intervalMs);
+  const [doc, archives] = await Promise.all([
+    loadDailyWork(rootDir, intervalMs),
+    loadDailyWorkArchives(rootDir),
+  ]);
   return {
     available: doc !== null,
     content: doc?.content ?? null,
     updatedAt: doc?.updatedAt ?? null,
     stale: doc === null || doc.stale,
     intervalMs,
+    archives,
   };
 }

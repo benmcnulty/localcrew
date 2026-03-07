@@ -23,6 +23,14 @@ import {
 } from "./config.ts";
 import { getEnvNumber } from "./env.ts";
 import {
+  PORTAL_BASE_URL,
+  loadPortalSession,
+  savePortalSession,
+  validateDeviceToken,
+  pushSnapshot,
+} from "./portal.ts";
+import type { PortalSnapshot } from "./portal.ts";
+import {
   appendChangelogEntry,
   createAgent,
   isValidPreferredResource,
@@ -1135,6 +1143,8 @@ export class LocalCrewApp {
   private readonly platform: NodeJS.Platform;
   private activeCycleCount = 0;
   private static readonly DEFAULT_MAX_PARALLEL_CYCLES = 3;
+  /** AbortController for cancelling in-flight auto-cycle fetch operations on /stop. */
+  private autoCycleAbort: AbortController | null = null;
   /** Maps resource alias → the task currently being processed by that resource. */
   private readonly activeTasksByResource = new Map<string, AutoQueueTask>();
   /** IDs of tasks currently being processed (prevents duplicate dequeue under parallel dispatch). */
@@ -1162,6 +1172,8 @@ export class LocalCrewApp {
   private static readonly QUEUE_FILL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — queue fill prompts are large
   /** Timestamp of the last failed queue fill attempt (used for cooldown). */
   private lastFillFailedAt = 0;
+  /** Consecutive idle cycles with no work — used for pulse backoff. */
+  private consecutiveIdleCycles = 0;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
   private readonly scriptTracker = new ScriptSessionTracker();
 
@@ -1632,6 +1644,33 @@ export class LocalCrewApp {
     return getEnvNumber("LOCALCREW_AUTO_PULSE_INTERVAL_MS", DEFAULT_AUTO_PULSE_INTERVAL_MS);
   }
 
+  /**
+   * Records whether the last pulse cycle did any real work.
+   * Idle cycles accumulate a backoff multiplier to reduce CPU pressure
+   * when the queue is empty; any meaningful work resets the counter.
+   */
+  recordIdleCycle(wasIdle: boolean): void {
+    if (wasIdle) {
+      this.consecutiveIdleCycles++;
+    } else {
+      this.consecutiveIdleCycles = 0;
+    }
+  }
+
+  /**
+   * Returns the effective pulse interval, applying exponential backoff
+   * after 3 consecutive idle cycles (caps at ~7× the base interval).
+   */
+  getEffectivePulseIntervalMs(): number {
+    const base = this.getAutoPulseIntervalMs();
+    const MAX_MULTIPLIER = 7;
+    const multiplier = Math.min(
+      MAX_MULTIPLIER,
+      Math.pow(2, Math.floor(this.consecutiveIdleCycles / 3))
+    );
+    return base * multiplier;
+  }
+
   getAutoSourceDocumentCharLimit(): number {
     return getEnvNumber(
       "LOCALCREW_AUTO_SOURCE_DOC_CHAR_LIMIT",
@@ -1851,6 +1890,10 @@ export class LocalCrewApp {
     return this.config.preferences;
   }
 
+  private isWeatherEnabled(): boolean {
+    return !!(this.config.preferences?.zipCode || this.config.preferences?.city);
+  }
+
   async getDailyWorkSnapshot(): Promise<DailyWorkSnapshot> {
     const intervalMs = parseDailyWorkIntervalMs(this.config.preferences?.dailyWorkIntervalHours);
     return getDailyWorkSnapshot(this.rootDir, intervalMs);
@@ -1862,6 +1905,25 @@ export class LocalCrewApp {
       ...r,
       shipRole: getShipRoleLabel(r, orchestratorAlias)
     }));
+  }
+
+  buildPortalSnapshot(): PortalSnapshot {
+    const status = this.getStatusBarState();
+    const resources = listResources(this.rootDir).map((r) => ({
+      alias: r.alias,
+      label: r.label,
+      tier: r.tier,
+      baseUrl: r.baseUrl,
+    }));
+    return {
+      mode: status.mode,
+      queueDepth: status.queuePending,
+      resourceCount: status.resourceCount,
+      autoBusy: status.autoBusy,
+      autoEnabled: status.autoEnabled,
+      orchestratorName: status.orchestratorName,
+      resources,
+    };
   }
 
   private speechUnavailableLine(): string {
@@ -2639,6 +2701,10 @@ export class LocalCrewApp {
   }
 
   private async stopAutoMode(): Promise<void> {
+    if (this.autoCycleAbort) {
+      this.autoCycleAbort.abort();
+      this.autoCycleAbort = null;
+    }
     await this.setAutoEnabled(false);
     if (this.runtime.mode === "auto") {
       this.runtime = {
@@ -2647,6 +2713,11 @@ export class LocalCrewApp {
         currentAgent: undefined
       };
     }
+  }
+
+  /** Number of auto cycles currently executing (drains to 0 after /stop). */
+  getActiveCycleCount(): number {
+    return this.activeCycleCount;
   }
 
   /**
@@ -2765,7 +2836,7 @@ export class LocalCrewApp {
       `Commands: /priority [high|medium|low], /model [alias|alias model], /models [resource|@participant], /direct <resource> "message" [model]`,
       `Commands: /participant list|add|edit|remove, /nickname [@alias] ["name"], /bind [@alias] [resource], /default [alias], /rename <old> <new>`,
       `Commands: /orchestrator ["name"], /resource list|add|edit|refresh|remove, /instructions [@alias] ["text"], /voice list, /voice [@alias] [preset] (macOS only), /sound [on|off] (macOS only)`,
-      "Commands: /daily [start|finish], /promote <resource>, /topology [assign|delegate|undelegate], /preferences [set <key> <value>], /compact, /reset, /clear, /exit",
+      "Commands: /daily [start|finish], /promote <resource>, /topology [assign|delegate|undelegate], /preferences [set <key> <value>], /compact, /reset, /clear, /restart-server, /exit",
       "",
       "Tip: /help <topic> for details — topics: chat, auto, resources, participants, agents, tools, topology, preferences, daily"
     ];
@@ -3093,11 +3164,12 @@ export class LocalCrewApp {
     summary: string;
     target?: string;
     timeoutMs?: number;
+    abortSignal?: AbortSignal;
   }): Promise<OllamaChatResult> {
     const started = Date.now();
 
     try {
-      const result = await chatWithOllamaDetailed(options.endpoint, options.messages, this.fetchFn, options.timeoutMs);
+      const result = await chatWithOllamaDetailed(options.endpoint, options.messages, this.fetchFn, options.timeoutMs, options.abortSignal);
       const durationMs =
         typeof result.totalDuration === "number"
           ? Math.round(result.totalDuration / 1_000_000)
@@ -3916,7 +3988,8 @@ export class LocalCrewApp {
       instructions: endpoint.instructions,
       summary: getConversationSummary(this.sessions),
       recentMessages,
-      taskPrompt: options.taskPrompt
+      taskPrompt: options.taskPrompt,
+      weatherEnabled: this.isWeatherEnabled()
     });
 
     let rawAssistantReply: string;
@@ -4148,9 +4221,9 @@ export class LocalCrewApp {
       .filter(Boolean)
       .join("\n");
 
-    return this.enqueueAutoTask(content, "high", "orchestrator:safe-mode", {
-      requestedResource: this.resolveOrchestratorAlias()
-    });
+    // Let the routing engine choose the best available resource rather than
+    // pinning to the orchestrator — which may already be overloaded.
+    return this.enqueueAutoTask(content, "high", "orchestrator:safe-mode");
   }
 
   private async quarantineFailedAutoTask(options: {
@@ -4243,15 +4316,27 @@ export class LocalCrewApp {
 
     let recoveryTask: AutoQueueTask | undefined;
     if (options.createRecoveryTask) {
-      recoveryTask = await this.queueSafeModeRecoveryTask({
-        failedTaskId: options.task.id,
-        reason: options.errorMessage,
-        failedTaskSummary: options.task.content
-      });
-      await appendChangelogEntry(
-        `Queued safe mode recovery task #${recoveryTask.id} after auto task #${options.task.id} failed.`,
-        this.rootDir
-      );
+      // Circuit breaker: cap safe-mode recovery tasks in the pending queue to
+      // prevent a cascade where recovery tasks themselves keep failing.
+      const existingRecoveryCount = this.systemState.auto.pending.filter((t) =>
+        this.isSafeModeRecoveryTask(t)
+      ).length;
+      if (existingRecoveryCount < 2) {
+        recoveryTask = await this.queueSafeModeRecoveryTask({
+          failedTaskId: options.task.id,
+          reason: options.errorMessage,
+          failedTaskSummary: options.task.content
+        });
+        await appendChangelogEntry(
+          `Queued safe mode recovery task #${recoveryTask.id} after auto task #${options.task.id} failed.`,
+          this.rootDir
+        );
+      } else {
+        await appendChangelogEntry(
+          `Skipped safe mode recovery for task #${options.task.id} — ${existingRecoveryCount} recovery tasks already pending.`,
+          this.rootDir
+        );
+      }
     }
 
     return { ...(recoveryTask ? { recoveryTask } : {}) };
@@ -5113,7 +5198,8 @@ export class LocalCrewApp {
         resourceAlias: options.resourceAlias,
         target: `task:${options.task.id}`,
         messages,
-        summary: `Pre-flight reasoning for auto task #${options.task.id}.`
+        summary: `Pre-flight reasoning for auto task #${options.task.id}.`,
+        abortSignal: this.autoCycleAbort?.signal
       });
       const preflightText = result.text.trim();
       if (!preflightText) {
@@ -5200,7 +5286,8 @@ export class LocalCrewApp {
       taskPrompt: `USER -> @${agent.slug}: ${userMessage}`,
       resourceRoster: this.getResourceRosterText(),
       extraContextBlocks,
-      currentDateTime: formatCurrentDateTime()
+      currentDateTime: formatCurrentDateTime(),
+      weatherEnabled: this.isWeatherEnabled()
     });
 
     let rawReply: string;
@@ -5339,13 +5426,31 @@ export class LocalCrewApp {
       return { queued: [], notes: [] };
     }
 
+    // Bail early if auto mode was stopped while we were waiting.
+    if (!this.isAutoMode()) {
+      return { queued: [], notes: [] };
+    }
+
+    const abortSignal = this.autoCycleAbort?.signal;
+
     const [documents, agents] = await Promise.all([
       loadSystemDocuments(this.rootDir),
       listAgents(this.rootDir)
     ]);
     const orchestratorAlias = this.resolveOrchestratorAlias();
     const resourceRoster = this.getResourceRosterText();
-    const draftEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+    const allResources = listResources(this.rootDir);
+
+    // For the draft phase, prefer a mid-tier or non-orchestrator resource to
+    // keep the top-tier machine free for task execution.
+    const draftResource =
+      allResources.find((r) => r.tier === "mid" && r.alias !== orchestratorAlias) ??
+      allResources.find((r) => r.alias !== orchestratorAlias) ??
+      null;
+    const draftAlias = draftResource?.alias ?? orchestratorAlias;
+    const draftEndpoint = getResourceEndpoint(draftAlias, "reasoning", this.rootDir);
+    // Finalize always uses the orchestrator — it makes the final queue decision.
+    const finalizeEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
     const fillDateTime = formatCurrentDateTime();
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
@@ -5359,7 +5464,8 @@ export class LocalCrewApp {
       resourceRoster,
       currentDateTime: fillDateTime,
       recentCompletedTopics: this.getRecentCompletedTopics(),
-      targetTaskCount: remainingQueueCapacity
+      targetTaskCount: remainingQueueCapacity,
+      weatherEnabled: this.isWeatherEnabled()
     });
 
     let draftReply: string;
@@ -5369,23 +5475,27 @@ export class LocalCrewApp {
           scope: "auto.queue-fill.draft",
           actor: "orchestrator",
           endpoint: draftEndpoint,
-          resourceAlias: orchestratorAlias,
-          target: this.getOrchestratorName(),
+          resourceAlias: draftAlias,
+          target: draftAlias,
           messages: draftMessages,
           summary: "Drafting the auto queue backlog.",
-          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS
+          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS,
+          abortSignal
         })
       ).text;
       draftReply = await this.resolveExternalTools({
         scope: "auto.queue-fill.draft",
         actor: "orchestrator",
         endpoint: draftEndpoint,
-        resourceAlias: orchestratorAlias,
-        target: this.getOrchestratorName(),
+        resourceAlias: draftAlias,
+        target: draftAlias,
         messages: draftMessages,
         rawReply: draftReply
       });
     } catch (error) {
+      if ((error as Error).name === "AbortError") {
+        return { queued: [], notes: ["Queue fill cancelled (auto mode stopped)."] };
+      }
       this.lastFillFailedAt = Date.now();
       return {
         queued: [
@@ -5404,6 +5514,11 @@ export class LocalCrewApp {
       };
     }
 
+    // Checkpoint: bail if auto mode was stopped during the draft phase.
+    if (!this.isAutoMode()) {
+      return { queued: [], notes: ["Queue fill cancelled (auto mode stopped)."] };
+    }
+
     const draftTasks = parseQueueFillOutput(draftReply);
     this.emitTaskEvent({
       type: "queue-fill",
@@ -5415,7 +5530,6 @@ export class LocalCrewApp {
         ? draftTasks.map((task) => `[${task.priority}] ${task.content}`).join("\n")
         : draftReply.trim();
     // Prefer an orchestrator-capable resource as reviewer, fall back to any non-primary top-tier
-    const allResources = listResources(this.rootDir);
     const reviewerResource =
       allResources.find(
         (resource) =>
@@ -5438,7 +5552,8 @@ export class LocalCrewApp {
         focusTodo: documents.focusTodo,
         changelog: documents.changelog,
         resourceRoster,
-        currentDateTime: fillDateTime
+        currentDateTime: fillDateTime,
+        weatherEnabled: this.isWeatherEnabled()
       });
 
       try {
@@ -5450,7 +5565,8 @@ export class LocalCrewApp {
             resourceAlias: reviewerResource.alias,
             target: reviewerResource.alias,
             messages: reviewMessages,
-            summary: `Reviewing the drafted auto queue backlog with @${reviewerResource.alias}.`
+            summary: `Reviewing the drafted auto queue backlog with @${reviewerResource.alias}.`,
+            abortSignal
           })
         ).text;
         reviewFeedback = await this.resolveExternalTools({
@@ -5463,8 +5579,16 @@ export class LocalCrewApp {
           rawReply: reviewFeedback
         });
       } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          return { queued: [], notes: ["Queue fill cancelled (auto mode stopped)."] };
+        }
         reviewFeedback = `Critique unavailable because the reviewer step failed: ${(error as Error).message}\nVERDICT: revise`;
       }
+    }
+
+    // Checkpoint: bail if auto mode was stopped during the review phase.
+    if (!this.isAutoMode()) {
+      return { queued: [], notes: ["Queue fill cancelled (auto mode stopped)."] };
     }
 
     const reviewVerdict = parseQueueReviewVerdict(reviewFeedback);
@@ -5504,7 +5628,8 @@ export class LocalCrewApp {
       reviewFeedback,
       resourceRoster,
       currentDateTime: fillDateTime,
-      targetTaskCount: remainingQueueCapacity
+      targetTaskCount: remainingQueueCapacity,
+      weatherEnabled: this.isWeatherEnabled()
     });
 
     let finalReply: string;
@@ -5513,26 +5638,30 @@ export class LocalCrewApp {
         await this.callModel({
           scope: "auto.queue-fill.finalize",
           actor: "orchestrator",
-          endpoint: draftEndpoint,
+          endpoint: finalizeEndpoint,
           resourceAlias: orchestratorAlias,
           target: this.getOrchestratorName(),
           messages: finalizeMessages,
           summary: reviewerResource
             ? `Finalizing the auto queue backlog after critique from @${reviewerResource.alias}.`
             : "Finalizing the auto queue backlog without a secondary reviewer.",
-          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS
+          timeoutMs: LocalCrewApp.QUEUE_FILL_TIMEOUT_MS,
+          abortSignal
         })
       ).text;
       finalReply = await this.resolveExternalTools({
         scope: "auto.queue-fill.finalize",
         actor: "orchestrator",
-        endpoint: draftEndpoint,
+        endpoint: finalizeEndpoint,
         resourceAlias: orchestratorAlias,
         target: this.getOrchestratorName(),
         messages: finalizeMessages,
         rawReply: finalReply
       });
     } catch (error) {
+      if ((error as Error).name === "AbortError") {
+        return { queued: [], notes: ["Queue fill cancelled (auto mode stopped)."] };
+      }
       this.lastFillFailedAt = Date.now();
       return {
         queued: [
@@ -5891,7 +6020,8 @@ export class LocalCrewApp {
         extraContextBlocks,
         currentDateTime: formatCurrentDateTime(),
         maxContextTokens: resourceProfile.maxContextTokens,
-        dailySessionContext: this.getDailySessionContext()
+        dailySessionContext: this.getDailySessionContext(),
+        weatherEnabled: this.isWeatherEnabled()
       });
 
       this.emitTaskEvent({
@@ -5912,7 +6042,8 @@ export class LocalCrewApp {
           resourceAlias: selection.alias,
           target: `task:${task.id}`,
           messages: outgoingMessages,
-          summary: `Processing auto task #${task.id}.`
+          summary: `Processing auto task #${task.id}.`,
+          abortSignal: this.autoCycleAbort?.signal
         });
         rawReply = modelResult.text;
         modelEvalCount = modelResult.evalCount ?? 0;
@@ -5926,6 +6057,16 @@ export class LocalCrewApp {
           rawReply
         });
       } catch (error) {
+        // When auto mode is stopped, abort errors are expected — return the
+        // task to the queue silently instead of quarantining it.
+        if ((error as Error).name === "AbortError") {
+          task.status = "queued";
+          return {
+            lines: [`Auto task #${task.id} cancelled (auto mode stopped).`],
+            errors: [],
+            shouldExit: false
+          };
+        }
         const errorMessage = (error as Error).message;
         const recovery = await this.quarantineFailedAutoTask({
           task,
@@ -6186,13 +6327,7 @@ export class LocalCrewApp {
     try {
       return await this.runAutoCycleLocked(async () => {
         // Front-load daily work generation when the document is stale or missing.
-        // Only active when the user has configured a daily work interval preference
-        // or a daily work directive, indicating they want the feature.
-        const dailyWorkEnabled = Boolean(
-          this.config.preferences?.dailyWorkIntervalHours ||
-          this.config.preferences?.dailyWorkDirective
-        );
-        if (this.systemState.auto.pending.length === 0 && dailyWorkEnabled) {
+        if (this.systemState.auto.pending.length === 0) {
           const intervalMs = parseDailyWorkIntervalMs(this.config.preferences?.dailyWorkIntervalHours);
           const stale = await isDailyWorkStale(this.rootDir, intervalMs);
           const dateSlug = new Date().toISOString().slice(0, 10);
@@ -6226,44 +6361,66 @@ export class LocalCrewApp {
           }
         }
 
-        if (this.systemState.auto.pending.length <= this.getQueueRefillThreshold()) {
+        // Process a pending task first so concurrent cycles pick up work
+        // immediately, then top-up afterwards to keep the queue full.
+        const processedLines: string[] = [];
+        const processedErrors: string[] = [];
+        let taskProcessed = false;
+        if (this.systemState.auto.pending.length > 0) {
+          const processed = await this.processNextAutoTask();
+          processedLines.push(...processed.lines);
+          processedErrors.push(...processed.errors);
+          taskProcessed = processed.lines.length > 0;
+        }
+
+        // Top-up: whenever the queue is below desired capacity, try to
+        // ingest inbox documents or fill with generated tasks.
+        // Skip top-up entirely if auto mode was stopped mid-cycle.
+        const belowCapacity = this.isAutoMode() && this.systemState.auto.pending.length < this.getDesiredPendingDepth();
+        const topUpLines: string[] = [];
+        if (belowCapacity) {
           const ingested = await this.ingestNextInboxDocumentTask();
           if (ingested) {
-            const processed = await this.processNextAutoTask();
-            return {
-              lines: [
-                `Ingested inbox document ${ingested.relativePath} and queued #${ingested.task.id}.`,
-                ...processed.lines
-              ],
-              errors: processed.errors,
-              shouldExit: false
-            };
+            topUpLines.push(`Ingested inbox document ${ingested.relativePath} and queued #${ingested.task.id}.`);
           }
 
-          const filled = await this.fillAutoQueue();
-          if (filled.queued.length > 0 || filled.notes.length > 0) {
-            return {
-              lines: [
-                `${this.getOrchestratorName()} filled the queue with ${filled.queued.length} self-improvement task${filled.queued.length === 1 ? "" : "s"}.`,
+          // Still below capacity after inbox ingestion? Generate tasks.
+          if (this.systemState.auto.pending.length < this.getDesiredPendingDepth()) {
+            const filled = await this.fillAutoQueue();
+            if (filled.queued.length > 0 || filled.notes.length > 0) {
+              topUpLines.push(
+                `${this.getOrchestratorName()} topped up the queue with ${filled.queued.length} task${filled.queued.length === 1 ? "" : "s"}.`,
                 ...filled.notes,
                 ...filled.queued.map((task) => `Queued #${task.id} [${task.priority}]: ${task.content}`)
-              ],
-              errors: [],
-              shouldExit: false
-            };
+              );
+            }
           }
         }
 
-        // If queue is still empty after fill attempt (cooldown, circuit breaker,
-        // or failed fill), return silently instead of spamming "Auto queue is
-        // empty" every pulse.
-        if (this.systemState.auto.pending.length === 0) {
-          return { lines: [], errors: [], shouldExit: false };
+        // If we top-upped but haven't processed a task yet (queue was empty
+        // before top-up), process one of the newly added tasks now.
+        if (!taskProcessed && this.systemState.auto.pending.length > 0) {
+          const processed = await this.processNextAutoTask();
+          processedLines.push(...processed.lines);
+          processedErrors.push(...processed.errors);
         }
 
-        return this.processNextAutoTask();
+        // Nothing happened — no tasks processed and no top-up occurred.
+        if (processedLines.length === 0 && topUpLines.length === 0) {
+          return { lines: [], errors: processedErrors, shouldExit: false };
+        }
+
+        return {
+          lines: [...topUpLines, ...processedLines],
+          errors: processedErrors,
+          shouldExit: false
+        };
       });
     } catch (error) {
+      // AbortError from /stop cancellation is expected — exit silently.
+      if ((error as Error).name === "AbortError") {
+        return { lines: [], errors: [], shouldExit: false };
+      }
       let recoveryLine: string | undefined;
       if (this.systemState.auto.pending.length > 0) {
         const [task, ...remaining] = this.sortPendingTasks(
@@ -6569,14 +6726,45 @@ export class LocalCrewApp {
       }
 
       if (command.type === "login") {
-        return {
-          lines: [
-            "Remote login is not implemented in Local Crew yet.",
-            "See the remote portal docs and local handoff spec for the planned benlive.tv/localcrew integration."
-          ],
-          errors: [],
-          shouldExit: false
-        };
+        const existingSession = loadPortalSession(this.rootDir);
+
+        if (!command.token) {
+          return {
+            lines: [
+              `Open ${PORTAL_BASE_URL}/port/ in your browser and sign in.`,
+              "Click 'Connect Local Crew' to generate a device token.",
+              "Then run: /login <token>",
+              ...(existingSession
+                ? [`Currently connected as orchestrator ${existingSession.orchestratorId}.`]
+                : [])
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        }
+
+        try {
+          const result = await validateDeviceToken(command.token, this.fetchFn ?? fetch);
+          const session = { ...result, connectedAt: new Date().toISOString() };
+          await savePortalSession(this.rootDir, session);
+          await pushSnapshot(session, this.buildPortalSnapshot(), this.fetchFn ?? fetch);
+          return {
+            lines: [
+              `Connected to Local Crew Portal (orchestrator: ${result.orchestratorId}).`,
+              `View your HUD at ${PORTAL_BASE_URL}/port/`,
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [
+              `Portal login failed: ${error instanceof Error ? error.message : String(error)}`
+            ],
+            shouldExit: false
+          };
+        }
       }
 
       if (command.type === "chatMode") {
@@ -6613,6 +6801,7 @@ export class LocalCrewApp {
 
       if (command.type === "autoMode") {
         await this.setAutoEnabled(true);
+        this.autoCycleAbort = new AbortController();
         this.runtime = {
           ...this.runtime,
           mode: "auto",
@@ -6651,9 +6840,16 @@ export class LocalCrewApp {
           };
         }
 
+        const inFlightCount = this.activeCycleCount;
         await this.stopAutoMode();
+        const lines = ["Auto mode stopped."];
+        if (inFlightCount > 0) {
+          lines.push(
+            `Cancelling ${inFlightCount} in-progress cycle${inFlightCount === 1 ? "" : "s"}… pending work will complete safely.`
+          );
+        }
         return {
-          lines: ["Auto mode stopped."],
+          lines,
           errors: [],
           shouldExit: false
         };
@@ -7687,6 +7883,16 @@ export class LocalCrewApp {
             shouldExit: false
           };
         }
+      }
+
+      // Server restart is handled at the REPL level (index.ts) since the
+      // server lifecycle is not owned by LocalCrewApp.
+      if (command.type === "restartServer") {
+        return {
+          lines: ["Server restart is handled at the REPL level."],
+          errors: [],
+          shouldExit: false
+        };
       }
 
       return {

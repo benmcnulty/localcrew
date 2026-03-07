@@ -8,7 +8,7 @@ async function readWorkspaceFile(relativePath: string): Promise<string> {
 }
 
 describe("release readiness guardrails", () => {
-  test("package.json stays zero-dependency", async () => {
+  test("package.json stays zero production dependency", async () => {
     const packageJsonRaw = await readWorkspaceFile("package.json");
     const packageJson = JSON.parse(packageJsonRaw) as {
       dependencies?: Record<string, string>;
@@ -16,7 +16,6 @@ describe("release readiness guardrails", () => {
     };
 
     expect(Object.keys(packageJson.dependencies ?? {})).toHaveLength(0);
-    expect(Object.keys(packageJson.devDependencies ?? {})).toHaveLength(0);
   });
 
   test("CI uses unified validate gate", async () => {

@@ -419,7 +419,7 @@ export type Command =
   | { type: "status" }
   | { type: "hud" }
   | { type: "explore" }
-  | { type: "login" }
+  | { type: "login"; token?: string }
   | { type: "endMode" }
   | { type: "help" }
   | { type: "help.topic"; topic: string }
@@ -483,4 +483,5 @@ export type Command =
   | { type: "topology.assign"; alias: string; role: ResourceRole }
   | { type: "topology.delegate"; orchestratorAlias: string; agentAlias: string }
   | { type: "topology.undelegate"; orchestratorAlias: string; agentAlias: string }
+  | { type: "restartServer" }
   | { type: "exit" };
