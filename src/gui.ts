@@ -63,15 +63,15 @@ export function getGuiHtml(): string {
           <section id="section-dashboard">
             <div class="stat-grid">
               <div class="stat-tile">
-                <div class="stat-value" id="stat-resources">&mdash;</div>
+                <div class="stat-value" id="stat-resources">0</div>
                 <div class="stat-label">Resources</div>
               </div>
               <div class="stat-tile">
-                <div class="stat-value" id="stat-mode">&mdash;</div>
+                <div class="stat-value" id="stat-mode">standby</div>
                 <div class="stat-label">Mode</div>
               </div>
               <div class="stat-tile">
-                <div class="stat-value" id="stat-prompt">&mdash;</div>
+                <div class="stat-value" id="stat-prompt">ready</div>
                 <div class="stat-label">Prompt</div>
               </div>
             </div>
@@ -464,14 +464,18 @@ export function getGuiStyles(): string {
 html, body {
   height: 100%;
   margin: 0;
-  background: #0d0f14;
+  background:
+    radial-gradient(circle at top left, rgba(0, 212, 255, 0.12), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(180, 79, 255, 0.12), transparent 24%),
+    linear-gradient(180deg, #091018 0%, #0b0f16 48%, #070a10 100%);
   color: #e8eaf0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable", "Avenir Next", "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }
 
 #app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -484,10 +488,12 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
-  padding: 0 20px;
-  background: #0a0c10;
-  border-bottom: 1px solid #2a2d3e;
+  height: 56px;
+  padding: 0 24px;
+  background: rgba(6, 10, 16, 0.78);
+  border-bottom: 1px solid rgba(95, 106, 140, 0.24);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(18px);
   flex-shrink: 0;
   gap: 16px;
 }
@@ -519,8 +525,8 @@ html, body {
 
 .topbar-name {
   font-size: 13px;
-  color: #c8cbda;
-  font-weight: 500;
+  color: #d8deea;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -528,7 +534,7 @@ html, body {
 
 .topbar-status {
   font-size: 12px;
-  color: #6b7280;
+  color: #94a0b8;
 }
 
 .topbar-right {
@@ -544,6 +550,7 @@ html, body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  background: linear-gradient(180deg, rgba(9, 13, 21, 0.58), rgba(7, 10, 16, 0.92));
 }
 
 /* ── Sidebar ── */
@@ -551,9 +558,12 @@ html, body {
 #sidebar {
   width: 220px;
   flex-shrink: 0;
-  background: #101318;
-  border-right: 1px solid #2a2d3e;
-  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: linear-gradient(180deg, rgba(10, 14, 22, 0.94), rgba(10, 14, 20, 0.82));
+  border-right: 1px solid rgba(95, 106, 140, 0.18);
+  padding: 16px 10px 20px;
   overflow-y: auto;
 }
 
@@ -561,25 +571,28 @@ html, body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 16px;
+  padding: 11px 14px;
   cursor: pointer;
-  color: #6b7280;
-  border-left: 2px solid transparent;
+  color: #8e98ad;
+  border: 1px solid transparent;
+  border-radius: 14px;
   font-size: 13px;
   font-weight: 500;
-  transition: color 0.1s, background 0.1s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, transform 0.12s;
   user-select: none;
 }
 
 .nav-item:hover {
-  color: #c8cbda;
-  background: #161921;
+  color: #d5dcec;
+  background: rgba(22, 28, 40, 0.7);
+  border-color: rgba(95, 106, 140, 0.2);
 }
 
 .nav-item.active {
-  color: #4f8ef7;
-  background: #1e2130;
-  border-left-color: #4f8ef7;
+  color: #eaf4ff;
+  background: linear-gradient(135deg, rgba(30, 44, 66, 0.92), rgba(25, 39, 58, 0.74));
+  border-color: rgba(79, 142, 247, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 24px rgba(2, 8, 18, 0.26);
 }
 
 .nav-icon {
@@ -594,16 +607,21 @@ html, body {
 #content {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
 section {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+#content > section {
+  width: min(1280px, 100%);
+  align-self: center;
 }
 
 section[hidden] {
@@ -613,10 +631,11 @@ section[hidden] {
 /* ── Cards ── */
 
 .card {
-  background: #141720;
-  border: 1px solid #2a2d3e;
-  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(18, 24, 35, 0.88), rgba(12, 18, 28, 0.8));
+  border: 1px solid rgba(95, 106, 140, 0.22);
+  border-radius: 16px;
   padding: 18px 20px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .card-title {
@@ -654,10 +673,11 @@ section[hidden] {
 }
 
 .stat-tile {
-  background: #141720;
-  border: 1px solid #2a2d3e;
-  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(18, 24, 35, 0.88), rgba(12, 18, 28, 0.8));
+  border: 1px solid rgba(95, 106, 140, 0.22);
+  border-radius: 16px;
   padding: 16px 20px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .stat-value {
@@ -679,12 +699,12 @@ section[hidden] {
 button {
   font: inherit;
   cursor: pointer;
-  border-radius: 5px;
-  padding: 7px 14px;
+  border-radius: 10px;
+  padding: 8px 14px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   border: none;
-  transition: opacity 0.1s;
+  transition: opacity 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 
 button:hover {
@@ -692,18 +712,19 @@ button:hover {
 }
 
 button[type="submit"] {
-  background: #4f8ef7;
+  background: linear-gradient(135deg, #67b2ff 0%, #4f8ef7 55%, #6b9dff 100%);
   color: #fff;
+  box-shadow: 0 12px 24px rgba(79, 142, 247, 0.24);
 }
 
 .btn-ghost {
-  background: #1e2130;
-  color: #c8cbda;
-  border: 1px solid #2a2d3e;
+  background: rgba(28, 35, 48, 0.72);
+  color: #d1d9e8;
+  border: 1px solid rgba(95, 106, 140, 0.22);
 }
 
 .btn-ghost:hover {
-  background: #252840;
+  background: rgba(37, 44, 64, 0.92);
   opacity: 1;
 }
 
@@ -785,11 +806,11 @@ input,
 select,
 textarea {
   font: inherit;
-  background: #0d0f14;
-  border: 1px solid #2a2d3e;
-  border-radius: 5px;
+  background: rgba(10, 14, 22, 0.86);
+  border: 1px solid rgba(95, 106, 140, 0.22);
+  border-radius: 12px;
   color: #e8eaf0;
-  padding: 7px 10px;
+  padding: 9px 12px;
   width: 100%;
   font-size: 13px;
 }
@@ -817,16 +838,17 @@ pre {
   font-size: 12px;
   line-height: 1.65;
   color: #c8cbda;
-  background: #0a0c10;
-  border: 1px solid #1e2130;
-  border-radius: 5px;
+  background: rgba(8, 11, 18, 0.96);
+  border: 1px solid rgba(57, 66, 92, 0.42);
+  border-radius: 12px;
   padding: 12px 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  min-height: 64px;
+  min-height: 88px;
   max-height: 420px;
   overflow-y: auto;
   margin: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 /* ── Item Lists ── */
@@ -897,7 +919,8 @@ pre {
 }
 
 .badge-live { background: #163d29; color: #4caf7d; }
-.badge-dim  { background: #1e2130; color: #6b7280; }
+.badge-live { background: #163d29; color: #4caf7d; box-shadow: 0 0 0 1px rgba(76, 175, 125, 0.18), 0 8px 18px rgba(22, 61, 41, 0.22); }
+.badge-dim  { background: rgba(30, 33, 48, 0.82); color: #8e98ad; }
 
 .dot {
   width: 7px;
@@ -1200,6 +1223,18 @@ function initializeApiToken() {
   }
 }
 
+function setConnectionState(dotClass, statusText, detailText) {
+  if (els.topbarDot) {
+    els.topbarDot.className = "dot " + dotClass;
+  }
+  if (els.topbarStatusText) {
+    els.topbarStatusText.textContent = statusText;
+  }
+  if (els.connectionLine) {
+    els.connectionLine.textContent = detailText || "";
+  }
+}
+
 function buildApiHeaders(extraHeaders) {
   const headers = { ...(extraHeaders || {}) };
   if (state.apiToken) {
@@ -1307,7 +1342,7 @@ function renderResources(resources) {
   if (els.resourceSummary) {
     els.resourceSummary.textContent =
       resources.length <= 1
-        ? "One resource configured. Run setup-agent.js on agent devices to add more."
+        ? "One resource configured. Run npm run setup:agent on agent devices to add more."
         : resources.length + " resources configured.";
   }
 
@@ -1541,18 +1576,31 @@ function formatExploreFileOutput(file) {
 }
 
 async function refreshView() {
-  const [status, chatConfig, dropbox, resources] = await Promise.all([
-    getJson("/api/status"),
-    getJson("/api/chat-config"),
-    getJson("/api/dropbox"),
-    getJson("/api/resources")
-  ]);
+  let status;
+  let chatConfig;
+  let dropbox;
+  let resources;
+  try {
+    [status, chatConfig, dropbox, resources] = await Promise.all([
+      getJson("/api/status"),
+      getJson("/api/chat-config"),
+      getJson("/api/dropbox"),
+      getJson("/api/resources")
+    ]);
+  } catch (error) {
+    const message = String(error);
+    const authHint = message.includes("Unauthorized")
+      ? "API token required for protected controls."
+      : message.includes("Local Crew only serves local-network clients")
+        ? "This UI is available only from the local network by default."
+        : message;
+    setConnectionState("dot-red", "connection failed", authHint);
+    throw error;
+  }
 
   // Topbar
   if (els.topbarOrchestrator) els.topbarOrchestrator.textContent = chatConfig.orchestratorName || "";
-  if (els.topbarDot) { els.topbarDot.className = "dot dot-green"; }
-  if (els.topbarStatusText) els.topbarStatusText.textContent = "connected";
-  if (els.connectionLine) els.connectionLine.textContent = "Prompt: " + (status.prompt || "");
+  setConnectionState("dot-green", "connected", "Prompt: " + (status.prompt || ""));
 
   // Stats
   if (els.statResources) els.statResources.textContent = String(resources.length);
@@ -2020,6 +2068,7 @@ if (els.guideHelpRefresh) {
 
 async function start() {
   initializeApiToken();
+  setConnectionState("dot-blue", "connecting", "Loading Local Crew state...");
   await refreshView();
   state.refreshTimer = window.setInterval(() => {
     refreshView().catch((error) => {
@@ -2030,8 +2079,7 @@ async function start() {
 
 start().catch((error) => {
   if (els.resultOutput) els.resultOutput.textContent = String(error);
-  if (els.topbarDot) els.topbarDot.className = "dot dot-red";
-  if (els.topbarStatusText) els.topbarStatusText.textContent = "connection failed";
+  setConnectionState("dot-red", "connection failed", String(error));
 });
 `;
 }
@@ -2161,7 +2209,7 @@ export function getDisplayHtml(): string {
         linear-gradient(90deg, rgba(0,212,255,0.028) 1px, transparent 1px);
       background-size: 60px 60px;
       color: var(--text);
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-family: "SF Pro Display", "Segoe UI Variable", "Avenir Next", "Segoe UI", sans-serif;
       font-size: var(--fs-base);
       -webkit-font-smoothing: antialiased;
     }
@@ -2171,11 +2219,12 @@ export function getDisplayHtml(): string {
       position: fixed; inset: 0;
       background: repeating-linear-gradient(
         0deg, transparent, transparent 3px,
-        rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 4px
+        rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px
       );
       pointer-events: none;
       z-index: 50;
     }
+  els.statPrompt.textContent = p.length > 18 ? p.slice(0, 16) + "…" : p || "ready";
 
     /* ── App shell ────────────────────────────────────────────────────────── */
     #dapp {
@@ -2408,8 +2457,14 @@ export function getDisplayHtml(): string {
       letter-spacing: 0.12em; color: var(--muted2); flex-shrink: 0;
       display: flex; align-items: center; gap: 0.4em;
     }
+    .dpanel-title svg {
+      flex-shrink: 0;
+      width: 1.22em;
+      height: 1.22em;
+      overflow: visible;
+    }
     .dpanel-title .dmini-inline {
-      margin-left: auto; display: flex; gap: 4px; align-items: center;
+      margin-left: auto; display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
     }
     .dmini-inline .dmini-pill {
       display: flex; align-items: center; gap: 0.25em;
@@ -3027,7 +3082,7 @@ export function getDisplayHtml(): string {
     <div class="dlogo"><span class="dlogo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><polygon points="12,2 20,7 20,17 12,22 4,17 4,7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/><line x1="20" y1="7" x2="4" y2="17" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/><line x1="20" y1="17" x2="4" y2="7" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/></svg></span><span class="dlogo-text">Local Crew</span></div>
     <div class="dtop-center">
       <span id="dorch"></span>
-      <span id="dmode">&mdash;</span>
+      <span id="dmode">syncing</span>
       <span id="dbusy" class="ddot" style="display:none"></span>
       <span class="dtop-sep"></span>
       <span id="dactivity" class="dactivity">Auto Pause</span>
@@ -3037,23 +3092,23 @@ export function getDisplayHtml(): string {
       <button id="dmatrix-btn" class="doverlay-btn" type="button">Matrix</button>
       <button id="ddaily-btn" class="doverlay-btn" type="button">Daily</button>
       <span id="dhealthdot" class="ddot"></span>
-      <span id="dclock">&mdash;</span>
+      <span id="dclock">--:--</span>
     </div>
   </header>
 
   <div id="dstatus-banner">
-    <span id="dstatus-fleet" class="dstatus-dim">&mdash;</span>
+    <span id="dstatus-fleet" class="dstatus-dim">Awaiting crew snapshot</span>
     <span class="dstatus-sep">&middot;</span>
     <span id="dstatus-bp" class="dstatus-dim">BP: nominal</span>
     <span class="dstatus-sep">&middot;</span>
     <span id="dstatus-bottleneck" class="dstatus-dim">Bottleneck: none</span>
     <span class="dstatus-sep">&middot;</span>
-    <span id="dstatus-dispatch" class="dstatus-dim">&mdash;</span>
+    <span id="dstatus-dispatch" class="dstatus-dim">Dispatch: standby</span>
   </div>
 
   <div id="dbody">
     <section id="dpnet" class="dpanel">
-      <h2 class="dpanel-title"><svg width="20" height="20" viewBox="0 0 16 16" style="flex-shrink:0;vertical-align:-0.2em;margin-right:0.3em"><circle cx="4" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><circle cx="12" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><line x1="6.2" y1="8" x2="9.8" y2="8" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><circle cx="8" cy="3.5" r="2.2" fill="currentColor" opacity="0.9"/><line x1="5" y1="6" x2="7" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><line x1="11" y1="6" x2="9" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/></svg>Fleet<span class="dmini-inline"><span class="dmini-pill"><span id="drescnt">&mdash;</span><span class="dmini-pill-lbl">online</span></span><span class="dmini-pill"><span id="dbusy-count">0</span><span class="dmini-pill-lbl">active</span></span></span></h2>
+      <h2 class="dpanel-title"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><circle cx="12" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><line x1="6.2" y1="8" x2="9.8" y2="8" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><circle cx="8" cy="3.5" r="2.2" fill="currentColor" opacity="0.9"/><line x1="5" y1="6" x2="7" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><line x1="11" y1="6" x2="9" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/></svg>Fleet<span class="dmini-inline"><span class="dmini-pill"><span id="dbusy-count">0</span><span class="dmini-pill-lbl">active</span></span><span class="dmini-pill"><span id="drescnt">0</span><span class="dmini-pill-lbl">online</span></span></span></h2>
       <div id="dres-grid"></div>
       <div class="dmodels">
         <div class="dsub" style="flex-shrink:0;color:rgba(0,255,127,0.5)">Model Activity</div>
@@ -3077,7 +3132,7 @@ export function getDisplayHtml(): string {
         <div class="dpmain-gauge">
           <div class="dgauge-wrap">
             <div class="dgauge-hdr">
-              <span id="dgauge-bigval" class="dgauge-cur">&mdash;</span>
+              <span id="dgauge-bigval" class="dgauge-cur">0</span>
               <span class="dgauge-sublbl">tok&thinsp;/&thinsp;min</span>
             </div>
             <div class="dgauge-container">
@@ -3101,7 +3156,7 @@ export function getDisplayHtml(): string {
                 <path id="dgauge-track" fill="none" stroke="rgba(0,212,255,0.1)" stroke-width="10" stroke-linecap="round"/>
                 <path id="dgauge-fill" fill="none" stroke="url(#gauge-grad)" stroke-width="10" stroke-linecap="round" pathLength="100" filter="url(#neon-glow)" style="transition:stroke-dashoffset 1.2s ease"/>
                 <g id="dgauge-ticks"></g>
-                <text id="dgauge-val" class="dgauge-val-text" x="100" y="88" text-anchor="middle" font-size="26">&mdash;</text>
+                <text id="dgauge-val" class="dgauge-val-text" x="100" y="88" text-anchor="middle" font-size="26">0</text>
                 <text class="dgauge-lbl-text" x="100" y="104" text-anchor="middle">utilization</text>
               </svg>
             </div>
@@ -3123,25 +3178,25 @@ export function getDisplayHtml(): string {
       <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><rect x="1" y="9" width="3" height="6" rx="0.8" fill="currentColor" opacity="0.5"/><rect x="5.5" y="5" width="3" height="10" rx="0.8" fill="currentColor" opacity="0.7"/><rect x="10" y="1" width="3" height="14" rx="0.8" fill="currentColor" opacity="0.9"/></svg>Metrics</h2>
       <div class="dstat-group">
         <div class="dstat-row dstat-row-done">
-          <div id="dtasksdone" class="dstat-val mv-done">&mdash;</div>
+          <div id="dtasksdone" class="dstat-val mv-done">0</div>
           <div class="dstat-lbl">Tasks Done</div>
         </div>
         <div class="dstat-row dstat-row-events">
-          <div id="devents" class="dstat-val mv-events">&mdash;</div>
+          <div id="devents" class="dstat-val mv-events">0</div>
           <div class="dstat-lbl">Audit Events</div>
         </div>
         <div class="dstat-row dstat-row-tokens">
-          <div id="dtokens" class="dstat-val mv-tokens">&mdash;</div>
+          <div id="dtokens" class="dstat-val mv-tokens">0</div>
           <div class="dstat-lbl">Total Tokens</div>
         </div>
       </div>
       <div class="dkpi-group">
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-tpm">&mdash;</span><span class="dkpi-lbl">tok/min</span></div>
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-tps">&mdash;</span><span class="dkpi-lbl">tok/sec</span></div>
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-drain">&mdash;</span><span class="dkpi-lbl">drain/min</span></div>
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-failed">&mdash;</span><span class="dkpi-lbl">failed</span></div>
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-stalled">&mdash;</span><span class="dkpi-lbl">stalled</span></div>
-        <div class="dkpi"><span class="dkpi-val" id="dkpi-oldest">&mdash;</span><span class="dkpi-lbl">oldest task</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-tpm">0</span><span class="dkpi-lbl">tok/min</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-tps">0</span><span class="dkpi-lbl">tok/sec</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-drain">0.0</span><span class="dkpi-lbl">drain/min</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-failed">0</span><span class="dkpi-lbl">failed</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-stalled">0</span><span class="dkpi-lbl">stalled</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-oldest">0s</span><span class="dkpi-lbl">oldest task</span></div>
       </div>
       <div style="display:none"><span id="dtpmbig"></span></div>
     </section>
@@ -3469,21 +3524,16 @@ export function getDisplayHtml(): string {
     var data=await fetchJ('/api/audit?limit=50');
     if(!Array.isArray(data))return;
     var newEvs=[],i,ev,totalNew=0;
+    if(ST.lastId===0&&data.length>0)ST.lastId=data[0].id;
     for(i=0;i<data.length;i++){if(data[i].id>ST.lastId)newEvs.push(data[i]);}
     if(newEvs.length>0){
       for(i=0;i<newEvs.length;i++){
         ev=newEvs[i];
-        if(ev.summary)mxFeedText(ev.summary);
         if(ev.evalCount&&ev.evalCount>0)totalNew+=ev.evalCount;
         if(ev.id>ST.lastId)ST.lastId=ev.id;
       }
       ST.audit=data.slice(0,30);renderLog();
       if(totalNew>0)updateTpmEma(totalNew);
-    }
-    if(MX.buf.length<200&&ST.audit.length>0){
-      for(var ri=0;ri<Math.min(ST.audit.length,10);ri++){
-        if(ST.audit[ri].summary)mxFeedText(ST.audit[ri].summary);
-      }
     }
   }
   function updateTpmEma(tokens){
@@ -3509,12 +3559,12 @@ export function getDisplayHtml(): string {
     else{ST.ema.rate=0;ST.tps.rate=0;applyTpm(0);}
   }
   function applyTpm(tpm){
-    setVal('dgauge-bigval',tpm>0?fmt(tpm):'—');
+    setVal('dgauge-bigval',tpm>0?fmt(tpm):'0');
     setVal('dtpmbig',fmt(tpm));
     // Update KPI tok/min and tok/sec in real-time
-    setVal('dkpi-tpm',tpm>0?fmt(tpm):'—');
+    setVal('dkpi-tpm',tpm>0?fmt(tpm):'0');
     var tps=Math.round(ST.tps.rate);
-    setVal('dkpi-tps',tps>0?String(tps):'—');
+    setVal('dkpi-tps',tps>0?String(tps):'0');
     // Don't override gauge here — gauge shows fleet utilization from displayMetrics
   }
   function renderLog(){
@@ -3560,7 +3610,7 @@ export function getDisplayHtml(): string {
     var modeEl2=el('dstatus-mode');
     if(modeEl2){
       var modeText=el('dmode');
-      modeEl2.textContent=modeText?modeText.textContent:'—';
+      modeEl2.textContent=modeText?modeText.textContent:'syncing';
     }
     var fleetEl=el('dstatus-fleet');
     if(fleetEl){
@@ -3586,10 +3636,11 @@ export function getDisplayHtml(): string {
 
     // KPIs — tok/min and tok/sec managed by realtime EMA, don't overwrite here
     setVal('dkpi-drain',typeof queue.drainRatePerMin==='number'?queue.drainRatePerMin.toFixed(1):'—');
+    setVal('dkpi-drain',typeof queue.drainRatePerMin==='number'?queue.drainRatePerMin.toFixed(1):'0.0');
     setVal('dkpi-failed',String(queue.failedCount||0));
     setVal('dkpi-stalled',String(queue.stalledCount||0));
     var oldest=queue.oldestPendingAgeSec||0;
-    setVal('dkpi-oldest',oldest>60?Math.round(oldest/60)+'m':oldest>0?oldest+'s':'—');
+    setVal('dkpi-oldest',oldest>60?Math.round(oldest/60)+'m':oldest>0?oldest+'s':'0s');
 
     // Gauge → fleet utilization is driven by client-side refreshResourceDots()
   }
@@ -3607,6 +3658,7 @@ export function getDisplayHtml(): string {
     ST.lastSyntheticId-=1;
     ST.audit.unshift(entry);
     if(ST.audit.length>30)ST.audit=ST.audit.slice(0,30);
+    mxFeedText(summary);
     renderLog();
   }
 
@@ -3944,34 +3996,43 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
-  // Film-accurate digital rain: pre-allocated columns, delta-time movement,
-  // depth via scale/opacity/speed, no shadowBlur for performance.
-  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,raf:null,columns:[],lastT:0};
+  // Crisp digital rain: snapped glyph grid, bounded frame cadence, and
+  // visible-row rendering only so the overlay stays sharp at any DPI.
+  var MX={on:false,stream:[],streamReadIdx:0,maxStream:12000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/32};
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
-  MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false}):null;
+  MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false,desynchronized:true}):null;
   MX.closeEl=document.getElementById('mx-close');
 
   function mxFeedText(t){
     if(!t||typeof t!=='string')return;
     for(var i=0;i<t.length;i++){
       var c=t.charAt(i);
-      if(c==='\\n'||c==='\\r'||c==='\\t')continue;
-      if(c===' '&&Math.random()>0.35)continue;
-      if(MX.buf.length<MX.maxBuf){MX.buf.push(c);}
-      else{MX.buf[MX.bufIdx%MX.maxBuf]=c;MX.bufIdx++;}
+      if(c==='\\r')continue;
+      if(c==='\\n'||c==='\\t')c=' ';
+      MX.stream.push(c);
+      if(MX.stream.length>MX.maxStream){
+        var trim=MX.stream.length-MX.maxStream;
+        MX.stream.splice(0,trim);
+        MX.streamReadIdx=Math.max(0,MX.streamReadIdx-trim);
+      }
     }
   }
 
-  var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
   function mxGetChar(){
-    if(MX.buf.length>0){var c=MX.buf[MX.bufIdx%MX.buf.length];MX.bufIdx++;return c;}
-    return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
+    if(MX.streamReadIdx>=MX.stream.length)return '';
+    var c=MX.stream[MX.streamReadIdx];
+    MX.streamReadIdx++;
+    if(MX.streamReadIdx>2048&&MX.streamReadIdx>=Math.floor(MX.stream.length/2)){
+      MX.stream.splice(0,MX.streamReadIdx);
+      MX.streamReadIdx=0;
+    }
+    return c;
   }
 
   function mxSizeCanvas(){
     if(!MX.cvs)return;
-    var dpr=window.devicePixelRatio||1;
+    var dpr=Math.min(window.devicePixelRatio||1,2);
     var w=window.innerWidth;
     var h=window.innerHeight;
     if(!w||!h)return;
@@ -3982,15 +4043,24 @@ export function getDisplayHtml(): string {
     if(MX.ctx)MX.ctx.setTransform(dpr,0,0,dpr,0,0);
   }
 
+  function mxBuildColumns(w,h){
+    var numCols=Math.max(24,Math.min(Math.floor(w/18),140));
+    MX.columns=[];
+    for(var i=0;i<numCols;i++){
+      MX.columns.push(mxMakeCol(w,h,false));
+    }
+  }
+
   // Create a single column with randomized depth properties.
   // depth 0=far (small, dim, slow), 1=near (large, bright, fast)
   function mxMakeCol(w,h,startAbove){
     var depth=Math.random(); // 0..1 continuous
     var d3=depth*depth*depth; // cubic curve: most columns are background
-    // Font sizes: 14px (far) to 28px (near), viewport scaled — large enough to stay legible
-    var vScale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.3:1.0;
-    var fs=Math.round((14+d3*14)*vScale);
-    var lineH=fs*1.18;
+    // Font sizes stay on a small set of snapped values for sharper glyph rasterization.
+    var vScale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.3:w>=1280?1.1:1.0;
+    var fs=Math.round((14+d3*12)*vScale/2)*2;
+    var lineH=Math.round(fs*1.16);
+    var cellW=Math.max(10,Math.round(fs*0.64));
     var len=Math.floor(6+Math.random()*22+d3*10); // near columns are longer
     var chars=[];
     for(var i=0;i<len;i++)chars.push(mxGetChar());
@@ -3998,20 +4068,19 @@ export function getDisplayHtml(): string {
     var speed=(30+d3*170+Math.random()*40)*vScale;
     // Opacity ceiling: 0.3 (far) to 1.0 (near) — far columns still visible
     var alpha=0.3+d3*0.7;
-    // Mutation rate: near columns mutate faster (film-like flickering)
-    var mutRate=0.001+d3*0.015;
     // Cache font string to avoid rebuilding each frame
-    var fontStr=fs+'px "SF Mono","Fira Code",ui-monospace,monospace';
-    var x=Math.floor(Math.random()*w);
+    var fontStr=fs+'px "SFMono-Regular","SF Mono","Menlo","Consolas","Liberation Mono",ui-monospace,monospace';
+    var laneCount=Math.max(8,Math.floor(w/cellW));
+    var x=Math.min(w-cellW,Math.floor(Math.random()*laneCount)*cellW);
     var y=startAbove? -(len*lineH+Math.random()*h*0.5) : -(len*lineH*Math.random());
-    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,alpha:alpha,mutRate:mutRate,fontStr:fontStr};
+    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,cellW:cellW,alpha:alpha,fontStr:fontStr,stepCarry:0};
   }
 
   // Respawn a column at the top with new properties
   function mxRespawn(col,w,h){
     var nc=mxMakeCol(w,h,true);
     col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.chars=nc.chars;col.len=nc.len;
-    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.alpha=nc.alpha;col.mutRate=nc.mutRate;col.fontStr=nc.fontStr;
+    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.cellW=nc.cellW;col.alpha=nc.alpha;col.fontStr=nc.fontStr;col.stepCarry=0;
   }
 
   function mxFrame(ts){
@@ -4021,12 +4090,18 @@ export function getDisplayHtml(): string {
     var w=MX.cvs.clientWidth||window.innerWidth;
     var h=MX.cvs.clientHeight||window.innerHeight;
 
-    // Delta time (capped at 100ms to avoid jumps on tab-switch)
-    var dt=MX.lastT?Math.min((ts-MX.lastT)/1000,0.1):0.016;
+    var elapsed=MX.lastT?Math.min(ts-MX.lastT,100):16.67;
     MX.lastT=ts;
+    if(MX.lastDrawT&&ts-MX.lastDrawT<MX.frameMs){
+      MX.raf=requestAnimationFrame(mxFrame);
+      return;
+    }
+    MX.lastDrawT=ts;
+    // Delta time (capped at 100ms to avoid jumps on tab-switch)
+    var dt=elapsed/1000;
 
-    // Fade previous frame — higher alpha = faster trail fade (more film-like)
-    ctx.fillStyle='rgba(0,0,0,0.15)';
+    // Fade previous frame — keep phosphor trails crisp instead of muddy.
+    ctx.fillStyle='rgba(0,0,0,0.18)';
     ctx.fillRect(0,0,w,h);
 
     ctx.textBaseline='top';
@@ -4038,6 +4113,7 @@ export function getDisplayHtml(): string {
       var col=cols[ci];
       // Move by delta time
       col.y+=col.speed*dt;
+      col.stepCarry+=col.speed*dt;
 
       // Respawn if fully past viewport
       if(col.y>h+10){
@@ -4045,20 +4121,22 @@ export function getDisplayHtml(): string {
         continue;
       }
 
-      // Occasional character mutation (film-like flickering)
-      if(Math.random()<col.mutRate){
-        var mi=Math.floor(Math.random()*col.len);
-        col.chars[mi]=mxGetChar();
+      while(col.stepCarry>=col.lineH){
+        col.stepCarry-=col.lineH;
+        if(col.chars.length>0)col.chars.shift();
+        col.chars.push(mxGetChar());
       }
 
       // Set font only when it changes from previous column
       if(col.fontStr!==lastFont){ctx.font=col.fontStr;lastFont=col.fontStr;}
 
-      // Draw characters: trail gradient from dim (top) to bright (bottom/head)
-      for(var chi=0;chi<col.len;chi++){
-        var cy=col.y+chi*col.lineH;
-        // Skip off-screen characters
-        if(cy<-col.lineH||cy>h)continue;
+      // Draw only visible rows to reduce overdraw on large displays.
+      var visibleStart=Math.max(0,Math.floor((-col.y)/col.lineH)-1);
+      var visibleEnd=Math.min(col.len-1,Math.ceil((h-col.y)/col.lineH)+1);
+      for(var chi=visibleStart;chi<=visibleEnd;chi++){
+        var ch=col.chars[chi];
+        if(!ch)continue;
+        var cy=Math.round(col.y+chi*col.lineH);
 
         var trailFrac=chi/(col.len-1||1); // 0=top, 1=head
         var isHead=chi===col.len-1;
@@ -4066,12 +4144,12 @@ export function getDisplayHtml(): string {
         if(isHead){
           // Head character: brightest, white-green
           ctx.globalAlpha=Math.min(col.alpha*1.2,1.0);
-          ctx.fillStyle='#ceffce';
-          ctx.fillText(col.chars[chi],col.x,cy);
-          // Subtle head glow — only for near columns (no shadowBlur, use double-draw)
+          ctx.fillStyle='#d8ffd8';
+          ctx.fillText(ch,col.x,cy);
+          // Subtle head bloom only for near columns, kept on whole pixels for sharpness.
           if(col.depth>0.7){
-            ctx.globalAlpha=col.alpha*0.3;
-            ctx.fillText(col.chars[chi],col.x-0.5,cy);
+            ctx.globalAlpha=col.alpha*0.14;
+            ctx.fillText(ch,col.x+1,cy);
           }
         }else{
           // Trail: phosphor green, fading toward top
@@ -4079,7 +4157,7 @@ export function getDisplayHtml(): string {
           var charAlpha=col.alpha*(0.15+trailFrac*trailFrac*0.85);
           ctx.globalAlpha=charAlpha;
           ctx.fillStyle='#00ff41';
-          ctx.fillText(col.chars[chi],col.x,cy);
+          ctx.fillText(ch,col.x,cy);
         }
       }
     }
@@ -4097,17 +4175,14 @@ export function getDisplayHtml(): string {
       mxSizeCanvas();
       if(MX.ctx&&MX.cvs){
         // Clear to solid black
+        MX.ctx.setTransform(1,0,0,1,0,0);
         MX.ctx.fillStyle='#000';
         MX.ctx.fillRect(0,0,MX.cvs.width,MX.cvs.height);
+        MX.ctx.setTransform(Math.min(window.devicePixelRatio||1,2),0,0,Math.min(window.devicePixelRatio||1,2),0,0);
       }
-      // Pre-allocate all columns — staggered across viewport height
       var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
       var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
-      var numCols=Math.max(20,Math.min(Math.floor(w/16),120));
-      MX.columns=[];
-      for(var i=0;i<numCols;i++){
-        MX.columns.push(mxMakeCol(w,h,false));
-      }
+      mxBuildColumns(w,h);
       MX.raf=requestAnimationFrame(mxFrame);
     });
   }
@@ -4117,8 +4192,9 @@ export function getDisplayHtml(): string {
     MX.overlay.classList.remove('active');
     if(MX.raf){cancelAnimationFrame(MX.raf);MX.raf=null;}
     MX.columns=[];
-    MX.buf=[];MX.bufIdx=0;
+    MX.stream=[];MX.streamReadIdx=0;
     MX.lastT=0;
+    MX.lastDrawT=0;
     if(MX.ctx&&MX.cvs){
       MX.ctx.clearRect(0,0,MX.cvs.width,MX.cvs.height);
     }
@@ -4126,23 +4202,21 @@ export function getDisplayHtml(): string {
 
   // Resize canvas on window resize
   window.addEventListener('resize',function(){
-    if(MX.on)mxSizeCanvas();
+    if(MX.on){
+      mxSizeCanvas();
+      var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
+      var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
+      mxBuildColumns(w,h);
+    }
   });
 
   function mxProcessEvent(msg){
     if(!msg)return;
-    if(msg.type==='state'){
-      if(msg.orchestratorName)mxFeedText(msg.orchestratorName);
-      var a=msg.auto||{};
-      if(a.nextTask&&a.nextTask.content)mxFeedText(a.nextTask.content);
-      if(a.lastCompleted&&a.lastCompleted.content)mxFeedText(a.lastCompleted.content);
-      if(Array.isArray(msg.activeResources)){
-        for(var ri=0;ri<msg.activeResources.length;ri++)mxFeedText(msg.activeResources[ri]);
-      }
-    }
     if(msg.type==='task-start'&&msg.taskContent)mxFeedText(msg.taskContent);
     if(msg.type==='task-complete'&&msg.taskContent)mxFeedText(msg.taskContent);
+    if(msg.type==='task-write'&&msg.filename)mxFeedText(msg.filename);
     if(msg.type==='queue-fill')mxFeedText('queue fill phase '+(msg.phase||''));
+    if(msg.type==='daily-complete'&&msg.summary)mxFeedText(msg.summary);
   }
 
   var mxBtn=document.getElementById('dmatrix-btn');

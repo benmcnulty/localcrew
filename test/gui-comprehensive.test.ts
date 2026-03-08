@@ -204,7 +204,12 @@ describe("Admin CSS: responsive breakpoints", () => {
 describe("Admin CSS: base styles", () => {
   test("has dark theme background", () => {
     expect(adminCss).toContain("background:");
-    expect(adminCss).toContain("#0d0f14");
+    expect(adminCss).toContain("#091018");
+  });
+
+  test("centers content sections within a readable max width", () => {
+    expect(adminCss).toContain("#content > section");
+    expect(adminCss).toContain("width: min(1280px, 100%)");
   });
 
   test("has tier colors", () => {
@@ -441,6 +446,12 @@ describe("Display UI: base structure", () => {
   test("has top header bar", () => {
     expect(displayHtml).toContain('id="dtop"');
     expect(displayHtml).toContain("Local Crew");
+  });
+
+  test("uses readable startup placeholders instead of raw dash-only chrome", () => {
+    expect(displayHtml).toContain('id="dmode">syncing<');
+    expect(displayHtml).toContain('id="dstatus-fleet" class="dstatus-dim">Awaiting crew snapshot<');
+    expect(displayHtml).toContain('id="dkpi-oldest">0s<');
   });
 
   test("has log strip at bottom", () => {
@@ -786,11 +797,11 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("numCols");
   });
 
-  test("mxStop cancels animation frame and clears buffer", () => {
+  test("mxStop cancels animation frame and clears the live text stream", () => {
     expect(displayHtml).toContain("cancelAnimationFrame(MX.raf)");
     expect(displayHtml).toContain("MX.columns=[]");
-    expect(displayHtml).toContain("MX.buf=[]");
-    expect(displayHtml).toContain("MX.bufIdx=0");
+    expect(displayHtml).toContain("MX.stream=[]");
+    expect(displayHtml).toContain("MX.streamReadIdx=0");
   });
 
   test("mxStart uses requestAnimationFrame", () => {
@@ -805,6 +816,63 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
   test("mxSizeCanvas handles device pixel ratio", () => {
     expect(displayHtml).toContain("devicePixelRatio");
     expect(displayHtml).toContain("setTransform");
+  });
+
+  test("mxFrame caps effective draw cadence for smoother low-overhead animation", () => {
+    expect(displayHtml).toContain("lastDrawT");
+    expect(displayHtml).toContain("frameMs:1000/32");
+    expect(displayHtml).toContain("ts-MX.lastDrawT<MX.frameMs");
+  });
+
+  test("mxFrame renders only visible rows for each column", () => {
+    expect(displayHtml).toContain("visibleStart");
+    expect(displayHtml).toContain("visibleEnd");
+    expect(displayHtml).toContain("for(var chi=visibleStart;chi<=visibleEnd;chi++)");
+  });
+
+  test("head bloom stays on whole pixels instead of subpixel blur", () => {
+    expect(displayHtml).toContain("col.x+1");
+    expect(displayHtml).not.toContain("col.x-0.5");
+  });
+
+  test("matrix consumes a real text stream instead of random filler glyphs", () => {
+    expect(displayHtml).toContain("streamReadIdx");
+    expect(displayHtml).toContain("return ''");
+    expect(displayHtml).not.toContain("var mxPool=");
+  });
+
+  test("matrix advances characters by row steps rather than random mutation", () => {
+    expect(displayHtml).toContain("stepCarry:0");
+    expect(displayHtml).toContain("while(col.stepCarry>=col.lineH)");
+    expect(displayHtml).not.toContain("mutRate");
+  });
+
+  test("matrix ignores idle state snapshots and only feeds live work events", () => {
+    expect(displayHtml).toContain("if(msg.type==='task-start'&&msg.taskContent)mxFeedText(msg.taskContent);");
+    expect(displayHtml).toContain("if(msg.type==='task-complete'&&msg.taskContent)mxFeedText(msg.taskContent);");
+    expect(displayHtml).not.toContain("if(msg.orchestratorName)mxFeedText(msg.orchestratorName);");
+    expect(displayHtml).not.toContain("if(a.nextTask&&a.nextTask.content)mxFeedText(a.nextTask.content);");
+    expect(displayHtml).not.toContain("if(a.lastCompleted&&a.lastCompleted.content)mxFeedText(a.lastCompleted.content);");
+  });
+
+  test("matrix stream mirrors display log summaries as they are added", () => {
+    expect(displayHtml).toContain("mxFeedText(summary);");
+  });
+});
+
+describe("Display fleet header polish", () => {
+  test("fleet header stacks active count above online count", () => {
+    expect(displayHtml).toContain("flex-direction: column");
+    expect(displayHtml).toContain("id=\"dbusy-count\">0</span><span class=\"dmini-pill-lbl\">active");
+    expect(displayHtml).toContain("id=\"drescnt\">0</span><span class=\"dmini-pill-lbl\">online");
+    expect(displayHtml.indexOf("id=\"dbusy-count\"")).toBeLessThan(displayHtml.indexOf("id=\"drescnt\""));
+  });
+
+  test("fleet icon sizing is controlled by css instead of inline squashing", () => {
+    expect(displayHtml).toContain(".dpanel-title svg");
+    expect(displayHtml).toContain("width: 1.22em");
+    expect(displayHtml).toContain("height: 1.22em");
+    expect(displayHtml).not.toContain("<svg viewBox=\"0 0 16 16\" width=\"1em\"");
   });
 });
 
