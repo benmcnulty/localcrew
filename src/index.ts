@@ -89,12 +89,16 @@ function exitAlternateScreen(): void {
 
 function renderFrame(lines: string[], previousLines: string[]): void {
   stdout.write("\u001b[H");
+  const maxWidth = (stdout as unknown as { columns?: number }).columns || 120;
 
   for (let index = 0; index < lines.length; index += 1) {
     if (lines[index] !== previousLines[index]) {
       stdout.write(`\u001b[${index + 1};1H`);
       stdout.write("\u001b[2K");
-      stdout.write(lines[index]);
+      // Truncate to terminal width to prevent line wrapping which corrupts
+      // row positioning in the alternate screen buffer.
+      const line = lines[index];
+      stdout.write(line.length > maxWidth ? line.slice(0, maxWidth) : line);
     }
   }
 

@@ -38,6 +38,7 @@ import {
   isOrchestratorCapable,
   routeTask,
   renderNetworkTopology,
+  resolveResourcePurpose,
   saveResources,
   selectModelForEndpoint,
   type ResourceTelemetry,
@@ -494,6 +495,56 @@ describe("resource routing", () => {
       expect(routed.resource.alias).toBe("helper");
       expect(routed.score).toBeGreaterThan(0);
       expect(routed.rationale).toContain("highest");
+    });
+  });
+
+  test("downgrades heavy reasoning models when a node is under pressure", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const orchestrator = getResourceProfilesByTier(rootDir).top[0];
+      const task = classifyTask("Analyze the architecture tradeoffs and diagnose the routing drift.");
+      const telemetry = buildResourceTelemetry(
+        orchestrator.alias,
+        1,
+        undefined,
+        {
+          loadAvg1m: 8.5,
+          loadAvg5m: 8.1,
+          totalMemGb: 32,
+          freeMemGb: 4,
+          freePct: 12.5,
+          timestamp: Date.now()
+        },
+        orchestrator
+      );
+
+      expect(resolveResourcePurpose(orchestrator, "reasoning", task, telemetry, "online")).toBe("default");
+    });
+  });
+
+  test("keeps heavy reasoning models available for deep work when headroom is healthy", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const orchestrator = getResourceProfilesByTier(rootDir).top[0];
+      const task = classifyTask(
+        "Design a comprehensive end-to-end architecture migration with benchmark planning and tradeoff analysis."
+      );
+      const telemetry = buildResourceTelemetry(
+        orchestrator.alias,
+        0,
+        undefined,
+        {
+          loadAvg1m: 1.2,
+          loadAvg5m: 1,
+          totalMemGb: 32,
+          freeMemGb: 22,
+          freePct: 68.75,
+          timestamp: Date.now()
+        },
+        orchestrator
+      );
+
+      expect(resolveResourcePurpose(orchestrator, "reasoning", task, telemetry, "online")).toBe("reasoning");
     });
   });
 });
@@ -1429,8 +1480,11 @@ describe("buildResourceTelemetry with live device metrics", () => {
       freeMemGb: 8,
       freePct: 25,
       timestamp: Date.now()
+    }, {
+      cpuLogicalCores: 8
     });
     expect(result.ramUsagePct).toBe(75);
+    expect(result.cpuLoadPct).toBe(19);
     expect(result.queueDepth).toBe(2);
   });
 

@@ -8,21 +8,50 @@ export const PORTAL_BASE_URL = getOptionalEnvString("LOCALCREW_PORTAL_URL", "htt
 
 export interface PortalSession {
   sessionToken: string;
+  deviceId?: string;
   orchestratorId: string;
   userId: string;
+  username?: string;
+  displayName?: string;
   expiresAt: string;
   connectedAt: string;
 }
 
 export interface PortalSnapshot {
   mode: string;
-  queueDepth: number;
-  resourceCount: number;
-  autoBusy: boolean;
-  autoEnabled: boolean;
-  orchestratorName: string;
-  resources: Array<{ alias: string; label: string; tier?: string }>;
-  capacitySummary?: string;
+  busy?: boolean;
+  queueDepth?: {
+    pending: number;
+    completed: number;
+    failed: number;
+  };
+  nextTask?: {
+    priority: string;
+    content: string;
+    resourceAlias?: string | null;
+  } | null;
+  lastCompleted?: {
+    content: string;
+    resourceAlias?: string | null;
+  } | null;
+  resources?: Array<{ alias: string; tier?: string; isBusy?: boolean; model?: string | null }>;
+  capacity?: {
+    resourceCount: number;
+    knownCpuLogicalCores: number;
+    knownRamGb: number;
+    knownGpuCount: number;
+    knownTotalVramGb: number;
+    highestKnownContextTokens: number;
+  } | null;
+  modelProfile?: string;
+  tps?: number;
+  dailySession?: {
+    active: boolean;
+    startTime: string | null;
+    taskCount: number;
+    errorCount: number;
+  } | null;
+  orchestratorName?: string;
 }
 
 export type FetchFn = typeof fetch;
@@ -49,13 +78,21 @@ export async function savePortalSession(rootDir: string, session: PortalSession)
 
 export async function validateDeviceToken(
   token: string,
+  details: {
+    orchestratorName: string;
+    capacitySummary?: unknown;
+  },
   fetchFn: FetchFn
 ): Promise<PortalSession> {
   const url = `${PORTAL_BASE_URL}/api/crew/validate-token`;
   const response = await fetchFn(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({
+      token,
+      orchestratorName: details.orchestratorName,
+      capacitySummary: details.capacitySummary ?? null,
+    }),
   });
 
   if (!response.ok) {
@@ -65,15 +102,21 @@ export async function validateDeviceToken(
 
   const data = (await response.json()) as {
     sessionToken: string;
+    deviceId?: string;
     orchestratorId: string;
     userId: string;
+    username?: string;
+    displayName?: string;
     expiresAt: string;
   };
 
   return {
     sessionToken: data.sessionToken,
+    ...(typeof data.deviceId === "string" ? { deviceId: data.deviceId } : {}),
     orchestratorId: data.orchestratorId,
     userId: data.userId,
+    ...(typeof data.username === "string" ? { username: data.username } : {}),
+    ...(typeof data.displayName === "string" ? { displayName: data.displayName } : {}),
     expiresAt: data.expiresAt,
     connectedAt: new Date().toISOString(),
   };
@@ -89,9 +132,10 @@ export async function pushSnapshot(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      authorization: `Bearer ${session.sessionToken}`,
       "X-Crew-Session": session.sessionToken,
     },
-    body: JSON.stringify(snapshot),
+    body: JSON.stringify({ snapshot }),
   });
 
   if (!response.ok) {

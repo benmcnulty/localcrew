@@ -53,6 +53,39 @@ describe("Display activity lifecycle", () => {
     expect(html).toContain(".paused #dqfill");
     expect(html).toContain(".paused .dbar-fill");
   });
+
+  test("uses a cube-style hexagon logo mark in the billboard header", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain('class="dlogo-mark"');
+    expect(html).toContain('points="12,2 20,7 20,17 12,22 4,17 4,7"');
+    expect(html).toContain('x1="20" y1="7" x2="4" y2="17"');
+  });
+
+  test("prefers the authenticated account username in the billboard header", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain("accountUsername");
+    expect(html).toContain("'ben'");
+    expect(html).toContain("syncHeaderHandle(data)");
+  });
+
+  test("derives busy indicators from explicit task activity instead of stale model names", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain("ar.isBusy===true");
+    expect(html).toContain("fleet.utilizationPct");
+    expect(html).toContain('dmini-pill-lbl">online');
+    expect(html).not.toContain("resource with a running model is busy");
+  });
+
+  test("keeps a minimum gauge height to avoid clipping on short current-focus tasks", () => {
+    const html = getDisplayHtml();
+
+    expect(html).toContain("min-height: clamp(180px, 20vh, 260px)");
+    expect(html).toContain("min-height: clamp(140px, 18vh, 220px)");
+    expect(html).toContain("overflow: visible");
+  });
 });
 
 describe("Served scripts are syntactically valid JavaScript", () => {

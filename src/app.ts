@@ -29,7 +29,7 @@ import {
   validateDeviceToken,
   pushSnapshot,
 } from "./portal.ts";
-import type { PortalSnapshot } from "./portal.ts";
+import type { PortalSession, PortalSnapshot } from "./portal.ts";
 import {
   appendChangelogEntry,
   createAgent,
@@ -87,6 +87,7 @@ import { pingResource, probeResourceModels } from "./resource-discovery.ts";
 import type { ResourceHealthResult, ResourceHealthStatus } from "./resource-discovery.ts";
 import {
   addResource,
+  classifyTask,
   chooseResourceForTask,
   detectTaskPurpose,
   getModelProfile,
@@ -102,6 +103,7 @@ import {
   removeResource,
   renderNetworkTopology,
   renderResourceInventory,
+  resolveResourcePurpose,
   setModelProfile,
   selectModelForEndpoint,
   checkContextBudget,
@@ -1136,6 +1138,7 @@ export class LocalCrewApp {
   private sessions: SessionsFile;
   private systemState: SystemState;
   private runtime: RuntimeState;
+  private portalSession: PortalSession | null;
   private readonly rootDir: string;
   private readonly fetchFn?: FetchFn;
   private readonly speakFn: SpeakFn;
@@ -1176,6 +1179,8 @@ export class LocalCrewApp {
   private consecutiveIdleCycles = 0;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
   private readonly scriptTracker = new ScriptSessionTracker();
+  /** Epoch ms when the app was created — used for uptime calculation. */
+  private readonly _startedAt = Date.now();
 
   private constructor(
     config: AppConfig,
@@ -1187,6 +1192,7 @@ export class LocalCrewApp {
     this.sessions = sessions;
     this.systemState = systemState;
     this.rootDir = options.rootDir ?? process.cwd();
+    this.portalSession = loadPortalSession(this.rootDir);
     this.fetchFn = options.fetchFn;
     this.speakFn = options.speakFn ?? defaultSpeakFn;
     this.warn = options.warn ?? (() => {});
@@ -1256,7 +1262,7 @@ export class LocalCrewApp {
       ...previous,
       queueDepth,
       tokensPerSecond: Number.isFinite(tokensPerSecond) ? tokensPerSecond : previous.tokensPerSecond,
-      activeModel: result.text ? previous.activeModel : previous.activeModel,
+      activeModel: previous.activeModel,
       avgQueueWaitMs
     });
   }
@@ -1269,7 +1275,7 @@ export class LocalCrewApp {
       : Math.max(0, previous.successRate - 0.1);
     this.resourceTelemetry.set(alias, {
       ...previous,
-      activeModel: model,
+      activeModel: previous.activeModel,
       failureCount: nextFailureCount,
       successRate: nextSuccessRate,
       queueDepth: this.systemState.auto.pending.filter(
@@ -1281,6 +1287,17 @@ export class LocalCrewApp {
     if (!success && errorMessage && isNetworkError(errorMessage)) {
       this.networkFailureTimes.set(alias, Date.now());
     }
+  }
+
+  private setResourceActiveModel(alias: string, activeModel: string | null): void {
+    const previous = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
+    this.resourceTelemetry.set(alias, {
+      ...previous,
+      activeModel,
+      queueDepth: this.systemState.auto.pending.filter(
+        (task) => task.requestedResource === alias || task.assignedResource === alias
+      ).length
+    });
   }
 
   /**
@@ -1381,6 +1398,7 @@ export class LocalCrewApp {
 
   private getActiveResourceSummaries(): Array<{
     alias: string;
+    isBusy: boolean;
     activeModel: string | null;
     tokensPerSecond: number;
     queueDepth: number;
@@ -1392,9 +1410,11 @@ export class LocalCrewApp {
     return aliases.map((alias) => {
       const telemetry = this.resourceTelemetry.get(alias) ?? this.getDefaultResourceTelemetry(alias);
       const health = this.resourceHealth.get(alias);
+      const isBusy = this.activeTasksByResource.has(alias);
       return {
         alias,
-        activeModel: telemetry.activeModel,
+        isBusy,
+        activeModel: isBusy ? telemetry.activeModel : null,
         tokensPerSecond: Math.round(telemetry.tokensPerSecond),
         queueDepth: telemetry.queueDepth,
         successRate: Number(telemetry.successRate.toFixed(2)),
@@ -1441,6 +1461,7 @@ export class LocalCrewApp {
     this.pushDisplayEvent({
       type: "state",
       orchestratorName: this.config.orchestratorName,
+      ...(this.getAccountUsername() ? { accountUsername: this.getAccountUsername() } : {}),
       orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       auto: {
@@ -1476,7 +1497,8 @@ export class LocalCrewApp {
       modelProfile: getModelProfile(),
       activeResources: this.getActiveResourceSummaries(),
       resourceHealth: this.getResourceHealthMap(),
-      preferences: prefs ?? {}
+      preferences: prefs ?? {},
+      displayMetrics: this.getDisplayMetrics()
     });
   }
 
@@ -1623,6 +1645,171 @@ export class LocalCrewApp {
     return statuses;
   }
 
+  /**
+   * Compute derived display metrics for the billboard wallboard.
+   * Returns structured data for operational status, fleet summary,
+   * back-pressure, and queue health.
+   */
+  private getDisplayMetrics(): {
+    systemStatus: {
+      overallState: "active" | "degraded" | "blocked" | "idle" | "recovering";
+      backPressure: "nominal" | "rising" | "high" | "critical";
+      bottleneck: string;
+      uptimeMs: number;
+    };
+    fleetSummary: {
+      totalNodes: number;
+      onlineNodes: number;
+      activeNodes: number;
+      idleNodes: number;
+      errorNodes: number;
+      utilizationPct: number;
+    };
+    queueHealth: {
+      oldestPendingAgeSec: number;
+      oldestRunningAgeSec: number;
+      failedCount: number;
+      retryCount: number;
+      stalledCount: number;
+      drainRatePerMin: number;
+    };
+    dispatch: {
+      state: string;
+      reason: string;
+      strategy: string;
+    };
+  } {
+    const now = Date.now();
+    const resources = listResources(this.rootDir);
+    const totalNodes = resources.length;
+    let onlineNodes = 0;
+    let errorNodes = 0;
+    const activeAliases = new Set([...this.activeTasksByResource.keys()]);
+
+    for (const r of resources) {
+      const h = this.resourceHealth.get(r.alias);
+      if (h && h.status === "offline") {
+        errorNodes++;
+      } else {
+        onlineNodes++;
+      }
+    }
+
+    const activeNodes = activeAliases.size;
+    const idleNodes = Math.max(0, onlineNodes - activeNodes);
+    const utilizationPct = onlineNodes > 0 ? Math.round((activeNodes / onlineNodes) * 100) : 0;
+
+    // Back-pressure: compare pending queue depth to desired depth
+    const pending = this.systemState.auto.pending.length;
+    const desired = this.getDesiredPendingDepth();
+    const ratio = desired > 0 ? pending / desired : 0;
+    let backPressure: "nominal" | "rising" | "high" | "critical" = "nominal";
+    if (activeNodes > 0 && idleNodes === 0 && pending > desired) backPressure = "rising";
+    if (ratio >= 1.5 && idleNodes === 0) backPressure = "high";
+    if (ratio >= 2.5 || (errorNodes > 0 && pending > desired)) backPressure = "critical";
+
+    // Bottleneck detection
+    let bottleneck = "none";
+    if (errorNodes > 0) {
+      const offlineNames = resources
+        .filter(r => this.resourceHealth.get(r.alias)?.status === "offline")
+        .map(r => r.alias);
+      bottleneck = offlineNames.join(", ") + " offline";
+    } else if (backPressure !== "nominal" && activeNodes >= onlineNodes) {
+      bottleneck = "all nodes saturated";
+    } else if (this.activeCycleCount >= this.getEffectiveParallelCycleLimit()) {
+      bottleneck = "parallel cycle limit reached";
+    }
+
+    // Overall state
+    let overallState: "active" | "degraded" | "blocked" | "idle" | "recovering" = "idle";
+    if (activeNodes > 0) overallState = "active";
+    if (errorNodes > 0 && activeNodes > 0) overallState = "degraded";
+    if (errorNodes > 0 && activeNodes === 0 && pending > 0) overallState = "blocked";
+    if (!this.isAutoMode() && activeNodes === 0) overallState = "idle";
+    if (errorNodes > 0 && activeNodes > 0 && backPressure === "nominal") overallState = "recovering";
+
+    // Queue health
+    let oldestPendingAgeSec = 0;
+    let oldestRunningAgeSec = 0;
+    for (const task of this.systemState.auto.pending) {
+      if (task.createdAt) {
+        const age = (now - new Date(task.createdAt).getTime()) / 1000;
+        if (age > oldestPendingAgeSec) oldestPendingAgeSec = age;
+      }
+    }
+    for (const task of this.activeTasksByResource.values()) {
+      if (task.startedAt) {
+        const age = (now - new Date(task.startedAt).getTime()) / 1000;
+        if (age > oldestRunningAgeSec) oldestRunningAgeSec = age;
+      }
+    }
+    const failedCount = this.systemState.auto.completed.filter(t => t.status === "failed").length;
+    const stalledCount = [...this.activeTasksByResource.values()].filter(t => {
+      if (!t.startedAt) return false;
+      return (now - new Date(t.startedAt).getTime()) > 5 * 60 * 1000; // >5 min
+    }).length;
+
+    // Drain rate: completed in last 10 minutes → per minute
+    const tenMinAgo = now - 10 * 60 * 1000;
+    const recentCompleted = this.systemState.auto.completed.filter(t =>
+      t.completedAt && new Date(t.completedAt).getTime() > tenMinAgo
+    ).length;
+    const drainRatePerMin = Number((recentCompleted / 10).toFixed(1));
+
+    // Dispatch state
+    let dispatchState = "dispatching";
+    let dispatchReason = "";
+    let strategy = "maximize throughput";
+    if (!this.isAutoMode()) {
+      dispatchState = "manual";
+      dispatchReason = "auto mode off";
+      strategy = "user-directed";
+    } else if (pending === 0 && activeNodes === 0) {
+      dispatchState = "idle";
+      dispatchReason = "queue empty";
+      strategy = "awaiting queue fill";
+    } else if (this.activeCycleCount >= this.getEffectiveParallelCycleLimit()) {
+      dispatchState = "at capacity";
+      dispatchReason = "parallel limit " + this.getEffectiveParallelCycleLimit();
+      strategy = "drain active tasks";
+    } else if (backPressure !== "nominal") {
+      dispatchState = "throttled";
+      dispatchReason = "back pressure " + backPressure;
+      strategy = "rebalance to idle nodes";
+    }
+
+    return {
+      systemStatus: {
+        overallState,
+        backPressure,
+        bottleneck,
+        uptimeMs: now - (this._startedAt ?? now),
+      },
+      fleetSummary: {
+        totalNodes,
+        onlineNodes,
+        activeNodes,
+        idleNodes,
+        errorNodes,
+        utilizationPct,
+      },
+      queueHealth: {
+        oldestPendingAgeSec: Math.round(oldestPendingAgeSec),
+        oldestRunningAgeSec: Math.round(oldestRunningAgeSec),
+        failedCount,
+        retryCount: 0,
+        stalledCount,
+        drainRatePerMin,
+      },
+      dispatch: {
+        state: dispatchState,
+        reason: dispatchReason,
+        strategy,
+      },
+    };
+  }
+
   shouldAutoPulse(): boolean {
     return this.isAutoMode() && this.activeCycleCount < this.getEffectiveParallelCycleLimit();
   }
@@ -1743,8 +1930,9 @@ export class LocalCrewApp {
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
       `Dropbox: ${dropbox.inbox.length} inbox / ${dropbox.active.length} active / ${dropbox.outbox.length} outbox`,
       `Telemetry: ${telemetry.totalEvents} events, ${telemetry.byKind["ollama.chat"] ?? 0} model calls, ${telemetry.wikipedia.calls} wiki searches`,
-      `Recent model metrics: ${topModels.length > 0 ? topModels.map((key) => formatTelemetryBucket(telemetry, key)).join(" | ") : "(none yet)"}`,
       `Last audit: ${lastAudit ? `#${lastAudit.id} ${lastAudit.summary}` : "(none yet)"}`,
+      `Top models:${topModels.length > 0 ? "" : " (none yet)"}`,
+      ...(topModels.map((key) => `  ${formatTelemetryBucket(telemetry, key)}`)),
       `Docs: focus ${internalFiles.focusTodo.modifiedAt} | roadmap ${internalFiles.roadmap.modifiedAt}`,
       `Docs: changelog ${internalFiles.changelog.modifiedAt} | directives ${internalFiles.directives.modifiedAt}`,
       `Explorer roots: ${getStoragePaths(this.rootDir).systemDir} | ${getDropboxPaths(this.rootDir).externalMemoryDir}`,
@@ -1755,6 +1943,7 @@ export class LocalCrewApp {
 
   async getStatusSnapshot(): Promise<{
     orchestratorName: string;
+    accountUsername?: string;
     orchestratorAlias: string;
     mode: ReplMode;
     prompt: string;
@@ -1787,6 +1976,7 @@ export class LocalCrewApp {
     modelProfile: ReturnType<typeof getModelProfile>;
     activeResources: ReturnType<LocalCrewApp["getActiveResourceSummaries"]>;
     resourceHealth: ReturnType<LocalCrewApp["getResourceHealthMap"]>;
+    displayMetrics: ReturnType<LocalCrewApp["getDisplayMetrics"]>;
   }> {
     const [agents, docs, telemetry, dropbox] = await Promise.all([
       listAgents(this.rootDir),
@@ -1801,6 +1991,7 @@ export class LocalCrewApp {
 
     return {
       orchestratorName: this.config.orchestratorName,
+      ...(this.getAccountUsername() ? { accountUsername: this.getAccountUsername() } : {}),
       orchestratorAlias: this.resolveOrchestratorAlias(),
       mode: this.runtime.mode,
       prompt: this.getPrompt(),
@@ -1832,7 +2023,8 @@ export class LocalCrewApp {
       systemTps: this.getSystemTps(),
       modelProfile: getModelProfile(),
       activeResources: this.getActiveResourceSummaries(),
-      resourceHealth: this.getResourceHealthMap()
+      resourceHealth: this.getResourceHealthMap(),
+      displayMetrics: this.getDisplayMetrics()
     };
   }
 
@@ -1909,19 +2101,55 @@ export class LocalCrewApp {
 
   buildPortalSnapshot(): PortalSnapshot {
     const status = this.getStatusBarState();
-    const resources = listResources(this.rootDir).map((r) => ({
-      alias: r.alias,
-      label: r.label,
-      tier: r.tier,
+    const failedCount = this.systemState.auto.completed.filter((task) => task.status === "failed").length;
+    const nextTask = this.sortPendingTasks(this.systemState.auto.pending)[0];
+    const lastCompleted = this.getLastCompletedSummary();
+    const activeResources = new Map(this.getActiveResourceSummaries().map((resource) => [resource.alias, resource]));
+    const resources = listResources(this.rootDir).map((resource) => ({
+      alias: resource.alias,
+      tier: resource.tier,
+      isBusy: activeResources.get(resource.alias)?.isBusy === true,
+      model:
+        activeResources.get(resource.alias)?.isBusy === true
+          ? activeResources.get(resource.alias)?.activeModel ?? resource.defaultModel
+          : null,
     }));
+    const dailySession = this.systemState.auto.dailySession
+      ? {
+          active: !this.systemState.auto.dailySession.completedAt,
+          startTime: this.systemState.auto.dailySession.startedAt ?? null,
+          taskCount: this.systemState.auto.dailySession.tasksCompleted,
+          errorCount: this.systemState.auto.dailySession.tasksErrored,
+        }
+      : null;
+
     return {
       mode: status.mode,
-      queueDepth: status.queuePending,
-      resourceCount: status.resourceCount,
-      autoBusy: status.autoBusy,
-      autoEnabled: status.autoEnabled,
+      busy: status.autoBusy,
+      queueDepth: {
+        pending: status.queuePending,
+        completed: status.queueCompleted,
+        failed: failedCount,
+      },
+      nextTask: nextTask
+        ? {
+            priority: nextTask.priority,
+            content: nextTask.content,
+            resourceAlias: nextTask.assignedResource ?? nextTask.requestedResource ?? null,
+          }
+        : null,
+      lastCompleted: lastCompleted
+        ? {
+            content: lastCompleted.content,
+            resourceAlias: lastCompleted.resourceAlias,
+          }
+        : null,
       orchestratorName: status.orchestratorName,
       resources,
+      capacity: getResourceCapacitySummary(this.rootDir),
+      modelProfile: getModelProfile(),
+      tps: this.getSystemTps(),
+      dailySession,
     };
   }
 
@@ -3006,6 +3234,11 @@ export class LocalCrewApp {
     return this.config.orchestratorName;
   }
 
+  private getAccountUsername(): string | undefined {
+    const username = this.portalSession?.username?.trim().replace(/^@+/, "");
+    return username ? username.toLowerCase() : undefined;
+  }
+
   /**
    * Build a short context block describing the current daily work session
    * state for injection into auto task and queue fill messages.
@@ -3204,6 +3437,136 @@ export class LocalCrewApp {
     } catch (error) {
       const errorMsg = (error as Error).message;
       this.updateResourceOutcome(options.resourceAlias, options.endpoint.model, false, errorMsg);
+
+      const fallbackEndpoint = this.getSpecializedModelFallbackEndpoint(
+        options.endpoint,
+        options.resourceAlias,
+        options.scope,
+        errorMsg
+      );
+
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "ollama.chat",
+          scope: options.scope,
+          summary: options.summary,
+          success: false,
+          actor: options.actor,
+          resourceAlias: options.resourceAlias,
+          target: options.target,
+          model: options.endpoint.model,
+          durationMs: Date.now() - started,
+          promptMessageCount: options.messages.length,
+          promptChars: options.messages.reduce((total, message) => total + message.content.length, 0),
+          requestMessages: options.messages,
+          error: (error as Error).message
+        },
+        this.rootDir
+      );
+
+      if (fallbackEndpoint) {
+        const fallbackStarted = Date.now();
+        this.warn(
+          `Falling back from ${options.endpoint.model} to ${fallbackEndpoint.model} on @${options.resourceAlias} after transient failure.`
+        );
+
+        await appendAuditEvent(
+          {
+            timestamp: new Date().toISOString(),
+            kind: "system",
+            scope: `${options.scope}.model-fallback`,
+            summary: `Retrying ${options.summary.toLowerCase()} on @${options.resourceAlias} with default model ${fallbackEndpoint.model}.`,
+            success: true,
+            actor: options.actor,
+            resourceAlias: options.resourceAlias,
+            target: options.target,
+            model: fallbackEndpoint.model,
+            metadata: {
+              failedModel: options.endpoint.model,
+              failedError: errorMsg
+            }
+          },
+          this.rootDir
+        );
+
+        try {
+          const fallbackResult = await chatWithOllamaDetailed(
+            fallbackEndpoint,
+            options.messages,
+            this.fetchFn,
+            options.timeoutMs,
+            options.abortSignal
+          );
+          const fallbackDurationMs =
+            typeof fallbackResult.totalDuration === "number"
+              ? Math.round(fallbackResult.totalDuration / 1_000_000)
+              : Date.now() - fallbackStarted;
+
+          this.updateResourceTelemetry(options.resourceAlias, fallbackResult, fallbackDurationMs);
+          this.updateResourceOutcome(options.resourceAlias, fallbackEndpoint.model, true);
+
+          await appendAuditEvent(
+            {
+              timestamp: new Date().toISOString(),
+              kind: "ollama.chat",
+              scope: `${options.scope}.model-fallback`,
+              summary: `${options.summary} (default-model fallback).`,
+              success: true,
+              actor: options.actor,
+              resourceAlias: options.resourceAlias,
+              target: options.target,
+              model: fallbackEndpoint.model,
+              durationMs: fallbackDurationMs,
+              promptMessageCount: options.messages.length,
+              promptChars: options.messages.reduce((total, message) => total + message.content.length, 0),
+              responseChars: fallbackResult.text.length,
+              promptEvalCount: fallbackResult.promptEvalCount,
+              evalCount: fallbackResult.evalCount,
+              requestMessages: options.messages,
+              responseText: fallbackResult.text,
+              metadata: {
+                failedModel: options.endpoint.model
+              }
+            },
+            this.rootDir
+          );
+
+          return fallbackResult;
+        } catch (fallbackError) {
+          this.updateResourceOutcome(
+            options.resourceAlias,
+            fallbackEndpoint.model,
+            false,
+            (fallbackError as Error).message
+          );
+          await appendAuditEvent(
+            {
+              timestamp: new Date().toISOString(),
+              kind: "ollama.chat",
+              scope: `${options.scope}.model-fallback`,
+              summary: `${options.summary} (default-model fallback).`,
+              success: false,
+              actor: options.actor,
+              resourceAlias: options.resourceAlias,
+              target: options.target,
+              model: fallbackEndpoint.model,
+              durationMs: Date.now() - fallbackStarted,
+              promptMessageCount: options.messages.length,
+              promptChars: options.messages.reduce((total, message) => total + message.content.length, 0),
+              requestMessages: options.messages,
+              error: (fallbackError as Error).message,
+              metadata: {
+                failedModel: options.endpoint.model,
+                initialError: errorMsg
+              }
+            },
+            this.rootDir
+          );
+          throw fallbackError;
+        }
+      }
+
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -4682,6 +5045,68 @@ export class LocalCrewApp {
     return getResourceEndpoint(selection.alias, purpose, this.rootDir);
   }
 
+  private getOperationalEndpointForTask(
+    resourceAlias: string,
+    desiredPurpose: "default" | "reasoning" | "coding" | "tools",
+    taskContent: string
+  ): EndpointConfig {
+    const resource = getResourceProfile(resourceAlias, this.rootDir);
+    const liveMetrics = this.liveDeviceMetrics.get(resourceAlias);
+    const baseTelemetry = this.resourceTelemetry.get(resourceAlias) ?? this.getDefaultResourceTelemetry(resourceAlias);
+    const ramUsagePct = liveMetrics
+      ? Math.round((1 - liveMetrics.freeMemGb / liveMetrics.totalMemGb) * 100)
+      : baseTelemetry.ramUsagePct;
+    const cpuLoadPct =
+      liveMetrics && typeof resource.cpuLogicalCores === "number" && resource.cpuLogicalCores > 0
+        ? Math.max(0, Math.min(100, Math.round((liveMetrics.loadAvg1m / resource.cpuLogicalCores) * 100)))
+        : baseTelemetry.cpuLoadPct;
+    const resolvedPurpose = resolveResourcePurpose(
+      resource,
+      desiredPurpose,
+      classifyTask(taskContent),
+      {
+        ...baseTelemetry,
+        ramUsagePct,
+        ...(cpuLoadPct !== undefined ? { cpuLoadPct } : {})
+      },
+      this.getResourceHealth(resourceAlias)?.status
+    );
+
+    return getResourceEndpoint(resourceAlias, resolvedPurpose, this.rootDir);
+  }
+
+  private getSpecializedModelFallbackEndpoint(
+    endpoint: EndpointConfig,
+    resourceAlias: string,
+    scope: string,
+    errorMessage: string
+  ): EndpointConfig | null {
+    const isAutonomousScope = scope.startsWith("auto.") || scope === "agent.create";
+    const transientFailure =
+      isNetworkError(errorMessage) ||
+      /^HTTP 5\d\d/.test(errorMessage) ||
+      /missing message\.content/i.test(errorMessage) ||
+      /timed out/i.test(errorMessage);
+
+    if (!isAutonomousScope || !transientFailure) {
+      return null;
+    }
+
+    const profile = getResourceProfile(resourceAlias, this.rootDir);
+    const specializedModels = [profile.reasoningModel, profile.codingModel, profile.toolsModel].filter(
+      (model): model is string => Boolean(model && model.trim())
+    );
+
+    if (!specializedModels.includes(endpoint.model) || endpoint.model === profile.defaultModel) {
+      return null;
+    }
+
+    return {
+      ...endpoint,
+      model: profile.defaultModel
+    };
+  }
+
   private async queueParsedTasks(
     queuedTasks: Array<{
       priority: TaskPriority;
@@ -5189,76 +5614,76 @@ export class LocalCrewApp {
       currentDateTime: formatCurrentDateTime()
     });
 
-    try {
-      const result = await this.callModel({
-        scope: "auto.task.preflight",
-        actor: "orchestrator",
-        endpoint: options.endpoint,
-        resourceAlias: options.resourceAlias,
-        target: `task:${options.task.id}`,
-        messages,
-        summary: `Pre-flight reasoning for auto task #${options.task.id}.`,
-        abortSignal: this.autoCycleAbort?.signal
-      });
-      const preflightText = result.text.trim();
-      if (!preflightText) {
+      try {
+        const result = await this.callModel({
+          scope: "auto.task.preflight",
+          actor: "orchestrator",
+          endpoint: options.endpoint,
+          resourceAlias: options.resourceAlias,
+          target: `task:${options.task.id}`,
+          messages,
+          summary: `Pre-flight reasoning for auto task #${options.task.id}.`,
+          abortSignal: this.autoCycleAbort?.signal
+        });
+        const preflightText = result.text.trim();
+        if (!preflightText) {
+          return null;
+        }
+        return `Pre-flight analysis:\n${preflightText}`;
+      } catch {
+        // Pre-flight is advisory — proceed with the task even if it fails.
         return null;
       }
-      return `Pre-flight analysis:\n${preflightText}`;
-    } catch {
-      // Pre-flight is advisory — proceed with the task even if it fails.
-      return null;
-    }
-  }
-
-  private async ingestNextInboxDocumentTask(): Promise<{
-    documentName: string;
-    relativePath: string;
-    task: AutoQueueTask;
-  } | null> {
-    const ingested = await ingestNextInboxDocument(this.rootDir);
-    if (!ingested) {
-      return null;
     }
 
-    const task = await this.enqueueAutoTask(
-      `Review the active external document "${ingested.name}", extract the requested work, produce the best next artifact for it, and queue any follow-up tasks that are needed.`,
-      "high",
-      "external-memory:inbox",
-      {
-        sourceDocumentRelativePath: ingested.relativePath,
-        sourceDocumentName: ingested.name
+    private async ingestNextInboxDocumentTask(): Promise<{
+      documentName: string;
+      relativePath: string;
+      task: AutoQueueTask;
+    } | null> {
+      const ingested = await ingestNextInboxDocument(this.rootDir);
+      if (!ingested) {
+        return null;
       }
-    );
 
-    await appendAuditEvent(
-      {
-        timestamp: new Date().toISOString(),
-        kind: "system",
-        scope: "dropbox.ingest",
-        summary: `Moved external document ${ingested.relativePath} from inbox to active and queued task #${task.id}.`,
-        success: true,
-        actor: "orchestrator",
-        target: ingested.relativePath,
-        metadata: {
-          sourceStage: ingested.sourceStage,
-          destinationStage: ingested.stage,
-          taskId: task.id
+      const task = await this.enqueueAutoTask(
+        `Review the active external document "${ingested.name}", extract the requested work, produce the best next artifact for it, and queue any follow-up tasks that are needed.`,
+        "high",
+        "external-memory:inbox",
+        {
+          sourceDocumentRelativePath: ingested.relativePath,
+          sourceDocumentName: ingested.name
         }
-      },
-      this.rootDir
-    );
-    await appendChangelogEntry(
-      `Moved external document ${ingested.relativePath} from inbox to active and queued auto task #${task.id}.`,
-      this.rootDir
-    );
+      );
 
-    return {
-      documentName: ingested.name,
-      relativePath: ingested.relativePath,
-      task
-    };
-  }
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "dropbox.ingest",
+          summary: `Moved external document ${ingested.relativePath} from inbox to active and queued task #${task.id}.`,
+          success: true,
+          actor: "orchestrator",
+          target: ingested.relativePath,
+          metadata: {
+            sourceStage: ingested.sourceStage,
+            destinationStage: ingested.stage,
+            taskId: task.id
+          }
+        },
+        this.rootDir
+      );
+      await appendChangelogEntry(
+        `Moved external document ${ingested.relativePath} from inbox to active and queued auto task #${task.id}.`,
+        this.rootDir
+      );
+
+      return {
+        documentName: ingested.name,
+        relativePath: ingested.relativePath,
+        task
+      };
+    }
 
   private async requestAgentReply(agent: AgentMeta, userMessage: string): Promise<CommandResult> {
     try {
@@ -5447,9 +5872,17 @@ export class LocalCrewApp {
       allResources.find((r) => r.alias !== orchestratorAlias) ??
       null;
     const draftAlias = draftResource?.alias ?? orchestratorAlias;
-    const draftEndpoint = getResourceEndpoint(draftAlias, "reasoning", this.rootDir);
+    const draftEndpoint = this.getOperationalEndpointForTask(
+      draftAlias,
+      "reasoning",
+      "Draft and refine the autonomous queue backlog with enough headroom left for execution."
+    );
     // Finalize always uses the orchestrator — it makes the final queue decision.
-    const finalizeEndpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+    const finalizeEndpoint = this.getOperationalEndpointForTask(
+      orchestratorAlias,
+      "reasoning",
+      "Finalize the autonomous queue backlog after critique and preserve reasoning headroom for execution."
+    );
     const fillDateTime = formatCurrentDateTime();
     const draftMessages = buildQueueFillMessages({
       directives: documents.directives,
@@ -5921,6 +6354,7 @@ export class LocalCrewApp {
       };
       activeResourceAlias = selection.alias;
       this.activeTasksByResource.set(activeResourceAlias, activeTask);
+      this.setResourceActiveModel(activeResourceAlias, endpoint.model);
 
       if (contextBudgetRerouteAudit) {
         await appendAuditEvent(
@@ -6299,6 +6733,7 @@ export class LocalCrewApp {
     } finally {
       if (activeResourceAlias) {
         this.activeTasksByResource.delete(activeResourceAlias);
+        this.setResourceActiveModel(activeResourceAlias, null);
         this.pushDisplayState();
       }
       this.processingTaskIds.delete(task.id);
@@ -6499,7 +6934,11 @@ export class LocalCrewApp {
     try {
       const documents = await loadSystemDocuments(this.rootDir);
       const orchestratorAlias = this.resolveOrchestratorAlias();
-      const endpoint = getResourceEndpoint(orchestratorAlias, "reasoning", this.rootDir);
+      const endpoint = this.getOperationalEndpointForTask(
+        orchestratorAlias,
+        "reasoning",
+        normalizedAnswers.mission
+      );
       const specMessages: ChatMessage[] = [
           {
             role: "system",
@@ -6725,7 +7164,7 @@ export class LocalCrewApp {
       }
 
       if (command.type === "login") {
-        const existingSession = loadPortalSession(this.rootDir);
+        const existingSession = this.portalSession;
 
         if (!command.token) {
           return {
@@ -6743,9 +7182,17 @@ export class LocalCrewApp {
         }
 
         try {
-          const result = await validateDeviceToken(command.token, this.fetchFn ?? fetch);
+          const result = await validateDeviceToken(
+            command.token,
+            {
+              orchestratorName: this.getOrchestratorName(),
+              capacitySummary: getResourceCapacitySummary(this.rootDir),
+            },
+            this.fetchFn ?? fetch
+          );
           const session = { ...result, connectedAt: new Date().toISOString() };
           await savePortalSession(this.rootDir, session);
+          this.portalSession = session;
           await pushSnapshot(session, this.buildPortalSnapshot(), this.fetchFn ?? fetch);
           return {
             lines: [

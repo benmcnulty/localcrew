@@ -2082,27 +2082,27 @@ export function getDisplayHtml(): string {
       --fs-lg:     1.2rem;
       --fs-xl:     1.8rem;
       --fs-metric: 2.2rem;
-      --fs-task:   1.02rem;
+      --fs-task:   0.82rem;
     }
     @media (max-width: 374px) {
       :root {
         --topbar-h:42px;--logbar-h:30px;--gap:5px;--pad:8px;--radius:4px;
         --fs-xs:0.56rem;--fs-sm:0.66rem;--fs-base:0.76rem;--fs-md:0.86rem;
-        --fs-xl:1.4rem;--fs-metric:1.7rem;--fs-task:0.85rem;
+        --fs-xl:1.4rem;--fs-metric:1.7rem;--fs-task:0.72rem;
       }
     }
     @media (min-width: 375px) and (max-width: 767px) {
       :root {
         --topbar-h:46px;--logbar-h:33px;--gap:7px;--pad:10px;--radius:5px;
         --fs-xs:0.60rem;--fs-sm:0.70rem;--fs-base:0.80rem;--fs-md:0.92rem;
-        --fs-xl:1.6rem;--fs-metric:2.0rem;--fs-task:0.92rem;
+        --fs-xl:1.6rem;--fs-metric:2.0rem;--fs-task:0.78rem;
       }
     }
     @media (min-width: 768px) {
       :root {
         --topbar-h:56px;--logbar-h:40px;--gap:12px;--pad:16px;
         --fs-sm:0.78rem;--fs-base:0.88rem;--fs-md:1.05rem;
-        --fs-xl:2.1rem;--fs-metric:3rem;--fs-task:1.1rem;
+        --fs-xl:2.1rem;--fs-metric:3rem;--fs-task:0.88rem;
       }
     }
     @media (min-width: 1024px) and (max-width: 1199px) {
@@ -2113,7 +2113,7 @@ export function getDisplayHtml(): string {
       :root {
         --topbar-h:60px;--logbar-h:42px;--gap:16px;--pad:20px;
         --fs-xs:0.66rem;--fs-sm:0.8rem;--fs-base:0.9rem;--fs-md:1.05rem;
-        --fs-lg:1.3rem;--fs-xl:2.3rem;--fs-metric:2.4rem;--fs-task:1.2rem;
+        --fs-lg:1.3rem;--fs-xl:2.3rem;--fs-metric:2.4rem;--fs-task:0.95rem;
       }
     }
     @media (min-width: 2560px) {
@@ -2193,8 +2193,17 @@ export function getDisplayHtml(): string {
       padding: 0 var(--pad); gap: var(--gap); flex-shrink: 0;
     }
     .dlogo {
+      display: flex; align-items: center; gap: 0.34em;
       font-size: var(--fs-lg); font-weight: 900;
       letter-spacing: -0.01em; white-space: nowrap; flex-shrink: 0;
+    }
+    .dlogo-mark {
+      width: 0.88em; height: 0.88em; flex-shrink: 0;
+      color: var(--n-blue);
+      filter: drop-shadow(0 0 10px rgba(0,212,255,0.45)) drop-shadow(0 0 18px rgba(0,255,127,0.15));
+    }
+    .dlogo-mark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+    .dlogo-text {
       background: linear-gradient(120deg, var(--n-blue) 0%, var(--n-green) 52%, var(--n-purple) 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
       filter: drop-shadow(0 0 10px rgba(0,212,255,0.4)) drop-shadow(0 0 22px rgba(0,255,127,0.18));
@@ -2220,6 +2229,27 @@ export function getDisplayHtml(): string {
     #dmode.m-agent  { color:var(--n-amber); border-color:rgba(255,204,0,0.5); background:rgba(255,204,0,0.07); text-shadow:0 0 8px var(--n-amber); }
     #dmode.m-command { color:var(--muted2); }
     .dtop-right { display:flex;align-items:center;gap:0.8em;white-space:nowrap;flex-shrink:0; }
+    .doverlay-btn {
+      border: 1px solid rgba(0,212,255,0.2);
+      background: rgba(0,212,255,0.05);
+      color: rgba(0,212,255,0.55);
+      border-radius: 4px;
+      padding: 0.22em 0.6em;
+      font-size: var(--fs-xs);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+    }
+    .doverlay-btn:hover {
+      background: rgba(0,212,255,0.12);
+      color: var(--n-blue);
+    }
+    .dtop-sep {
+      width: 1px; height: 1.4em;
+      background: rgba(0,212,255,0.15);
+      margin: 0 0.2em;
+      flex-shrink: 0;
+    }
     .dactivity {
       font-size: var(--fs-xs);
       color: var(--muted2);
@@ -2259,13 +2289,71 @@ export function getDisplayHtml(): string {
       0%,100% { box-shadow: 0 0 4px currentColor, 0 0 8px currentColor; }
       50% { box-shadow: 0 0 8px currentColor, 0 0 24px currentColor, 0 0 48px currentColor; }
     }
-    .ddot-green { background: #00ff7f; color: #00ff7f; animation: dotPulse 2.2s ease-in-out infinite; }
+    .ddot-green { background: #00ff7f; color: #00ff7f; }
     .ddot-amber { background: var(--n-amber); color: var(--n-amber); animation: dotPulse 1.2s ease-in-out infinite; }
     .ddot-pink  { background: var(--n-pink); color: var(--n-pink); animation: dotPulse 1.8s ease-in-out infinite; }
     .ddot-blue  { background: var(--n-blue); color: var(--n-blue); animation: dotPulse 2s ease-in-out infinite; }
     .ddot-red   { background: #ff3333; color: #ff3333; }
     @keyframes busyPulse { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
     .dpulse { animation: busyPulse 1.2s ease-in-out infinite; }
+
+    /* ── Status banner ─────────────────────────────────────────────────── */
+    #dstatus-banner {
+      display: flex; align-items: center; gap: 0.6em; flex-wrap: nowrap;
+      padding: 0.35em var(--pad); height: 28px; flex-shrink: 0;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid rgba(0,212,255,0.08);
+      font-family: "SF Mono",ui-monospace,monospace;
+      font-size: var(--fs-xs); color: var(--muted2);
+      overflow: hidden; white-space: nowrap;
+    }
+    #dstatus-banner > span { flex-shrink: 0; }
+    #dstatus-banner > span:last-child { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .dstatus-chip {
+      font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+      padding: 0.15em 0.5em; border-radius: 3px;
+    }
+    .dstatus-active    { background: rgba(0,255,127,0.12); color: #00ff7f; border: 1px solid rgba(0,255,127,0.3); }
+    .dstatus-idle      { background: rgba(90,90,90,0.15);  color: var(--muted2); border: 1px solid rgba(90,90,90,0.3); }
+    .dstatus-degraded  { background: rgba(255,204,0,0.12); color: var(--n-amber); border: 1px solid rgba(255,204,0,0.3); }
+    .dstatus-blocked   { background: rgba(255,45,120,0.12); color: #ff2d78; border: 1px solid rgba(255,45,120,0.3); }
+    .dstatus-recovering { background: rgba(0,212,255,0.12); color: var(--n-blue); border: 1px solid rgba(0,212,255,0.3); }
+    .dstatus-dim { opacity: 0.5; }
+    .dstatus-sep { opacity: 0.2; }
+
+    /* ── KPI group (right panel) ───────────────────────────────────────── */
+    .dkpi-group {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px; flex-shrink: 0;
+    }
+    @media (min-width: 1920px) { .dkpi-group { gap: 6px; } }
+    .dkpi {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 0.35em 0.3em; border-radius: 4px;
+      background: rgba(255,45,120,0.04);
+      border: 1px solid rgba(255,45,120,0.12);
+      gap: 0.15em; min-width: 0;
+    }
+    .dkpi-val {
+      font-size: var(--fs-md); font-weight: 800; font-variant-numeric: tabular-nums;
+      font-family: "SF Mono",ui-monospace,monospace;
+      color: rgba(255,45,120,0.85); line-height: 1;
+    }
+    .dkpi-lbl {
+      font-size: clamp(0.45rem, var(--fs-xs), 0.7rem); text-transform: uppercase;
+      letter-spacing: 0.06em; opacity: 0.4; text-align: center; line-height: 1.1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+    }
+
+    /* ── Task primary card accent ──────────────────────────────────────── */
+    .dtask-primary {
+      border-left-color: var(--n-amber);
+      background: rgba(255,204,0,0.04);
+    }
+    .dtask-primary .dtask-label { color: rgba(255,204,0,0.6); }
+    .dtask-meta-row {
+      margin-top: 0.3em; display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap;
+      font-size: var(--fs-xs);
+    }
 
     /* ── Flash on value update ────────────────────────────────────────────── */
     @keyframes valFlash {
@@ -2318,7 +2406,19 @@ export function getDisplayHtml(): string {
     .dpanel-title {
       font-size: var(--fs-xs); font-weight: 800; text-transform: uppercase;
       letter-spacing: 0.12em; color: var(--muted2); flex-shrink: 0;
+      display: flex; align-items: center; gap: 0.4em;
     }
+    .dpanel-title .dmini-inline {
+      margin-left: auto; display: flex; gap: 4px; align-items: center;
+    }
+    .dmini-inline .dmini-pill {
+      display: flex; align-items: center; gap: 0.25em;
+      background: rgba(0,255,127,0.06); border: 1px solid rgba(0,255,127,0.18);
+      border-radius: 3px; padding: 0.1em 0.4em;
+      font-size: clamp(0.5rem, 0.55rem, 0.65rem); font-weight: 800;
+      color: #00ff7f; font-variant-numeric: tabular-nums;
+    }
+    .dmini-pill-lbl { color: rgba(0,255,127,0.45); font-weight: 600; }
     #dpnet  .dpanel-title { color: rgba(0,255,127,0.5); }
     #dpmain .dpanel-title { color: rgba(0,212,255,0.5); }
     #dpmet  .dpanel-title { color: rgba(255,45,120,0.5); }
@@ -2329,37 +2429,50 @@ export function getDisplayHtml(): string {
 
     /* ── Network panel ────────────────────────────────────────────────────── */
     #dres-grid {
-      display: flex; flex-direction: column; gap: 5px;
+      display: flex; flex-direction: column; gap: 3px;
       overflow-y: auto; flex: 1; min-height: 0;
     }
     .dres-card {
-      display: flex; align-items: center; gap: 0.6em;
-      padding: 0.5em 0.7em;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.2em 0.4em;
+      padding: 0.3em 0.5em;
       background: rgba(0,255,127,0.04);
       border: 1px solid rgba(0,255,127,0.15);
       border-radius: 4px; flex-shrink: 0;
     }
     .dres-name {
-      font-size: var(--fs-sm); font-weight: 600;
+      font-size: var(--fs-xs); font-weight: 600;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
     }
     @media (min-width: 1920px) {
       .dres-name { white-space: normal; word-break: break-word; -webkit-line-clamp: 2;
         display: -webkit-box; -webkit-box-orient: vertical; }
     }
+    .dres-meta {
+      display: flex; align-items: center; gap: 0.4em;
+      width: 100%; padding-left: 0.9em;
+    }
     .dtier {
-      font-size: var(--fs-xs); font-weight: 800; padding: 0.1em 0.55em;
+      font-size: clamp(0.5rem, 0.55rem, 0.6rem); font-weight: 800; padding: 0.05em 0.4em;
       border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0;
     }
-    .dtier-top { background: rgba(0,255,127,0.12); color: #00ff7f; border: 1px solid rgba(0,255,127,0.3); }
-    .dtier-mid { background: rgba(255,204,0,0.10); color: var(--n-amber); border: 1px solid rgba(255,204,0,0.3); }
-    .dtier-low { background: rgba(90,90,90,0.12);  color: var(--muted2);  border: 1px solid rgba(90,90,90,0.3); }
+    .drole-captain { background: rgba(0,255,127,0.12); color: #00ff7f; border: 1px solid rgba(0,255,127,0.3); }
+    .drole-mate { background: rgba(255,204,0,0.10); color: var(--n-amber); border: 1px solid rgba(255,204,0,0.3); }
+    .drole-crew { background: rgba(90,90,90,0.12);  color: var(--muted2);  border: 1px solid rgba(90,90,90,0.3); }
 
     .dres-status {
       font-size: var(--fs-xs); letter-spacing: 0.07em; opacity: 0.5;
-      text-transform: uppercase; margin-left: auto; flex-shrink: 0;
+      text-transform: uppercase; flex-shrink: 0;
     }
     .dres-card[data-busy="1"] .dres-status { opacity: 0.9; color: var(--n-amber); }
+    .dres-card[data-status="offline"] {
+      background: rgba(255,60,80,0.06);
+      border-color: rgba(255,60,80,0.25);
+    }
+    .dres-card[data-status="offline"] .dres-name { opacity: 0.5; }
+    .dres-handle {
+      font-size: var(--fs-xs); color: rgba(0,212,255,0.5); font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     /* Colorblind-friendly status shapes — purely visual, no leaked text */
     .ddot-green { border-radius: 50%; }
@@ -2373,20 +2486,11 @@ export function getDisplayHtml(): string {
     }
     .ddot-busy { animation: device-pulse 1.8s ease-in-out infinite; }
 
-    .dmini-row { display: flex; gap: 6px; flex-shrink: 0; justify-content: center; }
-    .dmini {
-      flex: 1; display: flex; flex-direction: column; align-items: center;
-      background: rgba(0,255,127,0.04); border: 1px solid rgba(0,255,127,0.18);
-      border-radius: 5px; padding: 0.55em 0.4em; gap: 0.15em;
-    }
-    .dmini-val {
-      font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums;
-      line-height: 1; color: #00ff7f;
-      text-shadow: 0 0 6px #00ff7f, 0 0 16px rgba(0,255,127,0.5);
-    }
-    .dmini-lbl { font-size: var(--fs-xs); color: rgba(0,255,127,0.5); text-transform: uppercase; letter-spacing: 0.07em; }
-
     /* ── Main panel ───────────────────────────────────────────────────────── */
+    #dactive-tasks {
+      display: flex; flex-direction: column; gap: 6px;
+      flex-shrink: 0;
+    }
     .dtask-card {
       background: rgba(0,212,255,0.04);
       border: 1px solid rgba(0,212,255,0.14);
@@ -2402,12 +2506,12 @@ export function getDisplayHtml(): string {
       letter-spacing: 0.1em; color: rgba(0,212,255,0.45);
       margin-bottom: 0.45em; display: flex; align-items: center; gap: 0.5em;
     }
-    #dtask {
+    #dtask, .dtask-content {
       font-size: var(--fs-task); font-weight: 600; line-height: 1.45;
       display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
       overflow: hidden; transition: color 0.5s;
     }
-    @media (min-width: 1920px) { #dtask { -webkit-line-clamp: 5; } }
+    @media (min-width: 1920px) { #dtask, .dtask-content { -webkit-line-clamp: 5; } }
 
     #dtask-meta {
       margin-top: 0.4em; display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap;
@@ -2462,19 +2566,23 @@ export function getDisplayHtml(): string {
       transition: width 0.8s ease;
       will-change: width, background-position;
     }
-    /* ── Center panel layout: task card → side-by-side row ──────────────── */
-    .dpmain-row {
-      display: flex; flex: 1; min-height: 0; gap: var(--gap);
+    /* ── Center panel layout: focus row (tasks + gauge) → queue below ──── */
+    .dfocus-row {
+      display: flex; gap: var(--gap); flex-shrink: 0;
+      contain: layout style;
     }
+    .dfocus-row #dactive-tasks { flex: 1; min-width: 0; }
     .dpmain-queue {
       flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; overflow: hidden;
-      contain: layout;
+      contain: layout style;
     }
     .dpmain-gauge {
       flex: 0 0 clamp(130px, 36%, 240px); min-width: 0;
       display: flex; flex-direction: column; gap: 4px;
       border-left: 1px solid rgba(0,212,255,0.1);
       padding-left: var(--gap);
+      justify-content: center;
+      min-height: clamp(180px, 20vh, 260px);
     }
     #dqlist {
       display: flex; flex-direction: column; gap: 5px;
@@ -2504,8 +2612,11 @@ export function getDisplayHtml(): string {
     }
     .dqtext { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
-    /* Radial gauge — compact within right column of .dpmain-row */
-    .dgauge-wrap { display: flex; flex-direction: column; gap: 4px; flex: 1; min-height: 0; }
+    /* Radial gauge — compact within right column of .dfocus-row */
+    .dgauge-wrap {
+      display: flex; flex-direction: column; gap: 4px;
+      flex: 1; min-height: 100%; justify-content: center;
+    }
     .dgauge-hdr { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; gap: 2px; }
     .dgauge-cur {
       font-size: var(--fs-xl); font-family: "SF Mono",ui-monospace,monospace; font-weight: 800;
@@ -2517,7 +2628,14 @@ export function getDisplayHtml(): string {
       letter-spacing: 0.1em;
     }
     #dtpmlbl { display: none; } /* value displayed via .dgauge-cur directly */
-    .dgauge-container { flex: 1; min-height: 0; max-height: clamp(160px, 50vh, 300px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .dgauge-container {
+      flex: 0 0 auto;
+      min-height: clamp(140px, 18vh, 220px);
+      max-height: none;
+      display: flex; align-items: center; justify-content: center;
+      padding: 6px 0 0;
+      overflow: visible;
+    }
     #dgauge { width: 100%; height: 100%; display: block; }
     .dgauge-val-text {
       /* font-size intentionally omitted — set as SVG attribute so it scales
@@ -2531,40 +2649,40 @@ export function getDisplayHtml(): string {
       letter-spacing: 0.14em; font-family: system-ui,sans-serif;
     }
 
-    /* ── Metrics panel — horizontal stat rows ────────────────────────────── */
+    /* ── Metrics panel — stacked stat cards ──────────────────────────────── */
     .dstat-group { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
     .dstat-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0.55em 0.75em; border-radius: var(--radius);
-      border-left: 3px solid; gap: 0.5em;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 0.55em 0.5em; border-radius: var(--radius);
+      border-bottom: 3px solid; gap: 0.25em;
+      overflow: hidden; flex: 1; min-width: 0;
     }
-    .dstat-row-done   { border-left-color: #00ff7f;         background: rgba(0,255,127,0.04); }
-    .dstat-row-events { border-left-color: var(--n-purple); background: rgba(180,79,255,0.04); }
-    .dstat-row-tokens { border-left-color: var(--n-amber);  background: rgba(255,204,0,0.04); }
+    .dstat-row-done   { border-bottom-color: #00ff7f;         background: rgba(0,255,127,0.06); }
+    .dstat-row-events { border-bottom-color: var(--n-purple); background: rgba(180,79,255,0.04); }
+    .dstat-row-tokens { border-bottom-color: var(--n-amber);  background: rgba(255,204,0,0.04); }
     .dstat-val {
-      font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums;
+      font-size: clamp(1rem, var(--fs-xl), 2.4rem); font-weight: 800; font-variant-numeric: tabular-nums;
       line-height: 1; letter-spacing: 0.02em; flex-shrink: 0;
     }
     .mv-done   { color: #00ff7f;         text-shadow: 0 0 8px #00ff7f,        0 0 20px rgba(0,255,127,0.35); }
     .mv-events { color: var(--n-purple); text-shadow: 0 0 8px var(--n-purple),0 0 20px rgba(180,79,255,0.35); }
     .mv-tokens { color: var(--n-amber);  text-shadow: 0 0 8px var(--n-amber), 0 0 20px rgba(255,204,0,0.35); }
     .dstat-lbl {
-      font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em;
-      opacity: 0.45; text-align: right; line-height: 1.3;
+      font-size: clamp(0.55rem, var(--fs-xs), 0.85rem); text-transform: uppercase; letter-spacing: 0.08em;
+      opacity: 0.45; text-align: center; line-height: 1.2; flex-shrink: 1; min-width: 0;
     }
-    .dmodels { display: flex; flex-direction: column; gap: 8px; flex: 1; overflow-y: auto; min-height: 0; }
-    @media (min-width: 768px) and (max-width: 1199px) { .dmodels { display: none; } }
-    .dmodel-row { display: flex; flex-direction: column; gap: 4px; }
+    .dmodels { display: flex; flex-direction: column; gap: 6px; flex: 1; overflow-y: auto; min-height: 0; }
+    .dmodel-row { display: flex; flex-direction: column; gap: 3px; }
     .dmodel-hdr { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--muted2); }
     .dmodel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
-    .dbar-track { height: 4px; background: rgba(180,79,255,0.1); border-radius: 2px; overflow: hidden; }
+    .dbar-track { height: 4px; background: rgba(0,255,127,0.1); border-radius: 2px; overflow: hidden; }
     @media (min-width: 1920px) { .dbar-track { height: 7px; } }
     @media (min-width: 3840px) { .dbar-track { height: 12px; } }
     @media (min-width: 5120px) { .dbar-track { height: 16px; } }
     .dbar-fill {
       height: 100%; border-radius: inherit;
-      background: linear-gradient(90deg, var(--n-purple), var(--n-blue));
-      box-shadow: 0 0 6px var(--n-purple); opacity: 0.8;
+      background: linear-gradient(90deg, #00ff7f, var(--n-blue));
+      box-shadow: 0 0 6px #00ff7f; opacity: 0.8;
       transition: width 1s ease;
       will-change: width;
     }
@@ -2906,51 +3024,56 @@ export function getDisplayHtml(): string {
 <div id="dapp">
 
   <header id="dtop">
-    <div class="dlogo">&#x2B21; Local Crew</div>
+    <div class="dlogo"><span class="dlogo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><polygon points="12,2 20,7 20,17 12,22 4,17 4,7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/><line x1="20" y1="7" x2="4" y2="17" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/><line x1="20" y1="17" x2="4" y2="7" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.9"/></svg></span><span class="dlogo-text">Local Crew</span></div>
     <div class="dtop-center">
-      <span id="dorch">&mdash;</span>
+      <span id="dorch"></span>
       <span id="dmode">&mdash;</span>
       <span id="dbusy" class="ddot" style="display:none"></span>
-    </div>
-    <div class="dtop-right">
+      <span class="dtop-sep"></span>
       <span id="dactivity" class="dactivity">Auto Pause</span>
       <button id="dactive-toggle" class="dactive-btn" type="button" aria-label="Toggle always-active display mode">Monitor Off</button>
-      <button id="dmatrix-btn" class="dmatrix-btn" type="button">Enter Matrix</button>
-      <button id="ddaily-btn" class="ddaily-btn" type="button">Daily</button>
+    </div>
+    <div class="dtop-right">
+      <button id="dmatrix-btn" class="doverlay-btn" type="button">Matrix</button>
+      <button id="ddaily-btn" class="doverlay-btn" type="button">Daily</button>
       <span id="dhealthdot" class="ddot"></span>
       <span id="dclock">&mdash;</span>
     </div>
   </header>
 
+  <div id="dstatus-banner">
+    <span id="dstatus-fleet" class="dstatus-dim">&mdash;</span>
+    <span class="dstatus-sep">&middot;</span>
+    <span id="dstatus-bp" class="dstatus-dim">BP: nominal</span>
+    <span class="dstatus-sep">&middot;</span>
+    <span id="dstatus-bottleneck" class="dstatus-dim">Bottleneck: none</span>
+    <span class="dstatus-sep">&middot;</span>
+    <span id="dstatus-dispatch" class="dstatus-dim">&mdash;</span>
+  </div>
+
   <div id="dbody">
     <section id="dpnet" class="dpanel">
-      <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><circle cx="4" cy="8" r="2.2" fill="currentColor" opacity="0.7"/><circle cx="12" cy="8" r="2.2" fill="currentColor" opacity="0.7"/><line x1="6.2" y1="8" x2="9.8" y2="8" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><circle cx="8" cy="3.5" r="2.2" fill="currentColor" opacity="0.7"/><line x1="5" y1="6" x2="7" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><line x1="11" y1="6" x2="9" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.5"/></svg>Network</h2>
+      <h2 class="dpanel-title"><svg width="20" height="20" viewBox="0 0 16 16" style="flex-shrink:0;vertical-align:-0.2em;margin-right:0.3em"><circle cx="4" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><circle cx="12" cy="8" r="2.2" fill="currentColor" opacity="0.9"/><line x1="6.2" y1="8" x2="9.8" y2="8" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><circle cx="8" cy="3.5" r="2.2" fill="currentColor" opacity="0.9"/><line x1="5" y1="6" x2="7" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><line x1="11" y1="6" x2="9" y2="4.5" stroke="currentColor" stroke-width="1.2" opacity="0.7"/></svg>Fleet<span class="dmini-inline"><span class="dmini-pill"><span id="drescnt">&mdash;</span><span class="dmini-pill-lbl">online</span></span><span class="dmini-pill"><span id="dbusy-count">0</span><span class="dmini-pill-lbl">active</span></span></span></h2>
       <div id="dres-grid"></div>
-      <div class="dmini-row">
-        <div class="dmini"><div id="drescnt" class="dmini-val">&mdash;</div><div class="dmini-lbl">Online</div></div>
-        <div class="dmini"><div id="dbusy-count" class="dmini-val">0</div><div class="dmini-lbl">Busy</div></div>
+      <div class="dmodels">
+        <div class="dsub" style="flex-shrink:0;color:rgba(0,255,127,0.5)">Model Activity</div>
+        <div id="dmodelbars" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:0"></div>
       </div>
     </section>
 
     <section id="dpmain" class="dpanel">
       <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.7"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>Current Focus</h2>
-      <div class="dtask-card">
-        <div class="dtask-label">
-          <span class="ddot ddot-blue" id="dtask-dot"></span>
-          Active Task
-        </div>
-        <div id="dtask">Connecting&hellip;</div>
-        <div id="dtask-meta" style="display:none"></div>
-      </div>
-      <div class="dpmain-row">
-        <div class="dpmain-queue">
-          <div class="dqueue-hdr">
-            <span class="dsub">Queue</span>
-            <span id="dqfrac">0 pending &middot; 0 done</span>
+      <div class="dfocus-row">
+      <div id="dactive-tasks">
+        <div class="dtask-card dtask-primary">
+          <div class="dtask-label">
+            <span class="ddot ddot-blue" id="dtask-dot"></span>
+            Primary
           </div>
-          <div class="dtrack"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
-          <div id="dqlist"></div>
+          <div id="dtask" class="dtask-content">Connecting&hellip;</div>
+          <div id="dtask-meta" class="dtask-meta-row"></div>
         </div>
+      </div>
         <div class="dpmain-gauge">
           <div class="dgauge-wrap">
             <div class="dgauge-hdr">
@@ -2978,30 +3101,47 @@ export function getDisplayHtml(): string {
                 <path id="dgauge-track" fill="none" stroke="rgba(0,212,255,0.1)" stroke-width="10" stroke-linecap="round"/>
                 <path id="dgauge-fill" fill="none" stroke="url(#gauge-grad)" stroke-width="10" stroke-linecap="round" pathLength="100" filter="url(#neon-glow)" style="transition:stroke-dashoffset 1.2s ease"/>
                 <g id="dgauge-ticks"></g>
-                <text id="dgauge-val" class="dgauge-val-text" x="100" y="95" text-anchor="middle" font-size="22">&mdash;</text>
+                <text id="dgauge-val" class="dgauge-val-text" x="100" y="88" text-anchor="middle" font-size="26">&mdash;</text>
+                <text class="dgauge-lbl-text" x="100" y="104" text-anchor="middle">utilization</text>
               </svg>
             </div>
             <span id="dtpmlbl" style="display:none"></span>
           </div>
         </div>
       </div>
+      <div class="dpmain-queue">
+          <div class="dqueue-hdr">
+            <span class="dsub">Queue</span>
+            <span id="dqfrac">0 pending &middot; 0 done</span>
+          </div>
+          <div class="dtrack"><div id="dqfill" style="width:0%"></div><span id="dqpct" class="dqpct"></span></div>
+          <div id="dqlist"></div>
+        </div>
     </section>
 
     <section id="dpmet" class="dpanel">
       <h2 class="dpanel-title"><svg width="1em" height="1em" viewBox="0 0 16 16" style="vertical-align:-0.15em;margin-right:0.35em"><rect x="1" y="9" width="3" height="6" rx="0.8" fill="currentColor" opacity="0.5"/><rect x="5.5" y="5" width="3" height="10" rx="0.8" fill="currentColor" opacity="0.7"/><rect x="10" y="1" width="3" height="14" rx="0.8" fill="currentColor" opacity="0.9"/></svg>Metrics</h2>
       <div class="dstat-group">
+        <div class="dstat-row dstat-row-done">
+          <div id="dtasksdone" class="dstat-val mv-done">&mdash;</div>
+          <div class="dstat-lbl">Tasks Done</div>
+        </div>
         <div class="dstat-row dstat-row-events">
           <div id="devents" class="dstat-val mv-events">&mdash;</div>
-          <div class="dstat-lbl">Audit<br>Events</div>
+          <div class="dstat-lbl">Audit Events</div>
         </div>
         <div class="dstat-row dstat-row-tokens">
           <div id="dtokens" class="dstat-val mv-tokens">&mdash;</div>
-          <div class="dstat-lbl">Total<br>Tokens</div>
+          <div class="dstat-lbl">Total Tokens</div>
         </div>
       </div>
-      <div class="dmodels">
-        <div class="dsub" style="flex-shrink:0;color:rgba(180,79,255,0.5)">Model Activity</div>
-        <div id="dmodelbars" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:9px;min-height:0"></div>
+      <div class="dkpi-group">
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-tpm">&mdash;</span><span class="dkpi-lbl">tok/min</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-tps">&mdash;</span><span class="dkpi-lbl">tok/sec</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-drain">&mdash;</span><span class="dkpi-lbl">drain/min</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-failed">&mdash;</span><span class="dkpi-lbl">failed</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-stalled">&mdash;</span><span class="dkpi-lbl">stalled</span></div>
+        <div class="dkpi"><span class="dkpi-val" id="dkpi-oldest">&mdash;</span><span class="dkpi-lbl">oldest task</span></div>
       </div>
       <div style="display:none"><span id="dtpmbig"></span></div>
     </section>
@@ -3040,7 +3180,7 @@ export function getDisplayHtml(): string {
 </div>
 
 <script>
-  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,busyResources:{},activeAliases:{},resourceHealth:{},orchestratorAlias:'',orchestratorName:'',ema:{rate:0,lastT:0,timer:null,peak:10000}};
+  var ST={resources:[],audit:[],lastId:-1,lastSyntheticId:-1,busyResources:{},activeAliases:{},resourceHealth:{},orchestratorAlias:'',orchestratorName:'',accountUsername:'',ema:{rate:0,lastT:0,timer:null,peak:10000},tps:{rate:0,peak:200}};
   var clockEl=document.getElementById('dclock');
   function tickClock(){
     clockEl.textContent=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -3057,6 +3197,50 @@ export function getDisplayHtml(): string {
   }
   async function fetchJ(path){try{var r=await fetch(path,{cache:'no-store'});return r.ok?r.json():null;}catch(e){return null;}}
   function el(id){return document.getElementById(id);}
+  function cleanHandle(value){
+    var raw=String(value==null?'':value).trim().replace(/^@+/, '');
+    return raw||'';
+  }
+  function getHeaderHandle(data){
+    var raw=(data&&data.accountUsername)||ST.accountUsername||(data&&data.orchestratorName)||ST.orchestratorName||'ben';
+    var cleaned=cleanHandle(raw);
+    return '@'+(cleaned||'ben');
+  }
+  function syncHeaderHandle(data){
+    if(data&&typeof data.accountUsername==='string'&&data.accountUsername.trim())ST.accountUsername=cleanHandle(data.accountUsername);
+    if(data&&typeof data.orchestratorName==='string'&&data.orchestratorName.trim())ST.orchestratorName=data.orchestratorName;
+    el('dorch').textContent=getHeaderHandle(data);
+  }
+  function countOnlineNodes(resourceHealth){
+    if(!resourceHealth||typeof resourceHealth!=='object')return null;
+    var count=0,seen=false;
+    for(var alias in resourceHealth){
+      if(!Object.prototype.hasOwnProperty.call(resourceHealth,alias))continue;
+      seen=true;
+      if(!resourceHealth[alias]||resourceHealth[alias].status!=='offline')count++;
+    }
+    return seen?count:null;
+  }
+  function syncOnlineNodeCount(data){
+    var fleet=data&&data.displayMetrics&&data.displayMetrics.fleetSummary;
+    if(fleet&&typeof fleet.onlineNodes==='number'){
+      setVal('drescnt',String(fleet.onlineNodes));
+      return;
+    }
+    var onlineCount=countOnlineNodes(data&&data.resourceHealth);
+    if(typeof onlineCount==='number'){
+      setVal('drescnt',String(onlineCount));
+      return;
+    }
+    var cap=data&&data.capacity;
+    if(cap&&typeof cap.resourceCount==='number'){
+      setVal('drescnt',String(cap.resourceCount));
+      return;
+    }
+    if(Array.isArray(data&&data.activeResources)){
+      setVal('drescnt',String(data.activeResources.length));
+    }
+  }
 
   // Flash glow animation on value update
   function setVal(id,text){
@@ -3079,9 +3263,8 @@ export function getDisplayHtml(): string {
   async function loadStatus(){
     var data=await fetchJ('/api/status');
     if(!data)return;
-    el('dorch').textContent=data.orchestratorName||'\u2014';
+    syncHeaderHandle(data);
     if(data.orchestratorAlias)ST.orchestratorAlias=data.orchestratorAlias;
-    if(data.orchestratorName)ST.orchestratorName=data.orchestratorName;
     var mode=data.mode||'command',modeEl=el('dmode');
     modeEl.textContent=mode.toUpperCase();modeEl.className='m-'+mode;
     var busyEl=el('dbusy');var taskDotPoll=el('dtask-dot');
@@ -3094,13 +3277,15 @@ export function getDisplayHtml(): string {
     }
 
     var taskEl=el('dtask'),next=data.nextTask,last=data.lastCompleted;
-    if(next&&next.content){
-      taskEl.textContent=next.content;taskEl.style.color='';
-    } else if(last&&last.content){
-      taskEl.textContent='\u2713 '+last.content;taskEl.style.color='var(--muted2)';
-    } else if(mode==='auto'){
-      taskEl.textContent='Auto mode \u2014 scanning queue\u2026';taskEl.style.color='var(--muted2)';
-    } else{taskEl.textContent='Idle \u2014 '+mode+' mode';taskEl.style.color='var(--muted)';}
+    if(taskEl){
+      if(next&&next.content){
+        taskEl.textContent=next.content;taskEl.style.color='';
+      } else if(last&&last.content){
+        taskEl.textContent='\u2713 '+last.content;taskEl.style.color='var(--muted2)';
+      } else if(mode==='auto'){
+        taskEl.textContent='Auto mode \u2014 scanning queue\u2026';taskEl.style.color='var(--muted2)';
+      } else{taskEl.textContent='Idle \u2014 '+mode+' mode';taskEl.style.color='var(--muted)';}
+    }
 
     var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0,targetPending=(data.auto&&data.auto.desiredPendingDepth)||0;
     el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
@@ -3119,14 +3304,19 @@ export function getDisplayHtml(): string {
       setVal('dtokens',fmt(toks));
       renderModelBars(tel.models);
     }
-    var cap=data.capacity;
-    if(cap)setVal('drescnt',String(cap.resourceCount||0));
-    // Update active aliases from polling data
+    syncOnlineNodeCount(data);
+    // Update active aliases and busy state from polling data
     if(Array.isArray(data.activeResources)){
       ST.activeAliases={};
       for(var ai=0;ai<data.activeResources.length;ai++){
         var ar=data.activeResources[ai];
-        ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
+        var arAlias=typeof ar==='string'?ar:ar.alias;
+        ST.activeAliases[arAlias]=true;
+        if(typeof ar==='object'&&ar.isBusy===true){
+          ST.busyResources[arAlias]=true;
+        } else if(typeof ar==='object'){
+          delete ST.busyResources[arAlias];
+        }
       }
     }
     // Update health data from polling
@@ -3134,6 +3324,8 @@ export function getDisplayHtml(): string {
       ST.resourceHealth=data.resourceHealth;
     }
     refreshResourceDots();
+    // Wire displayMetrics to status banner and KPIs
+    if(data.displayMetrics)applyDisplayMetrics(data.displayMetrics);
   }
 
   // Queue
@@ -3141,16 +3333,34 @@ export function getDisplayHtml(): string {
     var data=await fetchJ('/api/queue');
     if(!data)return;
     var active=data.activeTasks||[],tasks=data.pending||[],listEl=el('dqlist');
-    if(!active.length&&!tasks.length){listEl.innerHTML='<div class="dempty">No pending tasks</div>';return;}
-    var html='';
-    for(var ai=0;ai<active.length;ai++){
-      var ares=active[ai].assignedResource||active[ai].requestedResource;
-      html+='<div class="dqitem dqitem-active">';
-      html+='<span class="ddot ddot-amber dpulse"></span>';
-      html+='<span class="dqtext">'+esc(active[ai].content)+'</span>';
-      if(ares)html+='<span class="dqres">@'+esc(ares)+'</span>';
-      html+='</div>';
+
+    // Render active tasks into Current Focus section
+    var activeContainer=el('dactive-tasks');
+    if(activeContainer){
+      if(active.length>0){
+        var ahtml='';
+        for(var ai=0;ai<active.length;ai++){
+          var ares=active[ai].assignedResource||active[ai].requestedResource;
+          var isPrimary=ai===0;
+          var dur=active[ai].startedAt?Math.round((Date.now()-active[ai].startedAt)/1000):0;
+          var durStr=dur>60?Math.round(dur/60)+'m':dur+'s';
+          ahtml+='<div class="dtask-card'+(isPrimary?' dtask-primary':'')+'">';
+          ahtml+='<div class="dtask-label"><span class="ddot ddot-amber dpulse"></span>'+(isPrimary?'Primary':'Active')+'</div>';
+          ahtml+='<div class="dtask-content">'+esc(active[ai].content)+'</div>';
+          ahtml+='<div class="dtask-meta-row">';
+          if(ares)ahtml+='<span class="dtask-res">@'+esc(ares)+'</span>';
+          if(dur>0)ahtml+='<span class="dtask-res" style="color:var(--muted2)">'+durStr+'</span>';
+          if(active[ai].priority)ahtml+='<span class="dtask-pri dtask-pri-'+active[ai].priority+'">'+active[ai].priority+'</span>';
+          ahtml+='</div>';
+          ahtml+='</div>';
+        }
+        activeContainer.innerHTML=ahtml;
+      }
     }
+
+    // Queue list shows only pending (waiting) tasks
+    if(!tasks.length){listEl.innerHTML='<div class="dempty">No pending tasks</div>';return;}
+    var html='';
     var max=Math.min(tasks.length,8);
     for(var j=0;j<max;j++){
       var r=tasks[j].requestedResource||tasks[j].assignedResource;
@@ -3177,18 +3387,36 @@ export function getDisplayHtml(): string {
   }
   function refreshResourceDots(){
     var cards=document.querySelectorAll('.dres-card');
+    var onlineCount=0;
     for(var i=0;i<cards.length;i++){
       var a=cards[i].getAttribute('data-alias');if(!a)continue;
       var dot=cards[i].querySelector('.ddot');if(!dot)continue;
       var isBusy=!!ST.busyResources[a];
+      // Only pulse when busy (amber); green idle dots stay static
       dot.className='ddot '+getResourceDotClass(a)+(isBusy?' ddot-busy':'');
       if(isBusy){cards[i].classList.add('busy');cards[i].setAttribute('data-busy','1');}
       else{cards[i].classList.remove('busy');cards[i].setAttribute('data-busy','0');}
       var statusEl=cards[i].querySelector('.dres-status');
       if(statusEl){
         var h=ST.resourceHealth[a];
-        statusEl.textContent=isBusy?'ACTIVE':(h&&h.status==='offline'?'OFFLINE':'IDLE');
+        var isOffline=h&&h.status==='offline';
+        var statusWord=isBusy?'ACTIVE':(isOffline?'OFFLINE':'IDLE');
+        statusEl.textContent=statusWord;
+        cards[i].setAttribute('data-status',statusWord.toLowerCase());
+        if(!isOffline)onlineCount++;
       }
+    }
+    // Sync utilization gauge with client-side busy/online state
+    var busyCount=Object.keys(ST.busyResources).length;
+    // Count online from rendered cards; fall back to total resources if no cards yet
+    var totalResources=document.querySelectorAll('.dres-card').length;
+    var effectiveOnline=onlineCount>0?onlineCount:(totalResources>0?totalResources:0);
+    if(effectiveOnline>0){
+      var util=Math.round((busyCount/effectiveOnline)*100);
+      drawGauge(util,100);
+    } else if(busyCount>0){
+      // Cards not rendered yet but we know some are busy
+      drawGauge(busyCount>0?25:0,100);
     }
   }
   async function loadResources(){
@@ -3197,18 +3425,30 @@ export function getDisplayHtml(): string {
     var grid=el('dres-grid');
     if(!data.length){grid.innerHTML='<div class="dempty">No resources</div>';return;}
     var html='';
+    var orchName=ST.orchestratorName||'Ben';
     for(var i=0;i<data.length;i++){
-      var r=data[i],tier=r.tier||'low',label=esc(r.label||r.alias);
+      var r=data[i],tier=r.tier||'low';
+      // Only rename the actual Local Orchestrator device (by label), not by alias
+      var isOrch=r.label==='Local Orchestrator';
+      var label=esc(isOrch?orchName:(r.label||r.alias));
+      var handleAlias=isOrch?orchName.toLowerCase():r.alias;
       var dotCls=getResourceDotClass(r.alias);
-      var busyCls=ST.busyResources[r.alias]?' busy':'';
+      var isBusy=!!ST.busyResources[r.alias];
+      var busyCls=isBusy?' busy':'';
       var h=ST.resourceHealth[r.alias];
-      var statusText=ST.busyResources[r.alias]?'ACTIVE':(h&&h.status==='offline'?'OFFLINE':'IDLE');
+      var isOffline=h&&h.status==='offline';
+      var statusText=isBusy?'ACTIVE':(isOffline?'OFFLINE':'IDLE');
       var role=r.shipRole||'Crew';
-      html+='<div class="dres-card'+busyCls+'" data-alias="'+esc(r.alias)+'" data-busy="'+(ST.busyResources[r.alias]?'1':'0')+'">';
-      html+='<span class="ddot '+dotCls+'"></span>';
+      var roleCls='drole-'+role.toLowerCase();
+      var statusLower=statusText.toLowerCase();
+      html+='<div class="dres-card'+busyCls+'" data-alias="'+esc(r.alias)+'" data-busy="'+(isBusy?'1':'0')+'" data-status="'+esc(statusLower)+'">';
+      html+='<span class="ddot '+dotCls+(isBusy?' ddot-busy':'')+'"></span>';
       html+='<span class="dres-name" title="'+label+'">'+label+'</span>';
-      html+='<span class="dtier dtier-'+tier+'" title="'+esc(role)+'">'+esc(role.toUpperCase())+'</span>';
+      html+='<span class="dres-handle">@'+esc(handleAlias)+'</span>';
+      html+='<div class="dres-meta">';
+      html+='<span class="dtier '+roleCls+'" title="'+esc(role)+'">'+esc(role.toUpperCase())+'</span>';
       html+='<span class="dres-status" aria-label="Status: '+statusText+'">'+statusText+'</span>';
+      html+='</div>';
       html+='</div>';
     }
     grid.innerHTML=html;
@@ -3253,20 +3493,29 @@ export function getDisplayHtml(): string {
     ST.ema.rate=ST.ema.rate===0?instant:0.22*instant+0.78*ST.ema.rate;
     ST.ema.lastT=now;
     if(ST.ema.rate>ST.ema.peak)ST.ema.peak=ST.ema.rate*1.25;
+    // tok/sec with heavier smoothing for natural gauge acceleration/deceleration
+    var instantTps=elapsed>0.3?(tokens/elapsed):ST.tps.rate;
+    ST.tps.rate=ST.tps.rate===0?instantTps:0.12*instantTps+0.88*ST.tps.rate;
+    if(ST.tps.rate>ST.tps.peak)ST.tps.peak=ST.tps.rate*1.25;
     clearTimeout(ST.ema.timer);
     ST.ema.timer=setTimeout(decayTpm,6000);
     applyTpm(Math.round(ST.ema.rate));
   }
   function decayTpm(){
     ST.ema.rate*=0.65;
+    ST.tps.rate*=0.65;
     applyTpm(Math.round(ST.ema.rate));
     if(ST.ema.rate>5){ST.ema.timer=setTimeout(decayTpm,2500);}
-    else{ST.ema.rate=0;applyTpm(0);}
+    else{ST.ema.rate=0;ST.tps.rate=0;applyTpm(0);}
   }
   function applyTpm(tpm){
     setVal('dgauge-bigval',tpm>0?fmt(tpm):'—');
     setVal('dtpmbig',fmt(tpm));
-    drawGauge(tpm,Math.max(ST.ema.peak,10000));
+    // Update KPI tok/min and tok/sec in real-time
+    setVal('dkpi-tpm',tpm>0?fmt(tpm):'—');
+    var tps=Math.round(ST.tps.rate);
+    setVal('dkpi-tps',tps>0?String(tps):'—');
+    // Don't override gauge here — gauge shows fleet utilization from displayMetrics
   }
   function renderLog(){
     var feed=el('dlogfeed');
@@ -3279,13 +3528,70 @@ export function getDisplayHtml(): string {
       if(isJob){info=['jobs','lk-jobs'];}
       else{info=KIND_MAP[ev.kind]||[ev.kind.split('.').pop(),'lk-sys'];}
       t=new Date(ev.timestamp).toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      // Source node from resourceAlias or actor field
+      var src='';
+      if(ev.resourceAlias)src='@'+ev.resourceAlias;
+      else if(ev.actor&&ev.actor!=='system')src='@'+ev.actor;
       html+='<div class="dlog"><span class="dlog-time">'+t+'</span>';
       html+='<span class="dlog-kind '+info[1]+'">'+info[0]+'</span>';
+      if(src)html+='<span class="dlog-kind" style="opacity:0.4">'+esc(src)+'</span>';
       html+='<span class="dlog-sum">'+esc(ev.summary)+'</span>';
       if(!ev.success)html+='<span class="dlog-err">\u2717</span>';
       html+='</div>';
     }
     feed.innerHTML=html;
+  }
+
+  // Display metrics → status banner + KPIs + gauge
+  function applyDisplayMetrics(dm){
+    if(!dm)return;
+    var sys=dm.systemStatus||{};
+    var fleet=dm.fleetSummary||{};
+    var queue=dm.queueHealth||{};
+    var dispatch=dm.dispatch||{};
+
+    // Status banner
+    var stateEl=el('dstatus-state');
+    if(stateEl){
+      var st=sys.overallState||'idle';
+      stateEl.textContent=st.toUpperCase();
+      stateEl.className='dstatus-chip dstatus-'+st;
+    }
+    var modeEl2=el('dstatus-mode');
+    if(modeEl2){
+      var modeText=el('dmode');
+      modeEl2.textContent=modeText?modeText.textContent:'—';
+    }
+    var fleetEl=el('dstatus-fleet');
+    if(fleetEl){
+      var st=sys.overallState||'idle';
+      var activeCount=typeof fleet.activeNodes==='number'?fleet.activeNodes:Object.keys(ST.busyResources).length;
+      var onlineCount=fleet.onlineNodes||0;
+      var util=typeof fleet.utilizationPct==='number'
+        ? fleet.utilizationPct
+        : (onlineCount>0?Math.round((activeCount/onlineCount)*100):0);
+      fleetEl.textContent=st.toUpperCase()+' '+util+'% util ('+activeCount+'/'+onlineCount+')';
+      fleetEl.style.color=st==='active'?'#00ff7f':st==='degraded'?'var(--n-amber)':st==='blocked'?'#ff2d78':'';
+    }
+    var bpEl=el('dstatus-bp');
+    if(bpEl){
+      var bp=sys.backPressure||'nominal';
+      bpEl.textContent='BP: '+bp;
+      bpEl.style.color=bp==='critical'?'#ff2d78':bp==='high'?'var(--n-amber)':bp==='rising'?'rgba(255,204,0,0.6)':'';
+    }
+    var bnEl=el('dstatus-bottleneck');
+    if(bnEl)bnEl.textContent=sys.bottleneck?'Bottleneck: '+sys.bottleneck:'Bottleneck: none';
+    var dispEl=el('dstatus-dispatch');
+    if(dispEl)dispEl.textContent='Dispatch: '+(dispatch.state||'idle')+(dispatch.strategy?' ('+dispatch.strategy+')':'');
+
+    // KPIs — tok/min and tok/sec managed by realtime EMA, don't overwrite here
+    setVal('dkpi-drain',typeof queue.drainRatePerMin==='number'?queue.drainRatePerMin.toFixed(1):'—');
+    setVal('dkpi-failed',String(queue.failedCount||0));
+    setVal('dkpi-stalled',String(queue.stalledCount||0));
+    var oldest=queue.oldestPendingAgeSec||0;
+    setVal('dkpi-oldest',oldest>60?Math.round(oldest/60)+'m':oldest>0?oldest+'s':'—');
+
+    // Gauge → fleet utilization is driven by client-side refreshResourceDots()
   }
 
   function pushDisplayLog(kind,summary,success){
@@ -3305,7 +3611,11 @@ export function getDisplayHtml(): string {
   }
 
   function applyStatePayload(d){
-    if(d.orchestratorName){el('dorch').textContent=d.orchestratorName;ST.orchestratorName=d.orchestratorName;}
+    // Show orchestrator name in header (e.g., "@Cap")
+    if(d.orchestratorName){
+      syncHeaderHandle(d);
+    }
+    else if(d.accountUsername){syncHeaderHandle(d);}
     if(d.orchestratorAlias)ST.orchestratorAlias=d.orchestratorAlias;
     if(d.mode){
       var modeEl=el('dmode');
@@ -3328,47 +3638,56 @@ export function getDisplayHtml(): string {
     var nextTask=auto.nextTask||null;
     var lastCompleted=auto.lastCompleted||null;
     var taskEl=el('dtask');
-    if(activeTasks.length>0){
-      taskEl.textContent=String(activeTasks[0].content||'Task in progress');
-      taskEl.style.color='var(--n-amber)';
-    } else if(nextTask&&nextTask.content){
-      taskEl.textContent=nextTask.content;
-      taskEl.style.color='';
-    } else if(lastCompleted&&lastCompleted.content){
-      var statusPrefix=lastCompleted.status==='failed'?'✗ ':'✓ ';
-      taskEl.textContent=statusPrefix+lastCompleted.content;
-      taskEl.style.color=lastCompleted.status==='failed'?'#ff6666':'var(--muted2)';
-    } else if(d.mode==='auto'){
-      taskEl.textContent='Auto mode — scanning queue…';
-      taskEl.style.color='var(--muted2)';
-    } else {
-      taskEl.textContent='Idle — '+(d.mode||'command')+' mode';
-      taskEl.style.color='var(--muted)';
+    var activeContainer=el('dactive-tasks');
+
+    // Render multiple active tasks into the container
+    if(activeTasks.length>0&&activeContainer){
+      var ahtml='';
+      for(var ati=0;ati<activeTasks.length;ati++){
+        var at=activeTasks[ati];
+        var atRes=at.assignedResource||at.requestedResource;
+        var isPrimary=ati===0;
+        var dur=at.startedAt?Math.round((Date.now()-at.startedAt)/1000):0;
+        var durStr=dur>60?Math.round(dur/60)+'m':dur+'s';
+        ahtml+='<div class="dtask-card'+(isPrimary?' dtask-primary':'')+'">';
+        ahtml+='<div class="dtask-label"><span class="ddot ddot-amber dpulse"></span>'+(isPrimary?'Primary':'Active')+'</div>';
+        ahtml+='<div class="dtask-content" style="color:var(--n-amber)">'+esc(at.content||'Task in progress')+'</div>';
+        ahtml+='<div class="dtask-meta-row">';
+        if(atRes)ahtml+='<span class="dtask-res">@'+esc(atRes)+'</span>';
+        if(dur>0)ahtml+='<span class="dtask-res" style="color:var(--muted2)">'+durStr+'</span>';
+        if(at.priority)ahtml+='<span class="dtask-pri dtask-pri-'+at.priority+'">'+at.priority+'</span>';
+        ahtml+='</div>';
+        ahtml+='</div>';
+      }
+      activeContainer.innerHTML=ahtml;
+    } else if(activeContainer){
+      // No active tasks — show single card with next/last/idle state
+      var singleHtml='<div class="dtask-card dtask-primary"><div class="dtask-label"><span class="ddot ddot-blue" id="dtask-dot"></span>Primary</div><div id="dtask">';
+      if(nextTask&&nextTask.content){
+        singleHtml+=esc(nextTask.content);
+      } else if(lastCompleted&&lastCompleted.content){
+        var statusPrefix=lastCompleted.status==='failed'?'✗ ':'✓ ';
+        singleHtml+=esc(statusPrefix+lastCompleted.content);
+      } else if(d.mode==='auto'){
+        singleHtml+='Auto mode — scanning queue…';
+      } else {
+        singleHtml+='Idle — '+esc(d.mode||'command')+' mode';
+      }
+      singleHtml+='</div><div id="dtask-meta" class="dtask-meta-row" style="display:none"></div></div>';
+      activeContainer.innerHTML=singleHtml;
     }
 
-    var metaEl=el('dtask-meta');
-    if(metaEl){
-      if(activeTasks.length===0){
-        var res=nextTask&&(nextTask.assignedResource||nextTask.requestedResource);
-        var pri=nextTask&&nextTask.priority?String(nextTask.priority).toUpperCase():'';
-        if(res){
-          metaEl.style.display='';
-          metaEl.innerHTML='<span class="dtask-pri dtask-pri-'+(nextTask.priority||'medium')+'">'+esc(pri)+'</span>'
-            +' <span class="dtask-res">@'+esc(res)+'</span>';
-        } else {
-          metaEl.style.display='none';metaEl.innerHTML='';
-        }
-      } else {
-        var leadTask=activeTasks[0]||{};
-        var leadRes=leadTask.assignedResource||leadTask.requestedResource||'?';
-        var leadPri=leadTask.priority?String(leadTask.priority).toUpperCase():'MEDIUM';
-        var activeSummary=activeTasks.length===1?'IN PROGRESS':String(activeTasks.length)+' IN PROGRESS';
-        metaEl.style.display='';
-        metaEl.innerHTML='<span class="dtask-pri dtask-pri-'+(leadTask.priority||'medium')+'">'+esc(activeSummary)+'</span>'
-          +' <span class="dtask-res">@'+esc(leadRes)+'</span>'
-          +' <span class="dtask-pri dtask-pri-'+(leadTask.priority||'medium')+'">'+esc(leadPri)+'</span>'
-          +(activeTasks.length>1?' <span class="dtask-res">+'+esc(String(activeTasks.length-1))+' more</span>':'');
-      }
+    if(activeTasks.length>0){
+      // dtask-dot handled per-card above
+    } else if(nextTask&&nextTask.content){
+      if(taskEl){taskEl.textContent=nextTask.content;taskEl.style.color='';}
+    } else if(lastCompleted&&lastCompleted.content){
+      var statusPrefix2=lastCompleted.status==='failed'?'✗ ':'✓ ';
+      if(taskEl){taskEl.textContent=statusPrefix2+lastCompleted.content;taskEl.style.color=lastCompleted.status==='failed'?'#ff6666':'var(--muted2)';}
+    } else if(d.mode==='auto'){
+      if(taskEl){taskEl.textContent='Auto mode — scanning queue…';taskEl.style.color='var(--muted2)';}
+    } else {
+      if(taskEl){taskEl.textContent='Idle — '+(d.mode||'command')+' mode';taskEl.style.color='var(--muted)';}
     }
 
     var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),targetPending=Number(auto.desiredPendingDepth||0);
@@ -3380,12 +3699,18 @@ export function getDisplayHtml(): string {
     setVal('dbusy-count',String(busyCount2));
 
     if(Array.isArray(d.activeResources)){
-      setVal('drescnt',String(d.activeResources.length));
-      // Track which aliases are active (have telemetry) for dot coloring
+      syncOnlineNodeCount(d);
+      // Track busy state from active task assignment, not from the last model seen.
       ST.activeAliases={};
       for(var ai=0;ai<d.activeResources.length;ai++){
         var ar=d.activeResources[ai];
-        ST.activeAliases[typeof ar==='string'?ar:ar.alias]=true;
+        var arAlias=typeof ar==='string'?ar:ar.alias;
+        ST.activeAliases[arAlias]=true;
+        if(typeof ar==='object'&&ar.isBusy===true){
+          ST.busyResources[arAlias]=true;
+        } else if(typeof ar==='object'){
+          delete ST.busyResources[arAlias];
+        }
       }
     }
     // Update health data from SSE
@@ -3398,6 +3723,8 @@ export function getDisplayHtml(): string {
       var instPeak=Math.round(d.systemTps*60);
       if(instPeak>ST.ema.peak)ST.ema.peak=instPeak*1.25;
     }
+    // Wire displayMetrics from SSE state
+    if(d.displayMetrics)applyDisplayMetrics(d.displayMetrics);
   }
 
   // Model bars
@@ -3409,14 +3736,14 @@ export function getDisplayHtml(): string {
     if(!entries.length){container.innerHTML='<div class="dempty">No model data yet</div>';return;}
     maxT=entries[0].toks;
     var orchAlias=ST.orchestratorAlias||'orchestrator';
-    var orchName=ST.orchestratorName||'Cap';
+    var orchName=ST.orchestratorName||'Ben';
     for(i=0;i<entries.length;i++){
       e=entries[i];pct=maxT>0?Math.round(e.toks/maxT*100):0;
       var displayName=e.name.replace(new RegExp('^'+orchAlias.replace(/[.*+?^{}()|[\]\\$]/g,'\\$&')+'/'),orchName+'/');
       nm=displayName.length>24?displayName.slice(0,22)+'\u2026':displayName;
       html+='<div class="dmodel-row"><div class="dmodel-hdr">';
       html+='<span class="dmodel-name" title="'+esc(e.name)+'">'+esc(nm)+'</span>';
-      html+='<span style="color:rgba(180,79,255,0.6)">'+fmt(e.toks)+'t</span></div>';
+      html+='<span style="color:rgba(0,255,127,0.6)">'+fmt(e.toks)+'t</span></div>';
       html+='<div class="dbar-track"><div class="dbar-fill" style="width:'+pct+'%"></div></div></div>';
     }
     container.innerHTML=html;
@@ -3449,12 +3776,12 @@ export function getDisplayHtml(): string {
       tickEl.innerHTML=html;
     }
     window.drawGauge=function(val,maxVal){
-      var pct=Math.min(1,Math.max(0,val/(maxVal||10000)));
+      var pct=Math.min(1,Math.max(0,val/(maxVal||100)));
       if(fillEl){fillEl.style.strokeDashoffset=String((100-pct*100).toFixed(1));}
-      if(valEl)valEl.textContent=fmt(val)||'\u2014';
-      drawTicks(maxVal||10000);
+      if(valEl)valEl.textContent=(fmt(val)||'\u2014')+'%';
+      drawTicks(maxVal||100);
     };
-    window.drawGauge(0,10000);
+    window.drawGauge(0,100);
   })();
 
   // Initial load (one fetch to populate UI before stream lifecycle kicks in)
@@ -3617,10 +3944,12 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
-  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,raf:null,columns:[],maxCols:30,lastSpawn:0,spawnRate:100};
+  // Film-accurate digital rain: pre-allocated columns, delta-time movement,
+  // depth via scale/opacity/speed, no shadowBlur for performance.
+  var MX={on:false,buf:[],bufIdx:0,maxBuf:5000,raf:null,columns:[],lastT:0};
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
-  MX.ctx=MX.cvs?MX.cvs.getContext('2d'):null;
+  MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false}):null;
   MX.closeEl=document.getElementById('mx-close');
 
   function mxFeedText(t){
@@ -3629,9 +3958,9 @@ export function getDisplayHtml(): string {
       var c=t.charAt(i);
       if(c==='\\n'||c==='\\r'||c==='\\t')continue;
       if(c===' '&&Math.random()>0.35)continue;
-      MX.buf.push(c);
+      if(MX.buf.length<MX.maxBuf){MX.buf.push(c);}
+      else{MX.buf[MX.bufIdx%MX.maxBuf]=c;MX.bufIdx++;}
     }
-    if(MX.buf.length>MX.maxBuf)MX.buf.splice(0,MX.buf.length-MX.maxBuf);
   }
 
   var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
@@ -3640,109 +3969,121 @@ export function getDisplayHtml(): string {
     return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
   }
 
-  // Depth tiers: fontSize, opacity, blur (0=far, 6=near)
-  var mxDepths=[
-    {size:10,alpha:0.12},{size:12,alpha:0.18},{size:14,alpha:0.28},
-    {size:16,alpha:0.42},{size:19,alpha:0.6},{size:23,alpha:0.8},{size:28,alpha:0.95}
-  ];
-
   function mxSizeCanvas(){
     if(!MX.cvs)return;
     var dpr=window.devicePixelRatio||1;
-    // Fall back to window dimensions if the overlay hasn't been laid out yet.
-    var w=MX.cvs.clientWidth||window.innerWidth;
-    var h=MX.cvs.clientHeight||window.innerHeight;
-    if(!w||!h)return; // nothing to size yet
+    var w=window.innerWidth;
+    var h=window.innerHeight;
+    if(!w||!h)return;
+    MX.cvs.style.width=w+'px';
+    MX.cvs.style.height=h+'px';
     MX.cvs.width=w*dpr;
     MX.cvs.height=h*dpr;
     if(MX.ctx)MX.ctx.setTransform(dpr,0,0,dpr,0,0);
-    // Scale depth sizes based on viewport width
-    var scale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.4:1.0;
-    for(var d=0;d<mxDepths.length;d++){
-      mxDepths[d].renderSize=mxDepths[d].size*scale;
-    }
   }
 
-  function mxSpawnCol(){
-    if(MX.columns.length>=MX.maxCols)return;
-    var depth=Math.floor(Math.random()*7);
-    var tier=mxDepths[depth];
-    var count=Math.floor(8+Math.random()*21);
+  // Create a single column with randomized depth properties.
+  // depth 0=far (small, dim, slow), 1=near (large, bright, fast)
+  function mxMakeCol(w,h,startAbove){
+    var depth=Math.random(); // 0..1 continuous
+    var d3=depth*depth*depth; // cubic curve: most columns are background
+    // Font sizes: 14px (far) to 28px (near), viewport scaled — large enough to stay legible
+    var vScale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.3:1.0;
+    var fs=Math.round((14+d3*14)*vScale);
+    var lineH=fs*1.18;
+    var len=Math.floor(6+Math.random()*22+d3*10); // near columns are longer
     var chars=[];
-    for(var i=0;i<count;i++)chars.push(mxGetChar());
-    var x=Math.random()*96+2; // percent
-    var speed=(0.3+depth*0.12+Math.random()*0.25); // px per frame (faster for near columns)
-    MX.columns.push({x:x,y:-(count*tier.renderSize*1.15),speed:speed,chars:chars,depth:depth,fontSize:tier.renderSize,alpha:tier.alpha});
+    for(var i=0;i<len;i++)chars.push(mxGetChar());
+    // Speed: 30..200 px/sec, correlated with depth
+    var speed=(30+d3*170+Math.random()*40)*vScale;
+    // Opacity ceiling: 0.3 (far) to 1.0 (near) — far columns still visible
+    var alpha=0.3+d3*0.7;
+    // Mutation rate: near columns mutate faster (film-like flickering)
+    var mutRate=0.001+d3*0.015;
+    // Cache font string to avoid rebuilding each frame
+    var fontStr=fs+'px "SF Mono","Fira Code",ui-monospace,monospace';
+    var x=Math.floor(Math.random()*w);
+    var y=startAbove? -(len*lineH+Math.random()*h*0.5) : -(len*lineH*Math.random());
+    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,alpha:alpha,mutRate:mutRate,fontStr:fontStr};
+  }
+
+  // Respawn a column at the top with new properties
+  function mxRespawn(col,w,h){
+    var nc=mxMakeCol(w,h,true);
+    col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.chars=nc.chars;col.len=nc.len;
+    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.alpha=nc.alpha;col.mutRate=nc.mutRate;col.fontStr=nc.fontStr;
   }
 
   function mxFrame(ts){
     if(!MX.on){MX.raf=null;return;}
     var ctx=MX.ctx;
     if(!ctx||!MX.cvs){MX.raf=null;return;}
-    var w=MX.cvs.clientWidth;
-    var h=MX.cvs.clientHeight;
+    var w=MX.cvs.clientWidth||window.innerWidth;
+    var h=MX.cvs.clientHeight||window.innerHeight;
 
-    // Spawn new columns at the configured rate
-    if(!MX.lastSpawn)MX.lastSpawn=ts;
-    if(ts-MX.lastSpawn>=MX.spawnRate){
-      var toSpawn=Math.random()<0.2?Math.floor(2+Math.random()*4):1;
-      for(var s=0;s<toSpawn;s++)mxSpawnCol();
-      MX.lastSpawn=ts;
-    }
+    // Delta time (capped at 100ms to avoid jumps on tab-switch)
+    var dt=MX.lastT?Math.min((ts-MX.lastT)/1000,0.1):0.016;
+    MX.lastT=ts;
 
-    // Clear with translucent black for trail effect (use canvas buffer dimensions,
-    // not clientWidth/clientHeight, so HiDPI displays clear the full buffer).
-    ctx.fillStyle='rgba(0,0,0,0.12)';
-    ctx.fillRect(0,0,MX.cvs.width,MX.cvs.height);
+    // Fade previous frame — higher alpha = faster trail fade (more film-like)
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    ctx.fillRect(0,0,w,h);
 
     ctx.textBaseline='top';
-    ctx.fontFamily='"SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace';
+    ctx.imageSmoothingEnabled=false;
 
-    var alive=[];
-    for(var ci=0;ci<MX.columns.length;ci++){
-      var col=MX.columns[ci];
-      var tier=mxDepths[col.depth];
-      var fs=tier.renderSize;
-      var lineH=fs*1.15;
-      var px=col.x*w/100;
+    var cols=MX.columns;
+    var lastFont='';
+    for(var ci=0;ci<cols.length;ci++){
+      var col=cols[ci];
+      // Move by delta time
+      col.y+=col.speed*dt;
 
-      ctx.font=fs+'px "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace';
-
-      // Draw characters with trail gradient (top chars dimmer, bottom brighter)
-      for(var chi=0;chi<col.chars.length;chi++){
-        var cy=col.y+chi*lineH;
-        if(cy<-lineH||cy>h)continue;
-        var trailFrac=chi/(col.chars.length-1||1); // 0=top, 1=bottom
-        var charAlpha=col.alpha*(0.06+trailFrac*0.94);
-        var isHead=chi===col.chars.length-1;
-
-        if(isHead){
-          // Head: bright white-green with glow
-          ctx.globalAlpha=Math.min(col.alpha+0.2,1.0);
-          ctx.shadowColor='#00ff41';
-          ctx.shadowBlur=fs*0.6;
-          ctx.fillStyle='#ccffdd';
-          ctx.fillText(col.chars[chi],px,cy);
-          ctx.shadowBlur=0;
-        }else{
-          // Trail: phosphor green with bloom
-          ctx.globalAlpha=charAlpha;
-          ctx.shadowColor='rgba(0,255,65,0.5)';
-          ctx.shadowBlur=fs*0.3;
-          ctx.fillStyle='#00ff41';
-          ctx.fillText(col.chars[chi],px,cy);
-          ctx.shadowBlur=0;
-        }
+      // Respawn if fully past viewport
+      if(col.y>h+10){
+        mxRespawn(col,w,h);
+        continue;
       }
 
-      // Advance position
-      col.y+=col.speed;
-      // Remove if fully past viewport
-      if(col.y>h+lineH){/* dead */}else{alive.push(col);}
+      // Occasional character mutation (film-like flickering)
+      if(Math.random()<col.mutRate){
+        var mi=Math.floor(Math.random()*col.len);
+        col.chars[mi]=mxGetChar();
+      }
+
+      // Set font only when it changes from previous column
+      if(col.fontStr!==lastFont){ctx.font=col.fontStr;lastFont=col.fontStr;}
+
+      // Draw characters: trail gradient from dim (top) to bright (bottom/head)
+      for(var chi=0;chi<col.len;chi++){
+        var cy=col.y+chi*col.lineH;
+        // Skip off-screen characters
+        if(cy<-col.lineH||cy>h)continue;
+
+        var trailFrac=chi/(col.len-1||1); // 0=top, 1=head
+        var isHead=chi===col.len-1;
+
+        if(isHead){
+          // Head character: brightest, white-green
+          ctx.globalAlpha=Math.min(col.alpha*1.2,1.0);
+          ctx.fillStyle='#ceffce';
+          ctx.fillText(col.chars[chi],col.x,cy);
+          // Subtle head glow — only for near columns (no shadowBlur, use double-draw)
+          if(col.depth>0.7){
+            ctx.globalAlpha=col.alpha*0.3;
+            ctx.fillText(col.chars[chi],col.x-0.5,cy);
+          }
+        }else{
+          // Trail: phosphor green, fading toward top
+          // Smooth fade: raised floor keeps characters legible
+          var charAlpha=col.alpha*(0.15+trailFrac*trailFrac*0.85);
+          ctx.globalAlpha=charAlpha;
+          ctx.fillStyle='#00ff41';
+          ctx.fillText(col.chars[chi],col.x,cy);
+        }
+      }
     }
     ctx.globalAlpha=1.0;
-    MX.columns=alive;
-
     MX.raf=requestAnimationFrame(mxFrame);
   }
 
@@ -3751,21 +4092,22 @@ export function getDisplayHtml(): string {
     if(DAILY.on)dailyClose();
     MX.on=true;
     MX.overlay.classList.add('active');
-    var vw=window.innerWidth;
-    var rawCols=Math.floor(vw/28);
-    MX.maxCols=Math.max(8,Math.min(rawCols,80));
-    MX.spawnRate=Math.max(60,Math.round(220-vw/30));
-    MX.lastSpawn=0;
-    // Defer canvas sizing by one frame so the overlay has committed its layout
-    // and clientWidth/clientHeight are non-zero before we read them.
+    MX.lastT=0;
     requestAnimationFrame(function(){
       mxSizeCanvas();
       if(MX.ctx&&MX.cvs){
-        MX.ctx.clearRect(0,0,MX.cvs.width,MX.cvs.height);
+        // Clear to solid black
+        MX.ctx.fillStyle='#000';
+        MX.ctx.fillRect(0,0,MX.cvs.width,MX.cvs.height);
       }
-      // Initial burst
-      var burst=Math.floor(MX.maxCols*0.4);
-      for(var i=0;i<burst;i++)mxSpawnCol();
+      // Pre-allocate all columns — staggered across viewport height
+      var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
+      var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
+      var numCols=Math.max(20,Math.min(Math.floor(w/16),120));
+      MX.columns=[];
+      for(var i=0;i<numCols;i++){
+        MX.columns.push(mxMakeCol(w,h,false));
+      }
       MX.raf=requestAnimationFrame(mxFrame);
     });
   }
@@ -3776,7 +4118,7 @@ export function getDisplayHtml(): string {
     if(MX.raf){cancelAnimationFrame(MX.raf);MX.raf=null;}
     MX.columns=[];
     MX.buf=[];MX.bufIdx=0;
-    // Clear canvas using buffer dimensions, not CSS pixel dimensions.
+    MX.lastT=0;
     if(MX.ctx&&MX.cvs){
       MX.ctx.clearRect(0,0,MX.cvs.width,MX.cvs.height);
     }
