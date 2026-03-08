@@ -242,7 +242,7 @@ describe("Display UI: HTML structure", () => {
   test("Matrix and Daily trigger buttons in the UI", () => {
     expect(html).toContain('id="dmatrix-btn"');
     expect(html).toContain('id="ddaily-btn"');
-    expect(html).toMatch(/>Enter Matrix</);
+    expect(html).toMatch(/>Matrix</);
     expect(html).toMatch(/>Daily</);
   });
 

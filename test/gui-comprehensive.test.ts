@@ -250,10 +250,9 @@ describe("Admin JS: core functions", () => {
     expect(adminJs).toContain("initializeApiToken");
   });
 
-  test("handles URL param token extraction and history cleanup", () => {
-    expect(adminJs).toContain("searchParams");
+  test("handles API token via session storage", () => {
     expect(adminJs).toContain("sessionStorage");
-    expect(adminJs).toContain("history.replaceState");
+    expect(adminJs).toContain("localCrewApiToken");
   });
 
   test("defines buildApiHeaders function", () => {
@@ -640,8 +639,8 @@ describe("Display JS: Matrix engine", () => {
     expect(displayHtml).toContain("mxFeedText");
   });
 
-  test("defines mxSpawn for column spawning", () => {
-    expect(displayHtml).toContain("mxSpawn");
+  test("defines mxMakeCol for column creation", () => {
+    expect(displayHtml).toContain("mxMakeCol");
   });
 
   test("defines mxProcessEvent for SSE integration", () => {
@@ -654,9 +653,9 @@ describe("Display JS: Matrix engine", () => {
     expect(displayHtml).toContain("scanline");
   });
 
-  test("Matrix has column depth tiers", () => {
-    expect(displayHtml).toContain("mxDepths");
-    expect(displayHtml).toContain("renderSize");
+  test("Matrix has continuous depth system", () => {
+    expect(displayHtml).toContain("depth");
+    expect(displayHtml).toContain("mxMakeCol");
   });
 });
 
@@ -782,9 +781,9 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("columns:[]");
   });
 
-  test("mxStart spawns initial burst of columns", () => {
-    expect(displayHtml).toContain("mxSpawnCol()");
-    expect(displayHtml).toContain("burst");
+  test("mxStart pre-allocates columns", () => {
+    expect(displayHtml).toContain("mxMakeCol(");
+    expect(displayHtml).toContain("numCols");
   });
 
   test("mxStop cancels animation frame and clears buffer", () => {

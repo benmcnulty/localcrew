@@ -161,6 +161,111 @@ function makeChatResponse(
 }
 
 describe("LocalCrewApp", () => {
+  test("reports idle resources after a completed command response", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        speakFn: () => {}
+      });
+
+      const result = await app.execute(parseCommand("Hello Erin"));
+      const status = await app.getStatusSnapshot();
+      const orchestrator = status.activeResources.find((resource) => resource.alias === "orchestrator");
+
+      expect(result.errors).toEqual([]);
+      expect(orchestrator).toEqual(
+        expect.objectContaining({
+          alias: "orchestrator",
+          isBusy: false,
+          activeModel: null
+        })
+      );
+      expect(status.displayMetrics.fleetSummary.utilizationPct).toBe(0);
+    });
+  });
+
+  test("logs into the Local Crew Portal with orchestrator metadata and exposes the account username", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (input, init) => {
+          const url = String(input);
+          fetchCalls.push({ url, init });
+
+          if (url.endsWith("/api/crew/validate-token")) {
+            return new Response(
+              JSON.stringify({
+                valid: true,
+                userId: "user-1",
+                sessionToken: "session-1",
+                deviceId: "device-1",
+                orchestratorId: "orch-1",
+                username: "ben",
+                displayName: "Ben McNulty",
+                expiresAt: "2026-12-31T00:00:00.000Z"
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              }
+            );
+          }
+
+          if (url.endsWith("/api/crew/snapshot")) {
+            return new Response(JSON.stringify({ accepted: true, heartbeat: 123 }), {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            });
+          }
+
+          throw new Error(`Unexpected fetch: ${url}`);
+        },
+        speakFn: () => {}
+      });
+
+      const result = await app.execute(parseCommand("/login TEST1234"));
+      const status = await app.getStatusSnapshot();
+
+      expect(result.errors).toEqual([]);
+      expect(result.lines[0]).toContain("Connected to Local Crew Portal");
+      expect(status.accountUsername).toBe("ben");
+      expect(fetchCalls).toHaveLength(2);
+
+      const validateCall = fetchCalls[0];
+      const validateBody = JSON.parse(String(validateCall.init?.body)) as {
+        token: string;
+        orchestratorName: string;
+        capacitySummary: { resourceCount: number };
+      };
+      expect(validateBody.token).toBe("TEST1234");
+      expect(validateBody.orchestratorName).toBe("Captain");
+      expect(validateBody.capacitySummary.resourceCount).toBe(4);
+
+      const snapshotCall = fetchCalls[1];
+      expect(snapshotCall.init?.headers).toEqual(
+        expect.objectContaining({ authorization: "Bearer session-1" })
+      );
+      const snapshotBody = JSON.parse(String(snapshotCall.init?.body)) as {
+        snapshot: {
+          queueDepth: { pending: number; completed: number; failed: number };
+          resources: Array<{ alias: string; isBusy?: boolean; model?: string | null }>;
+        };
+      };
+      expect(snapshotBody.snapshot.queueDepth).toEqual({ pending: 0, completed: 0, failed: 0 });
+      expect(snapshotBody.snapshot.resources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ alias: "orchestrator", isBusy: false, model: null })
+        ])
+      );
+    });
+  });
+
   test("routes command-mode plain messages to the default endpoint", async () => {
     await withTempDir(async (rootDir) => {
       const seenBodies: Array<{ messages?: ChatMessage[] }> = [];
@@ -2162,6 +2267,104 @@ describe("LocalCrewApp", () => {
       expect(requestedModels).toContain("llama3.1:latest");
       expect(requestedModels).not.toContain("gemma3:4b");
     });
+  });
+
+  test("preserves headroom by downgrading heavy reasoning work to the default model on a stressed node", async () => {
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        orchestrator: {
+          alias: "orchestrator",
+          label: "Local Orchestrator",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.1:8b",
+          reasoningModel: "gpt-oss:20b",
+          role: "Primary orchestration resource.",
+          capabilities: ["reasoning"],
+          notes: [],
+          cpuLogicalCores: 10,
+          ramGb: 32
+        }
+      };
+      await saveResources(resources, rootDir);
+
+      const requestedModels: string[] = [];
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { model?: string };
+          requestedModels.push(body.model ?? "");
+          return makeChatResponse("Headroom preserved.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.syncResourceReport({
+        alias: "orchestrator",
+        label: "Local Orchestrator",
+        baseUrl: "http://127.0.0.1:11434",
+        apiStyle: "ollama",
+        liveMetrics: {
+          loadAvg1m: 8.5,
+          loadAvg5m: 8.2,
+          totalMemGb: 32,
+          freeMemGb: 4,
+          freePct: 12.5,
+          timestamp: Date.now()
+        }
+      });
+
+      await app.execute(parseCommand("/auto"));
+      await app.execute(parseCommand("Analyze the system architecture tradeoffs and diagnose the routing drift."));
+
+      expect(requestedModels).toContain("llama3.1:8b");
+      expect(requestedModels).not.toContain("gpt-oss:20b");
+    });
+  });
+
+  test("falls back to the default model after a transient specialized-model failure in auto mode", async () => {
+    process.env.LOCALCREW_INFERENCE_RETRY_DELAY_MS = "1";
+    await withTempDir(async (rootDir) => {
+      const resources: Record<string, ResourceProfile> = {
+        orchestrator: {
+          alias: "orchestrator",
+          label: "Local Orchestrator",
+          tier: "top",
+          baseUrl: "http://127.0.0.1:11434",
+          defaultModel: "llama3.1:8b",
+          reasoningModel: "gpt-oss:20b",
+          role: "Primary orchestration resource.",
+          capabilities: ["reasoning"],
+          notes: []
+        }
+      };
+      await saveResources(resources, rootDir);
+
+      const requestedModels: string[] = [];
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { model?: string };
+          requestedModels.push(body.model ?? "");
+          if (body.model === "gpt-oss:20b") {
+            throw new Error("HTTP 500: model overloaded");
+          }
+          return makeChatResponse("Fallback completed.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const result = await app.execute(
+        parseCommand("Design a comprehensive end-to-end architecture review with tradeoff analysis.")
+      );
+
+      expect(result.errors).toEqual([]);
+      expect(requestedModels).toContain("gpt-oss:20b");
+      expect(requestedModels).toContain("llama3.1:8b");
+      expect(requestedModels[requestedModels.length - 1]).toBe("llama3.1:8b");
+    });
+    delete process.env.LOCALCREW_INFERENCE_RETRY_DELAY_MS;
   });
 
   test("rejects loopback base URLs for synced non-orchestrator resources", async () => {

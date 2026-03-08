@@ -595,6 +595,7 @@ export interface TaskMetadata {
 export interface ResourceTelemetry {
   queueDepth: number;
   ramUsagePct: number;
+  cpuLoadPct?: number;
   tokensPerSecond: number;
   activeModel: string | null;
   avgQueueWaitMs: number;
@@ -610,16 +611,22 @@ export function buildResourceTelemetry(
   alias: string,
   queueDepth: number,
   telemetrySummary?: { resources?: Record<string, { calls: number; errors: number; totalDurationMs: number; evalCount: number }> },
-  liveMetrics?: LiveDeviceMetrics
+  liveMetrics?: LiveDeviceMetrics,
+  resourceProfile?: Pick<ResourceProfile, "cpuLogicalCores">
 ): ResourceTelemetry {
   const ramUsagePct = liveMetrics
     ? Math.round((1 - liveMetrics.freeMemGb / liveMetrics.totalMemGb) * 100)
     : 0;
+  const cpuLoadPct =
+    liveMetrics && typeof resourceProfile?.cpuLogicalCores === "number" && resourceProfile.cpuLogicalCores > 0
+      ? Math.max(0, Math.min(100, Math.round((liveMetrics.loadAvg1m / resourceProfile.cpuLogicalCores) * 100)))
+      : undefined;
   const stats = telemetrySummary?.resources?.[alias];
   if (!stats || stats.calls === 0) {
     return {
       queueDepth,
       ramUsagePct,
+      ...(cpuLoadPct !== undefined ? { cpuLoadPct } : {}),
       tokensPerSecond: 0,
       activeModel: null,
       avgQueueWaitMs: 0,
@@ -635,6 +642,7 @@ export function buildResourceTelemetry(
   return {
     queueDepth,
     ramUsagePct,
+    ...(cpuLoadPct !== undefined ? { cpuLoadPct } : {}),
     tokensPerSecond,
     activeModel: null,
     avgQueueWaitMs: avgDurationMs,
@@ -644,11 +652,12 @@ export function buildResourceTelemetry(
 }
 
 const SCORE_WEIGHTS = {
-  availability: 0.20,
+  availability: 0.18,
   memoryHeadroom: 0.10,
-  capabilityMatch: 0.30,
+  cpuHeadroom: 0.10,
+  capabilityMatch: 0.27,
   reliability: 0.25,
-  throughput: 0.10,
+  throughput: 0.05,
   // Fairness: prevents starvation by boosting idle resources.
   fairness: 0.05
 };
@@ -663,6 +672,79 @@ function clamp01(value: number): number {
 
 function estimateTokenCount(content: string): number {
   return Math.max(32, Math.ceil(content.length / 4));
+}
+
+function parseModelSizeBillions(model: string | undefined): number | undefined {
+  if (!model) {
+    return undefined;
+  }
+
+  const match = model.match(/(?:^|[:\-])(\d+(?:\.\d+)?)b(?:\b|$)/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const size = Number.parseFloat(match[1]);
+  return Number.isFinite(size) ? size : undefined;
+}
+
+function isHeavyReasoningModel(resource: ResourceProfile): boolean {
+  if (!resource.reasoningModel) {
+    return false;
+  }
+
+  const reasoningSize = parseModelSizeBillions(resource.reasoningModel);
+  const defaultSize = parseModelSizeBillions(resource.defaultModel);
+
+  if (reasoningSize !== undefined && defaultSize !== undefined) {
+    return reasoningSize >= defaultSize + 8 || reasoningSize >= defaultSize * 1.75;
+  }
+
+  return /\b(gpt-oss|qwq|r1|mixtral|70b|32b|27b|20b|reason)\b/i.test(resource.reasoningModel);
+}
+
+function requiresHighReasoningCapacity(task: TaskMetadata): boolean {
+  if (task.reasoningDepth === "high" || task.tokenEstimate >= 6000) {
+    return true;
+  }
+
+  return /\b(architecture|tradeoff|benchmark|root cause|release readiness|consensus|finalize|comprehensive|end[- ]?to[- ]?end|diagnos(?:e|is))\b/i.test(
+    task.content
+  );
+}
+
+export function resolveResourcePurpose(
+  resource: ResourceProfile,
+  desiredPurpose: "default" | "reasoning" | "coding" | "tools",
+  task: TaskMetadata,
+  telemetry?: ResourceTelemetry,
+  healthStatus?: "online" | "offline" | "degraded"
+): "default" | "reasoning" | "coding" | "tools" {
+  if (desiredPurpose !== "reasoning") {
+    return desiredPurpose;
+  }
+
+  if (!resource.reasoningModel) {
+    return "default";
+  }
+
+  if (!isHeavyReasoningModel(resource)) {
+    return "reasoning";
+  }
+
+  const requiresHeavyReasoning = requiresHighReasoningCapacity(task);
+  const lowOperationalHeadroom =
+    healthStatus === "degraded" ||
+    (telemetry?.queueDepth ?? 0) > 0 ||
+    (telemetry?.ramUsagePct ?? 0) >= 72 ||
+    (telemetry?.cpuLoadPct ?? 0) >= 75 ||
+    task.latencySensitive;
+
+  if (!requiresHeavyReasoning || lowOperationalHeadroom) {
+    return "default";
+  }
+
+  return "reasoning";
 }
 
 function inferReasoningDepth(content: string, taskType: TaskMetadata["taskType"]): TaskMetadata["reasoningDepth"] {
@@ -750,6 +832,8 @@ export function computeResourceScore(
 
   const availability = clamp01(1 - telemetry.queueDepth / MAX_QUEUE_DEPTH);
   const memoryHeadroom = clamp01(1 - telemetry.ramUsagePct / 100);
+  const cpuHeadroom =
+    telemetry.cpuLoadPct === undefined ? 0.75 : clamp01(1 - telemetry.cpuLoadPct / 100);
   const capabilityMatch = capabilityMatchScore(resource, task);
   const reliability = clamp01(telemetry.successRate);
   // Normalize throughput: assume 50 tok/s is excellent, 0 means unknown (treat as neutral 0.5)
@@ -764,6 +848,7 @@ export function computeResourceScore(
   let score =
     SCORE_WEIGHTS.availability * availability +
     SCORE_WEIGHTS.memoryHeadroom * memoryHeadroom +
+    SCORE_WEIGHTS.cpuHeadroom * cpuHeadroom +
     SCORE_WEIGHTS.capabilityMatch * capabilityMatch +
     SCORE_WEIGHTS.reliability * reliability +
     SCORE_WEIGHTS.throughput * throughput +
@@ -961,10 +1046,12 @@ export function chooseResourceForTask(
         resource.alias,
         getResourceLoad(resource.alias, resourceLoad),
         options.telemetrySummary,
-        liveMetricsByAlias[resource.alias]
+        liveMetricsByAlias[resource.alias],
+        resource
       )
     ])
   );
+  const classified = classifyTask(task);
   const orchestratorAlias = options.primaryOrchestratorAlias ?? getOrchestratorResourceAlias(rootDir);
   const orchestrator = resources.find((profile) => profile.alias === orchestratorAlias) ?? resources[0];
   if (!orchestrator) {
@@ -998,11 +1085,18 @@ export function chooseResourceForTask(
       pickHighestContext(top, resourceLoad) ??
       pickHighestContext(resources, resourceLoad) ??
       orchestrator;
+    const desiredPurpose =
+      selected.reasoningModel && selected.alias === orchestrator.alias ? "reasoning" : "default";
     return {
       alias: selected.alias,
       tier: selected.tier,
-      purpose:
-        selected.reasoningModel && selected.alias === orchestrator.alias ? "reasoning" : "default",
+      purpose: resolveResourcePurpose(
+        selected,
+        desiredPurpose,
+        classified,
+        telemetryByAlias[selected.alias],
+        options.healthStatuses?.[selected.alias]
+      ),
       rationale: `Selected ${selected.alias} for a context-heavy task using the highest known context budget while considering current queue load.`
     };
   }
@@ -1076,7 +1170,13 @@ export function chooseResourceForTask(
       return {
         alias: selected.alias,
         tier: selected.tier,
-        purpose: selected.reasoningModel ? "reasoning" : "default",
+        purpose: resolveResourcePurpose(
+          selected,
+          selected.reasoningModel ? "reasoning" : "default",
+          classified,
+          telemetryByAlias[selected.alias],
+          options.healthStatuses?.[selected.alias]
+        ),
         rationale: `Delegating complex multi-step task to sub-orchestrator @${selected.alias} which can coordinate independently${subordinates.length > 0 ? ` with subordinates: ${subordinates.map((s) => `@${s}`).join(", ")}` : ""}.`,
         delegateToOrchestrator: selected.alias,
         availableSubordinates: subordinates
@@ -1101,8 +1201,6 @@ export function chooseResourceForTask(
       rationale: `Selected ${selected.alias} for a smaller isolated task that does not require the best reasoning tier.`
     };
   }
-
-  const classified = classifyTask(task);
   const scoredRoute = routeTask(
     classified,
     resources,
@@ -1137,12 +1235,17 @@ export function chooseResourceForTask(
   return {
     alias: scoredRoute.resource.alias,
     tier: scoredRoute.resource.tier,
-    purpose:
+    purpose: resolveResourcePurpose(
+      scoredRoute.resource,
       fallbackPurpose === "reasoning" && scoredRoute.resource.reasoningModel
         ? "reasoning"
         : fallbackPurpose === "tools" && scoredRoute.resource.toolsModel
           ? "tools"
           : "default",
+      classified,
+      telemetryByAlias[scoredRoute.resource.alias],
+      options.healthStatuses?.[scoredRoute.resource.alias]
+    ),
     rationale: scoredRoute.rationale
   };
 }
