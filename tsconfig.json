@@ -7,6 +7,5 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022"
-  },
-  "exclude": ["test/playwright", "playwright.config.ts"]
+  }
 }

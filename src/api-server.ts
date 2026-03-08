@@ -38,6 +38,7 @@ interface WorkerRequestMessage {
   url: string;
   bodyText: string;
   headers?: Record<string, string>;
+  remoteAddress?: string;
 }
 
 interface WorkerResponseMessage {
@@ -65,6 +66,7 @@ interface ApiRequest {
   url: URL;
   bodyText: string;
   headers?: Record<string, string>;
+  remoteAddress?: string;
 }
 
 interface ApiResponsePayload {
@@ -93,6 +95,66 @@ function getCorsOrigin(): string {
 
 function getApiToken(): string | undefined {
   return getOptionalEnvString("LOCALCREW_API_TOKEN");
+}
+
+function getApiNetworkScope(): "local" | "any" {
+  return getEnvString("LOCALCREW_API_NETWORK_SCOPE", "local") === "any" ? "any" : "local";
+}
+
+function normalizeClientAddress(remoteAddress?: string): string {
+  if (!remoteAddress) {
+    return "";
+  }
+  let normalized = remoteAddress.trim().toLowerCase();
+  if (normalized.startsWith("[")) {
+    const closingIndex = normalized.indexOf("]");
+    normalized = closingIndex >= 0 ? normalized.slice(1, closingIndex) : normalized.slice(1);
+  }
+  const zoneIndex = normalized.indexOf("%");
+  if (zoneIndex >= 0) {
+    normalized = normalized.slice(0, zoneIndex);
+  }
+  if (normalized.startsWith("::ffff:")) {
+    normalized = normalized.slice(7);
+  }
+  return normalized;
+}
+
+function isPrivateIpv4(address: string): boolean {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)) {
+    return false;
+  }
+  const octets = address.split(".").map((segment) => Number(segment));
+  if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+  return (
+    octets[0] === 10 ||
+    octets[0] === 127 ||
+    (octets[0] === 169 && octets[1] === 254) ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168)
+  );
+}
+
+export function isLocalApiClientAddress(remoteAddress?: string): boolean {
+  const normalized = normalizeClientAddress(remoteAddress);
+  if (!normalized) {
+    return false;
+  }
+  if (isPrivateIpv4(normalized)) {
+    return true;
+  }
+  if (normalized === "::1") {
+    return true;
+  }
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+    return true;
+  }
+  if (normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) {
+    return true;
+  }
+  return false;
 }
 
 function getRequestApiToken(request: ApiRequest): string {
@@ -163,6 +225,12 @@ async function buildApiResponse(
       },
       bodyText: ""
     };
+  }
+
+  if (getApiNetworkScope() !== "any" && !isLocalApiClientAddress(request.remoteAddress)) {
+    return jsonResponse(403, {
+      error: "Forbidden. Local Crew only serves local-network clients by default."
+    });
   }
 
   // Authenticate if LOCALCREW_API_TOKEN is configured
@@ -626,7 +694,8 @@ async function startNodeWorkerApi(
             method: message.method,
             url: new URL(message.url, "http://localhost"),
             bodyText: message.bodyText,
-            headers: message.headers
+            headers: message.headers,
+            remoteAddress: message.remoteAddress
           });
           if (child.connected) {
             child.send({
@@ -760,7 +829,8 @@ function startVirtualApiServer(
         method: request.method,
         url,
         bodyText: await request.text(),
-        headers: reqHeaders
+        headers: reqHeaders,
+        remoteAddress: "127.0.0.1"
       });
       return buildFetchResponse(payload);
     } catch (error) {
@@ -844,7 +914,8 @@ export async function startApiServer(
         method: request.method ?? "GET",
         url,
         bodyText,
-        headers: reqHeaders
+        headers: reqHeaders,
+        remoteAddress: (request as { socket?: { remoteAddress?: string } }).socket?.remoteAddress
       });
       response.writeHead(payload.status, payload.headers);
       response.end(payload.bodyText);

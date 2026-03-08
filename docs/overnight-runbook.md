@@ -46,10 +46,10 @@ Confirm API health and SSE stream:
 curl -s http://127.0.0.1:4310/api/health
 ```
 
-If `LOCALCREW_API_TOKEN` is enabled, verify authenticated events endpoint:
+Verify local billboard SSE reachability from a LAN-safe client:
 
 ```bash
-curl -N -H "Authorization: Bearer $LOCALCREW_API_TOKEN" http://127.0.0.1:4310/api/events
+curl -N http://127.0.0.1:4310/api/events
 ```
 
 ## 4) Agent Device Onboarding
@@ -57,7 +57,7 @@ curl -N -H "Authorization: Bearer $LOCALCREW_API_TOKEN" http://127.0.0.1:4310/ap
 On each secondary device:
 
 ```bash
-node scripts/setup-agent.js
+npm run setup:agent
 ```
 
 Then validate from orchestrator shell/UI:

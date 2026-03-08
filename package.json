@@ -31,11 +31,6 @@
     "start:node": "node src/index.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test ./test/*.test.ts",
-    "validate": "npm run typecheck && npm test",
-    "test:e2e": "bunx playwright test",
-    "test:e2e:ui": "bunx playwright test --ui"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.58.2"
+    "validate": "npm run typecheck && npm test"
   }
 }

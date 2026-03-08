@@ -8,7 +8,7 @@ async function readWorkspaceFile(relativePath: string): Promise<string> {
 }
 
 describe("release readiness guardrails", () => {
-  test("package.json stays zero production dependency", async () => {
+  test("package.json stays zero dependency", async () => {
     const packageJsonRaw = await readWorkspaceFile("package.json");
     const packageJson = JSON.parse(packageJsonRaw) as {
       dependencies?: Record<string, string>;
@@ -16,6 +16,7 @@ describe("release readiness guardrails", () => {
     };
 
     expect(Object.keys(packageJson.dependencies ?? {})).toHaveLength(0);
+    expect(Object.keys(packageJson.devDependencies ?? {})).toHaveLength(0);
   });
 
   test("CI uses unified validate gate", async () => {
@@ -37,5 +38,9 @@ describe("release readiness guardrails", () => {
     expect(runbook).toContain("bunx tsc --noEmit");
     expect(runbook).toContain("npm test");
     expect(runbook).toContain("Known Limitations");
+  });
+
+  test("repo does not ship playwright release scaffolding", async () => {
+    await expect(readWorkspaceFile("playwright.config.ts")).rejects.toThrow();
   });
 });

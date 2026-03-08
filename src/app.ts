@@ -1924,7 +1924,7 @@ export class LocalCrewApp {
       `Resources: ${resources.length}`,
       ...(resources.length <= 1
         ? [
-            'Onboarding: run `node scripts/setup-agent.js` on the next agent device. It will prefill the first three IP numbers from the local network, you confirm or enter the final number of the orchestrator IP, then it will prompt for a device nickname and sync it here automatically.'
+            'Onboarding: run `npm run setup:agent` on the next agent device. It will prefill the first three IP numbers from the local network, you confirm or enter the final number of the orchestrator IP, then it will prompt for a device nickname and sync it here automatically.'
           ]
         : []),
       `Agents: ${agents.length > 0 ? agents.map((agent) => `@${agent.slug}`).join(", ") : "(none)"}`,
@@ -3115,7 +3115,7 @@ export class LocalCrewApp {
         "Resources are inference endpoints (Ollama, OpenAI-compatible, or Anthropic).",
         "Each has a tier (top, mid, low) that controls task routing priority.",
         "Hardware metadata (CPU, RAM, GPU, VRAM, context tokens) is optional but",
-        "improves routing decisions. Use the setup-agent.js script to onboard",
+        "improves routing decisions. Use npm run setup:agent to onboard",
         "remote devices automatically.",
       ],
       participants: [
