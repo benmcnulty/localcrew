@@ -88,6 +88,37 @@ describe("parseCommand", () => {
       type: "login",
       token: undefined
     });
+    expect(parseCommand("/port")).toEqual({
+      type: "port.status"
+    });
+  });
+
+  test("parses Port commands", () => {
+    expect(parseCommand("/port feed")).toEqual({
+      type: "port.feed",
+      feed: "profile",
+      section: "all"
+    });
+    expect(parseCommand("/port feed public advice")).toEqual({
+      type: "port.feed",
+      feed: "public",
+      section: "advice"
+    });
+    expect(parseCommand('/port post mates daily-log "Shift complete. Queue is empty."')).toEqual({
+      type: "port.post",
+      audience: "mates",
+      section: "daily-log",
+      content: "Shift complete. Queue is empty."
+    });
+    expect(parseCommand('/port post "Need help validating the release checklist."')).toEqual({
+      type: "port.post",
+      content: "Need help validating the release checklist."
+    });
+    expect(parseCommand('/port reply log-123 "I can take the first pass."')).toEqual({
+      type: "port.reply",
+      logId: "log-123",
+      content: "I can take the first pass."
+    });
   });
 
   test("parses auto mode commands", () => {

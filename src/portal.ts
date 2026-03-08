@@ -54,6 +54,62 @@ export interface PortalSnapshot {
   orchestratorName?: string;
 }
 
+export type PortLogAudience = "public" | "mates" | "profile";
+export type PortLogSection = "all" | "general" | "advice" | "help" | "daily-log";
+
+export interface PortCommunitySummary {
+  username?: string | null;
+  displayName?: string | null;
+  membershipTier?: string | null;
+  tokenBalance?: number;
+  monthlyTokenAllotment?: number;
+  dailyTokenAllotment?: number;
+  termsAcceptedAt?: string | number | null;
+  authorizedCaptainSlots?: number;
+  authorizedCaptainCount?: number;
+}
+
+export interface PortLogEntry {
+  id: string;
+  parentId?: string | null;
+  rootId?: string | null;
+  uid?: string;
+  username?: string | null;
+  displayName?: string | null;
+  authorType?: string | null;
+  authorLabel?: string | null;
+  premiumBadge?: boolean;
+  audience: PortLogAudience;
+  section: Exclude<PortLogSection, "all">;
+  content: string;
+  createdAt?: string | number | null;
+  updatedAt?: string | number | null;
+  score?: number;
+  upVotes?: number;
+  downVotes?: number;
+  replyCount?: number;
+  replies?: PortLogEntry[];
+}
+
+export interface PortFeedResult {
+  logs: PortLogEntry[];
+  feed: PortLogAudience;
+  section: PortLogSection;
+}
+
+export interface PortPublishOptions {
+  content: string;
+  audience?: PortLogAudience;
+  section?: Exclude<PortLogSection, "all">;
+  parentId?: string;
+}
+
+export interface PortPublishResult {
+  created: boolean;
+  log: PortLogEntry | null;
+  community?: PortCommunitySummary;
+}
+
 export type FetchFn = typeof fetch;
 
 function portalSessionPath(rootDir: string): string {
@@ -133,7 +189,6 @@ export async function pushSnapshot(
     headers: {
       "Content-Type": "application/json",
       authorization: `Bearer ${session.sessionToken}`,
-      "X-Crew-Session": session.sessionToken,
     },
     body: JSON.stringify({ snapshot }),
   });
@@ -142,4 +197,91 @@ export async function pushSnapshot(
     const text = await response.text().catch(() => "");
     throw new Error(`Portal snapshot push failed (${response.status}): ${text}`);
   }
+}
+
+async function readPortalError(response: Response): Promise<string> {
+  const data = await response.json().catch(() => null) as { message?: string; code?: string } | null;
+  if (data?.message) {
+    return data.message;
+  }
+
+  const text = await response.text().catch(() => "");
+  return text || `Request failed with status ${response.status}.`;
+}
+
+function buildPortalSessionHeaders(session: PortalSession, includeContentType = false): Headers {
+  const headers = new Headers({
+    authorization: `Bearer ${session.sessionToken}`,
+  });
+
+  if (includeContentType) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return headers;
+}
+
+export async function fetchPortLogs(
+  session: PortalSession,
+  options: {
+    feed?: PortLogAudience;
+    section?: PortLogSection;
+    limit?: number;
+  },
+  fetchFn: FetchFn
+): Promise<PortFeedResult> {
+  const params = new URLSearchParams();
+  if (options.feed) {
+    params.set("feed", options.feed);
+  }
+  if (options.section) {
+    params.set("section", options.section);
+  }
+  if (typeof options.limit === "number") {
+    params.set("limit", String(options.limit));
+  }
+
+  const url = `${PORTAL_BASE_URL}/api/port/logs${params.size > 0 ? `?${params.toString()}` : ""}`;
+  const response = await fetchFn(url, {
+    method: "GET",
+    headers: buildPortalSessionHeaders(session),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Port feed fetch failed (${response.status}): ${await readPortalError(response)}`);
+  }
+
+  return await response.json() as PortFeedResult;
+}
+
+export async function publishPortLog(
+  session: PortalSession,
+  options: PortPublishOptions,
+  fetchFn: FetchFn
+): Promise<PortPublishResult> {
+  const body: Record<string, string> = {
+    content: options.content,
+  };
+
+  if (options.audience) {
+    body.audience = options.audience;
+  }
+  if (options.section) {
+    body.section = options.section;
+  }
+  if (options.parentId) {
+    body.parentId = options.parentId;
+  }
+
+  const response = await fetchFn(`${PORTAL_BASE_URL}/api/port/logs`, {
+    method: "POST",
+    headers: buildPortalSessionHeaders(session, true),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Port log publish failed (${response.status}): ${await readPortalError(response)}`);
+  }
+
+  return await response.json() as PortPublishResult;
 }

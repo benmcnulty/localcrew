@@ -409,6 +409,10 @@ export interface WebsiteFetchResult {
   chunks: string[];
 }
 
+export type PortFeedName = "public" | "mates" | "profile";
+export type PortSectionName = "all" | "general" | "advice" | "help" | "daily-log";
+export type PortPublishSectionName = Exclude<PortSectionName, "all">;
+
 export type Command =
   | { type: "message"; text: string; alias?: string }
   | { type: "crosstalk"; fromAlias: string; toAlias: string; text: string }
@@ -420,6 +424,10 @@ export type Command =
   | { type: "hud" }
   | { type: "explore" }
   | { type: "login"; token?: string }
+  | { type: "port.status" }
+  | { type: "port.feed"; feed: PortFeedName; section: PortSectionName }
+  | { type: "port.post"; content: string; audience?: PortFeedName; section?: PortPublishSectionName }
+  | { type: "port.reply"; logId: string; content: string }
   | { type: "endMode" }
   | { type: "help" }
   | { type: "help.topic"; topic: string }

@@ -31,10 +31,12 @@ function usage(command: string): string {
       return "Usage: /explore";
     case "/login":
       return "Usage: /login [token]";
+    case "/port":
+      return 'Usage: /port | /port status | /port feed [public|mates|profile] [all|general|advice|help|daily-log] | /port post [public|mates|profile] [general|advice|help|daily-log] "message" | /port reply <logId> "message"';
     case "/end":
       return "Usage: /end";
     case "/help":
-      return "Usage: /help [topic] — topics: chat, auto, resources, participants, agents, tools, topology, preferences, daily";
+      return "Usage: /help [topic] — topics: chat, auto, resources, participants, agents, tools, port, topology, preferences, daily";
     case "/priority":
       return "Usage: /priority [high|medium|low]";
     case "/agent":
@@ -122,6 +124,22 @@ function parseTier(value: string): "top" | "mid" | "low" | undefined {
 
 function parseApiStyle(value: string): "ollama" | "openai" | "anthropic" | undefined {
   if (value === "ollama" || value === "openai" || value === "anthropic") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parsePortFeedName(value: string): "public" | "mates" | "profile" | undefined {
+  if (value === "public" || value === "mates" || value === "profile") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parsePortSectionName(value: string): "all" | "general" | "advice" | "help" | "daily-log" | undefined {
+  if (value === "all" || value === "general" || value === "advice" || value === "help" || value === "daily-log") {
     return value;
   }
 
@@ -339,6 +357,83 @@ export function parseCommand(input: string): Command {
         throw new CommandParseError(usage("/login [token]"));
       }
       return { type: "login", token: rest[0] };
+    case "/port": {
+      if (rest.length === 0) {
+        return { type: "port.status" };
+      }
+
+      const subcommand = rest[0].toLowerCase();
+      if (subcommand === "status") {
+        if (rest.length !== 1) {
+          throw new CommandParseError(usage("/port"));
+        }
+        return { type: "port.status" };
+      }
+
+      if (subcommand === "feed") {
+        if (rest.length > 3) {
+          throw new CommandParseError(usage("/port"));
+        }
+
+        const feed = rest[1] ? parsePortFeedName(rest[1].toLowerCase()) : "profile";
+        const section = rest[2] ? parsePortSectionName(rest[2].toLowerCase()) : "all";
+        if (!feed || !section) {
+          throw new CommandParseError(usage("/port"));
+        }
+
+        return { type: "port.feed", feed, section };
+      }
+
+      if (subcommand === "post") {
+        const args = [...rest.slice(1)];
+        let audience: "public" | "mates" | "profile" | undefined;
+        let section: "general" | "advice" | "help" | "daily-log" | undefined;
+
+        if (args[0]) {
+          const maybeAudience = parsePortFeedName(args[0].toLowerCase());
+          if (maybeAudience) {
+            audience = maybeAudience;
+            args.shift();
+          }
+        }
+
+        if (args[0]) {
+          const maybeSection = parsePortSectionName(args[0].toLowerCase());
+          if (maybeSection && maybeSection !== "all") {
+            section = maybeSection;
+            args.shift();
+          }
+        }
+
+        const content = args.join(" ").trim();
+        if (!content) {
+          throw new CommandParseError(usage("/port"));
+        }
+
+        return {
+          type: "port.post",
+          content,
+          ...(audience ? { audience } : {}),
+          ...(section ? { section } : {})
+        };
+      }
+
+      if (subcommand === "reply") {
+        if (rest.length < 3) {
+          throw new CommandParseError(usage("/port"));
+        }
+
+        const logId = rest[1].trim();
+        const content = rest.slice(2).join(" ").trim();
+        if (!logId || !content) {
+          throw new CommandParseError(usage("/port"));
+        }
+
+        return { type: "port.reply", logId, content };
+      }
+
+      throw new CommandParseError(usage("/port"));
+    }
     case "/end":
       if (rest.length > 0) {
         throw new CommandParseError(usage("/end"));
