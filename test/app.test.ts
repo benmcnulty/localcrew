@@ -325,6 +325,9 @@ describe("LocalCrewApp", () => {
       expect(snapshotCall.init?.headers).toEqual(
         expect.objectContaining({ authorization: "Bearer session-1" })
       );
+      expect(snapshotCall.init?.headers).not.toEqual(
+        expect.objectContaining({ "X-Crew-Session": "session-1" })
+      );
       const snapshotBody = JSON.parse(String(snapshotCall.init?.body)) as {
         snapshot: {
           queueDepth: { pending: number; completed: number; failed: number };
@@ -337,6 +340,159 @@ describe("LocalCrewApp", () => {
           expect.objectContaining({ alias: "orchestrator", isBusy: false, model: null })
         ])
       );
+    });
+  });
+
+  test("reports Port connection guidance before a portal session exists", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => {
+          throw new Error("Unexpected fetch");
+        },
+        speakFn: () => {}
+      });
+
+      const result = await app.execute(parseCommand("/port"));
+
+      expect(result.errors).toEqual([]);
+      expect(result.lines[0]).toContain("Port is not connected");
+      expect(result.lines[1]).toContain("/login <token>");
+    });
+  });
+
+  test("browses and publishes Port Logs through the CLI after login", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+
+      const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+      let logPostCount = 0;
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (input, init) => {
+          const url = String(input);
+          fetchCalls.push({ url, init });
+
+          if (url.endsWith("/api/crew/validate-token")) {
+            return new Response(
+              JSON.stringify({
+                valid: true,
+                userId: "user-1",
+                sessionToken: "session-1",
+                deviceId: "device-1",
+                orchestratorId: "orch-1",
+                username: "ben",
+                displayName: "Ben McNulty",
+                expiresAt: "2026-12-31T00:00:00.000Z"
+              }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          if (url.endsWith("/api/crew/snapshot")) {
+            return new Response(JSON.stringify({ accepted: true }), {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            });
+          }
+
+          if (url.includes("/api/port/logs?") && init?.method === "GET") {
+            return new Response(
+              JSON.stringify({
+                feed: "public",
+                section: "help",
+                logs: [
+                  {
+                    id: "log-1",
+                    displayName: "Captain North",
+                    username: "north",
+                    audience: "public",
+                    section: "help",
+                    content: "Need a second set of eyes on the release plan.",
+                    score: 3,
+                    createdAt: "2026-03-08T10:15:00.000Z",
+                    replies: [
+                      {
+                        id: "reply-1",
+                        displayName: "Captain South",
+                        audience: "public",
+                        section: "help",
+                        content: "I can review it after lunch.",
+                        createdAt: "2026-03-08T10:30:00.000Z"
+                      }
+                    ]
+                  }
+                ]
+              }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          if (url.endsWith("/api/port/logs") && init?.method === "POST") {
+            logPostCount += 1;
+            return new Response(
+              JSON.stringify({
+                created: true,
+                log: logPostCount === 1
+                  ? {
+                      id: "log-new",
+                      audience: "mates",
+                      section: "daily-log",
+                      content: "Shift complete. Queue is clear."
+                    }
+                  : {
+                      id: "reply-new",
+                      audience: "mates",
+                      section: "daily-log",
+                      content: "I can take the first follow-up."
+                    },
+                community: {
+                  tokenBalance: logPostCount === 1 ? 114 : 108
+                }
+              }),
+              { status: 201, headers: { "content-type": "application/json" } }
+            );
+          }
+
+          throw new Error(`Unexpected fetch: ${url}`);
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/login TEST1234"));
+
+      const feedResult = await app.execute(parseCommand("/port feed public help"));
+      expect(feedResult.errors).toEqual([]);
+      expect(feedResult.lines[0]).toBe("Port feed: Public / Help");
+      expect(feedResult.lines.some((line) => line.includes("log-1"))).toBe(true);
+      expect(feedResult.lines.some((line) => line.includes("Captain South"))).toBe(true);
+
+      const postResult = await app.execute(parseCommand('/port post daily-log "Shift complete. Queue is clear."'));
+      expect(postResult.errors).toEqual([]);
+      expect(postResult.lines[0]).toContain("Published Port Log log-new");
+      expect(postResult.lines[1]).toContain("114");
+
+      const replyResult = await app.execute(parseCommand('/port reply log-new "I can take the first follow-up."'));
+      expect(replyResult.errors).toEqual([]);
+      expect(replyResult.lines[0]).toContain("Replied to Port Log log-new");
+      expect(replyResult.lines[1]).toContain("108");
+
+      const feedCall = fetchCalls.find((call) => call.url.includes("/api/port/logs?"));
+      expect(feedCall?.init?.headers).toBeInstanceOf(Headers);
+      expect((feedCall?.init?.headers as Headers).get("authorization")).toBe("Bearer session-1");
+
+      const postCalls = fetchCalls.filter((call) => call.url.endsWith("/api/port/logs") && call.init?.method === "POST");
+      expect(postCalls).toHaveLength(2);
+      expect(JSON.parse(String(postCalls[0]?.init?.body))).toEqual({
+        content: "Shift complete. Queue is clear.",
+        section: "daily-log"
+      });
+      expect(JSON.parse(String(postCalls[1]?.init?.body))).toEqual({
+        parentId: "log-new",
+        content: "I can take the first follow-up."
+      });
     });
   });
 

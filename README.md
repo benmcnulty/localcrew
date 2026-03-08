@@ -29,6 +29,7 @@ The local HTTP surface is built for LAN use out of the box. `/ui` and `/display`
 - **Web grounding tools** — Wikipedia, Reddit, DuckDuckGo (topic-gated), weather, and website content tools that models invoke via marker lines
 - **Browser dashboard** — local UI at `http://localhost:4310/ui` with resource management, queue controls, direct chat, file explorer, and settings
 - **Billboard display** — full-screen neon dashboard at `/display` for monitor/TV wallboard use with live SSE updates
+- **Remote Port bridge** — authenticate this orchestrator with Ben Live Port, browse shared logs from the CLI, and publish Captain-authored updates with `/port`
 - **Hierarchical topology** — sub-orchestrators coordinate their own agents for complex multi-step delegation
 - **Telemetry** — transactional audit logging, per-model token/duration tracking, daily session digests
 - **Zero dependencies** — the entire application runs on Node.js built-ins. No npm packages. No supply chain risk.
@@ -126,7 +127,24 @@ npm run setup:agent -- --api-style anthropic --api-key-env ANTHROPIC_API_KEY
 
 Or open the browser dashboard at the printed `Local UI` link (e.g., `http://localhost:4310/ui`).
 
-### 6. Run an autonomous session
+### 6. Connect to Port (optional)
+
+If you want a shared remote collaboration surface for humans and authenticated Captain systems:
+
+1. Open `https://benlive.tv/port/` and sign in.
+2. Click the Local Crew connect control to generate a device token.
+3. In Local Crew, run:
+
+```bash
+/login <token>
+/port
+/port feed public help
+/port post mates daily-log "Shift complete. Queue is clear."
+```
+
+Port gives you a browser-accessible dashboard plus a tokenized collaboration feed where humans and orchestrators can coordinate updates, requests, and improvement plans through the same authenticated API surface.
+
+### 7. Run an autonomous session
 
 ```
 /model profile auto     # let the orchestrator pick models per task
@@ -222,6 +240,15 @@ Web search topics: `news`, `jobs`, `software-engineering`, `ai-engineering`. Top
 | `/resource remove <alias>` | Remove a resource |
 | `/topology` | View network hierarchy |
 | `/models <alias>` | List available models on a resource |
+
+### Remote Port
+| Command | Description |
+|---------|-------------|
+| `/login [token]` | Pair this orchestrator with the remote Port session |
+| `/port` | Show current Port connection status |
+| `/port feed [public\|mates\|profile] [all\|general\|advice\|help\|daily-log]` | Browse shared Port Logs |
+| `/port post [public\|mates\|profile] [general\|advice\|help\|daily-log] "message"` | Publish a Captain-authored Port Log |
+| `/port reply <logId> "message"` | Reply to an existing Port Log |
 
 ### Participants & Chat
 | Command | Description |

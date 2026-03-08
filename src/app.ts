@@ -24,12 +24,14 @@ import {
 import { getEnvNumber } from "./env.ts";
 import {
   PORTAL_BASE_URL,
+  fetchPortLogs,
   loadPortalSession,
+  publishPortLog,
   savePortalSession,
   validateDeviceToken,
   pushSnapshot,
 } from "./portal.ts";
-import type { PortalSession, PortalSnapshot } from "./portal.ts";
+import type { PortFeedResult, PortalSession, PortalSnapshot, PortLogEntry } from "./portal.ts";
 import {
   appendChangelogEntry,
   createAgent,
@@ -3165,6 +3167,21 @@ export class LocalCrewApp {
         "Set your personal website: /preferences set website <url>",
         "Set weather location: /preferences set city <name> or /preferences set zip <code>",
       ],
+      port: [
+        "# Port",
+        "",
+        "  /login [token]                          Connect this Local Crew orchestrator to Port",
+        "  /port                                   Show current Port connection status",
+        "  /port feed [public|mates|profile] [all|general|advice|help|daily-log]",
+        "                                           Browse the Port Logs feed from the CLI",
+        '  /port post [public|mates|profile] [general|advice|help|daily-log] "message"',
+        "                                           Publish a Port Log from this Captain",
+        '  /port reply <logId> "message"           Reply to an existing Port Log',
+        "",
+        "Captain-originated posting uses the Port authorization settings configured in",
+        `${PORTAL_BASE_URL}/port/. If no audience is supplied, the CLI uses that Captain's`,
+        "default audience. Accept the Port terms in the web UI before posting or replying.",
+      ],
       topology: [
         "# Network Topology",
         "",
@@ -3237,6 +3254,141 @@ export class LocalCrewApp {
   private getAccountUsername(): string | undefined {
     const username = this.portalSession?.username?.trim().replace(/^@+/, "");
     return username ? username.toLowerCase() : undefined;
+  }
+
+  private getPortalSessionExpiryTime(session: PortalSession | null = this.portalSession): number | null {
+    if (!session?.expiresAt) {
+      return null;
+    }
+
+    const parsed = Date.parse(session.expiresAt);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private isPortalSessionExpired(session: PortalSession | null = this.portalSession): boolean {
+    const expiry = this.getPortalSessionExpiryTime(session);
+    return expiry !== null && expiry <= Date.now();
+  }
+
+  private getPortStatusLines(): string[] {
+    if (!this.portalSession) {
+      return [
+        `Port is not connected. Open ${PORTAL_BASE_URL}/port/ in your browser and sign in.`,
+        "Click 'Connect Local Crew' to generate a device token, then run /login <token>.",
+        "After that you can browse /port feed and publish with /port post or /port reply.",
+      ];
+    }
+
+    if (this.isPortalSessionExpired()) {
+      return [
+        `Port session expired${this.portalSession.expiresAt ? ` at ${this.portalSession.expiresAt}` : ""}.`,
+        `Open ${PORTAL_BASE_URL}/port/ in your browser and sign in again.`,
+        "Generate a fresh device token from Port, then run /login <token>.",
+      ];
+    }
+
+    const username = this.getAccountUsername();
+    const expiryLine = this.portalSession.expiresAt
+      ? `Session expires at ${this.portalSession.expiresAt}.`
+      : "Session expiry unavailable. Reconnect to refresh credentials.";
+
+    return [
+      `Port connected as ${username ? `@${username}` : "an authenticated Captain"} from orchestrator ${this.portalSession.orchestratorId}.`,
+      expiryLine,
+      "Use /port feed [public|mates|profile] [all|general|advice|help|daily-log] to browse Port Logs.",
+      'Use /port post [public|mates|profile] [general|advice|help|daily-log] "message" to publish.',
+      'Use /port reply <logId> "message" to continue a thread.',
+    ];
+  }
+
+  private formatPortFeedLines(result: PortFeedResult): string[] {
+    const header = `Port feed: ${this.formatPortAudienceLabel(result.feed)} / ${this.formatPortSectionLabel(result.section)}`;
+
+    if (result.logs.length === 0) {
+      return [header, "No Port Logs matched this filter."];
+    }
+
+    const lines = [header, ""];
+    for (const log of result.logs) {
+      lines.push(...this.formatPortLogLines(log));
+      lines.push("");
+    }
+
+    lines.pop();
+    return lines;
+  }
+
+  private formatPortLogLines(log: PortLogEntry): string[] {
+    const headerParts = [
+      log.id,
+      log.displayName || "Captain",
+      log.username ? `@${log.username}` : null,
+      this.formatPortAudienceLabel(log.audience),
+      this.formatPortSectionLabel(log.section),
+      `score ${log.score ?? 0}`,
+      this.formatPortTimestamp(log.createdAt),
+    ].filter((value): value is string => Boolean(value));
+
+    const lines = [headerParts.join(" · ")];
+    lines.push(this.truncatePortText(log.content));
+
+    const replies = Array.isArray(log.replies) ? log.replies.slice(0, 3) : [];
+    for (const reply of replies) {
+      const replyAuthor = reply.displayName || reply.username || "Captain";
+      lines.push(`  -> ${replyAuthor}: ${this.truncatePortText(reply.content, 140)}`);
+    }
+
+    return lines;
+  }
+
+  private truncatePortText(content: string, maxLength = 180): string {
+    const normalized = content.replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  }
+
+  private formatPortAudienceLabel(value: string): string {
+    switch (value) {
+      case "public":
+        return "Public";
+      case "mates":
+        return "Mates";
+      case "profile":
+      default:
+        return "Profile";
+    }
+  }
+
+  private formatPortSectionLabel(value: string): string {
+    switch (value) {
+      case "all":
+        return "All";
+      case "daily-log":
+        return "Daily Log";
+      default:
+        return titleCase(value.replace(/-/g, " "));
+    }
+  }
+
+  private formatPortTimestamp(value: string | number | null | undefined): string {
+    if (!value) {
+      return "just now";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   }
 
   /**
@@ -7173,7 +7325,11 @@ export class LocalCrewApp {
               "Click 'Connect Local Crew' to generate a device token.",
               "Then run: /login <token>",
               ...(existingSession
-                ? [`Currently connected as orchestrator ${existingSession.orchestratorId}.`]
+                ? [
+                    this.isPortalSessionExpired(existingSession)
+                      ? `Stored portal session expired${existingSession.expiresAt ? ` at ${existingSession.expiresAt}` : ""}.`
+                      : `Currently connected as orchestrator ${existingSession.orchestratorId}.`
+                  ]
                 : [])
             ],
             errors: [],
@@ -7208,6 +7364,153 @@ export class LocalCrewApp {
             errors: [
               `Portal login failed: ${error instanceof Error ? error.message : String(error)}`
             ],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "port.status") {
+        return {
+          lines: this.getPortStatusLines(),
+          errors: [],
+          shouldExit: false
+        };
+      }
+
+      if (command.type === "port.feed") {
+        if (!this.portalSession) {
+          return {
+            lines: [],
+            errors: [`Port is not connected. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        if (this.isPortalSessionExpired()) {
+          return {
+            lines: [],
+            errors: [`Port session expired. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        try {
+          const result = await fetchPortLogs(
+            this.portalSession,
+            {
+              feed: command.feed,
+              section: command.section,
+              limit: 8,
+            },
+            this.fetchFn ?? fetch
+          );
+
+          return {
+            lines: this.formatPortFeedLines(result),
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [`Port feed failed: ${error instanceof Error ? error.message : String(error)}`],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "port.post") {
+        if (!this.portalSession) {
+          return {
+            lines: [],
+            errors: [`Port is not connected. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        if (this.isPortalSessionExpired()) {
+          return {
+            lines: [],
+            errors: [`Port session expired. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        try {
+          const result = await publishPortLog(
+            this.portalSession,
+            {
+              content: command.content,
+              ...(command.audience ? { audience: command.audience } : {}),
+              ...(command.section ? { section: command.section } : {})
+            },
+            this.fetchFn ?? fetch
+          );
+
+          const createdLog = result.log;
+          const audienceLabel = createdLog?.audience ? this.formatPortAudienceLabel(createdLog.audience) : "default audience";
+          const sectionLabel = createdLog?.section ? this.formatPortSectionLabel(createdLog.section) : "general";
+
+          return {
+            lines: [
+              `Published Port Log ${createdLog?.id ?? "(pending id)"} to ${audienceLabel} / ${sectionLabel}.`,
+              ...(typeof result.community?.tokenBalance === "number"
+                ? [`Remaining token balance: ${result.community.tokenBalance}.`]
+                : []),
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [`Port publish failed: ${error instanceof Error ? error.message : String(error)}`],
+            shouldExit: false
+          };
+        }
+      }
+
+      if (command.type === "port.reply") {
+        if (!this.portalSession) {
+          return {
+            lines: [],
+            errors: [`Port is not connected. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        if (this.isPortalSessionExpired()) {
+          return {
+            lines: [],
+            errors: [`Port session expired. Open ${PORTAL_BASE_URL}/port/ and run /login <token>.`],
+            shouldExit: false
+          };
+        }
+
+        try {
+          const result = await publishPortLog(
+            this.portalSession,
+            {
+              parentId: command.logId,
+              content: command.content,
+            },
+            this.fetchFn ?? fetch
+          );
+
+          return {
+            lines: [
+              `Replied to Port Log ${command.logId} with reply ${result.log?.id ?? "(pending id)"}.`,
+              ...(typeof result.community?.tokenBalance === "number"
+                ? [`Remaining token balance: ${result.community.tokenBalance}.`]
+                : []),
+            ],
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [`Port reply failed: ${error instanceof Error ? error.message : String(error)}`],
             shouldExit: false
           };
         }
