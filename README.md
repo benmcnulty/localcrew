@@ -6,6 +6,8 @@ Local Crew turns every machine on your network into a coordinated inference node
 
 The system provides a dynamic and secure foundation for AI experimental building through agentic orchestration of local resources. It abstracts physical hardware behind **virtual agent identities** — named participants with their own instructions, model preferences, and voice — while a **resource delegation** layer routes work to the best available device based on capability, availability, and memory headroom.
 
+The local HTTP surface is built for LAN use out of the box. `/ui` and `/display` stay unauthenticated on the local network for ready-to-run collaboration, while the server rejects non-local clients by default. Remote authenticated access belongs to the separate Ben Live portal layer.
+
 ```
 ┌──────────────────────────────────────────────────┐
 │  You                                             │
@@ -56,8 +58,16 @@ npm install
 Start Ollama on every device that will serve as an inference endpoint:
 
 ```bash
-ollama serve
+OLLAMA_HOST=127.0.0.1:11434 ollama serve
 ```
+
+On Windows PowerShell:
+
+```powershell
+$env:OLLAMA_HOST="127.0.0.1:11434"; ollama serve
+```
+
+This keeps the local Ollama API loopback-only on that device. Local Crew exposes a separate LAN-safe agent gateway for orchestrator-to-agent traffic, so you do not need to open Ollama itself to the full network.
 
 Pull at least one model if you haven't already:
 
@@ -85,8 +95,8 @@ The script discovers your local models, writes the managed `.env.local`, registe
 On each additional device, with the repo cloned and `npm install` complete:
 
 ```bash
-ollama serve                    # in one terminal
-node scripts/setup-agent.js     # in another terminal
+OLLAMA_HOST=127.0.0.1:11434 ollama serve   # in one terminal
+npm run setup:agent                        # in another terminal
 ```
 
 The agent setup:
@@ -95,14 +105,15 @@ The agent setup:
 - Prompts for a device nickname
 - Discovers available models
 - Syncs the device to the orchestrator
-- Stays running as a local monitor that auto-restarts Ollama if it dies and re-syncs models periodically
+- Prints the exact secure `ollama serve` command it expects for that machine
+- Stays running as a local monitor that auto-restarts Ollama with a loopback-only bind if it dies, keeps a narrow agent gateway online for the orchestrator, and re-syncs models periodically
 
 Re-running on the same device replaces the prior listing (no duplicates). Use `--once` for a one-shot setup without the persistent monitor.
 
 For non-Ollama endpoints:
 ```bash
-node scripts/setup-agent.js --api-style openai --api-key-env OPENAI_API_KEY
-node scripts/setup-agent.js --api-style anthropic --api-key-env ANTHROPIC_API_KEY
+npm run setup:agent -- --api-style openai --api-key-env OPENAI_API_KEY
+npm run setup:agent -- --api-style anthropic --api-key-env ANTHROPIC_API_KEY
 ```
 
 ### 5. Verify the network

@@ -10,7 +10,7 @@
 3. Start Local Crew on primary:
    - `npm run start`
 4. On each secondary device, onboard once:
-   - `node scripts/setup-agent.js`
+   - `npm run setup:agent`
 5. Validate network and models on primary:
    - `/resource list`
    - `/topology`
@@ -45,17 +45,22 @@ For a full operations checklist (logging, rollback, report handoff), use [docs/o
    - after configuration, Local Crew starts automatically in the same terminal unless you pass `--no-start`
 3. Open the printed `Local UI` link or stay in the CLI.
 4. Bring a second agent device online, benchmark it with the platform script on that device if needed, then run:
-   - `node scripts/setup-agent.js`
+   - start Ollama loopback-only on that device:
+     - macOS/Linux: `OLLAMA_HOST=127.0.0.1:11434 ollama serve`
+     - Windows PowerShell: `$env:OLLAMA_HOST="127.0.0.1:11434"; ollama serve`
+   - then onboard it:
+     - `npm run setup:agent`
    - the Local Crew setup output shows the full primary-device IP to remember
    - the script will prompt for `Orchestrator IP:` and prefill the first three IP numbers from the local network when available
    - confirm or enter the final number of the orchestrator IP before continuing
    - it immediately tests `http://<orchestrator-ip>:4310/api/health` before continuing
    - it then prompts for a device nickname used in the orchestrator resource listing and reuses the prior local nickname when available
-   - it prints a verified configuration summary before syncing
+   - it prints a verified configuration summary before syncing, including the exact secure `ollama serve` command expected for that device
    - re-running it on the same device replaces the prior synced listing for that device instead of creating duplicates
    - for local agent endpoints, the script keeps running as a local monitor by default; use `--once` to skip the persistent monitor
    - that monitor exposes a narrow LAN gateway for the orchestrator and limits access to the configured orchestrator IP instead of requiring broad LAN exposure of the local inference service
-   - for OpenAI-compatible or Anthropic endpoints, pass `--api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync
+   - if the local Ollama service dies, the monitor restarts it with a loopback-only bind instead of reopening it to the LAN
+   - for OpenAI-compatible or Anthropic endpoints, run `npm run setup:agent -- --api-style openai|anthropic` and optionally `--api-key-env YOUR_ENV_NAME`; the named env var must exist on the orchestrator for live use after sync
    - or register it manually with `/resource add <alias> "Label" <baseUrl> [top|mid|low] [ollama|openai|anthropic]`
    - or use the `Resources` section in `/ui`
 5. Configure the starter chat roster and test the network:
@@ -87,6 +92,7 @@ The main public-safe env surface is:
 - `LOCALCREW_API_BIND_HOST`
 - `LOCALCREW_API_PUBLIC_HOST`
 - `LOCALCREW_API_PORT`
+- `LOCALCREW_API_NETWORK_SCOPE` — `local` (default) allows only loopback/private-LAN clients; set to `any` only for intentionally broader exposure
 - `LOCALCREW_API_CORS_ORIGIN` — allowed CORS origin for the local API (omit for no CORS headers)
 - `LOCALCREW_API_TOKEN` — optional Bearer token for API authentication
 - `LOCALCREW_ORCHESTRATOR_NAME`
@@ -194,6 +200,7 @@ Recommended usage pattern:
 
 - keep orchestrator/agent devices in default auto-pause mode unless actively viewed
 - use a non-orchestrator networked tablet/TV/phone as your persistent always-active display when needed
+- keep the server on its default `LOCALCREW_API_NETWORK_SCOPE=local` setting so `/ui` and `/display` remain LAN-only even when bound to `0.0.0.0`
 
 ## Hierarchical Topology
 
@@ -211,7 +218,7 @@ Only top-tier devices with ≥16k context qualify for the orchestrator role.
 A sub-orchestrator is a device that independently coordinates a group of subordinate agents, receiving complex delegated tasks from the primary orchestrator in `/auto` mode. Sub-orchestrators continue processing even if the primary goes offline.
 
 **Requirements:**
-- Must be registered as a resource (via `setup-agent.js` or `/resource add`)
+- Must be registered as a resource (via `npm run setup:agent` or `/resource add`)
 - Must be a `top` tier device (set during sync or via `/resource edit`)
 - Must have ≥16k context tokens (set `maxContextTokens` via `/resource edit`)
 
@@ -219,7 +226,7 @@ A sub-orchestrator is a device that independently coordinates a group of subordi
 
 1. Sync the device if not already registered:
    ```
-   node scripts/setup-agent.js   # run on the agent device
+   npm run setup:agent   # run on the agent device
    ```
    Then on the primary, confirm the device appears in `/resource list`.
 

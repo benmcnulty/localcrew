@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { cpus, freemem, homedir, hostname, loadavg, networkInterfaces, platform, totalmem, uptime } from "node:os";
 
 function trimTrailingSlash(value) {
@@ -78,6 +79,56 @@ function getStoragePaths(rootDir) {
 
 function getLoopbackHosts() {
   return new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+}
+
+function isPrivateIpv4Address(value) {
+  if (!value) {
+    return false;
+  }
+
+  const octets = value.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  return (
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168) ||
+    (octets[0] === 169 && octets[1] === 254)
+  );
+}
+
+function isLocalEndpointHost(hostName, machine) {
+  const normalized = normalizeRemoteAddress(hostName);
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized === "localhost" || getLoopbackHosts().has(normalized)) {
+    return true;
+  }
+
+  return normalized === machine.localIp || isPrivateIpv4Address(normalized);
+}
+
+function getRecommendedOllamaHost(endpointUrl) {
+  try {
+    const parsed = new URL(trimTrailingSlash(endpointUrl));
+    const port = parsed.port || "11434";
+    return `127.0.0.1:${port}`;
+  } catch {
+    return "127.0.0.1:11434";
+  }
+}
+
+function buildRecommendedOllamaServeCommand(platformName, endpointUrl) {
+  const hostSpec = getRecommendedOllamaHost(endpointUrl);
+  if (platformName === "win32") {
+    return `$env:OLLAMA_HOST="${hostSpec}"; ollama serve`;
+  }
+
+  return `OLLAMA_HOST=${hostSpec} ollama serve`;
 }
 
 function normalizeRemoteAddress(value) {
@@ -507,6 +558,38 @@ function getPromptSeedOrchestratorIp(existingReport, machine) {
   return parseSubnetPrefix(machine.localIp);
 }
 
+function getEndpointSetupNotes(localEndpoint, apiStyle, machine) {
+  const notes = [];
+  if (apiStyle !== "ollama") {
+    return notes;
+  }
+
+  const recommendedCommand = buildRecommendedOllamaServeCommand(machine.platform, localEndpoint);
+
+  try {
+    const parsed = new URL(trimTrailingSlash(localEndpoint));
+    const hostName = normalizeRemoteAddress(parsed.hostname);
+    if (!hostName || hostName === "localhost" || getLoopbackHosts().has(hostName)) {
+      notes.push("Local Ollama endpoint is already loopback-only. The agent gateway will publish a separate LAN-safe proxy for the orchestrator.");
+      return notes;
+    }
+
+    if (hostName === "0.0.0.0" || isPrivateIpv4Address(hostName) || hostName === machine.localIp) {
+      notes.push(
+        `Local Ollama should stay loopback-only on this device. Prefer ${recommendedCommand} and let the agent gateway expose LAN access only to the orchestrator.`
+      );
+      return notes;
+    }
+  } catch {
+    // Fall through to the generic note.
+  }
+
+  notes.push(
+    `If this is a local Ollama instance, prefer ${recommendedCommand} so model traffic stays on this device and the orchestrator reaches it through the agent gateway instead of a broad LAN bind.`
+  );
+  return notes;
+}
+
 async function promptForSetup(options, machine, existingReport) {
   let nickname = options.nickname;
 
@@ -862,10 +945,23 @@ async function isEndpointHealthy(baseUrl, apiStyle, apiKeyEnv) {
   }
 }
 
-function startOllamaServe(rootDir) {
+function buildDiscoveryFailureHelp(apiStyle, endpointUrl, machine) {
+  if (apiStyle !== "ollama") {
+    return "Confirm the local endpoint URL, API style, and any required API key env var, then rerun setup.";
+  }
+
+  return `Start or restart Ollama with ${buildRecommendedOllamaServeCommand(machine.platform, endpointUrl)} and rerun setup.`;
+}
+
+function startOllamaServe(rootDir, endpointUrl) {
   const command = process.platform === "win32" ? "ollama.exe" : "ollama";
+  const childEnv = {
+    ...process.env,
+    OLLAMA_HOST: getRecommendedOllamaHost(endpointUrl)
+  };
   const child = spawn(command, ["serve"], {
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: childEnv
   });
   const paths = getStoragePaths(rootDir);
   const logStream = createWriteStream(paths.monitorLogPath, {
@@ -1004,8 +1100,11 @@ async function runAgentMonitor(context) {
         await logMonitorLine(rootDir, `Ollama crashed ${ollamaRestartCount} times in a row. Backing off — manual restart required.`);
       } else {
         try {
-          await logMonitorLine(rootDir, `Local Ollama is not responding at ${localEndpoint}; starting \`ollama serve\` (attempt ${ollamaRestartCount + 1}/${maxOllamaRestarts}).`);
-          localServerProcess = startOllamaServe(rootDir);
+          await logMonitorLine(
+            rootDir,
+            `Local Ollama is not responding at ${localEndpoint}; starting \`${buildRecommendedOllamaServeCommand(machine.platform, localEndpoint)}\` (attempt ${ollamaRestartCount + 1}/${maxOllamaRestarts}).`
+          );
+          localServerProcess = startOllamaServe(rootDir, localEndpoint);
           _activeOllamaChild = localServerProcess;
           ollamaRestartCount++;
           lastOllamaRestartAt = now;
@@ -1070,11 +1169,16 @@ async function main() {
   const prompted = await promptForSetup(options, machine, existingReport);
   let localEndpoint = trimTrailingSlash(options.endpointUrl);
   const gatewayPort = getGatewayPort(options, existingReport);
-  const discovery = await discoverModelsFromReachableEndpoint(
-    localEndpoint,
-    options.apiStyle,
-    options.apiKeyEnv
-  );
+  let discovery;
+  try {
+    discovery = await discoverModelsFromReachableEndpoint(
+      localEndpoint,
+      options.apiStyle,
+      options.apiKeyEnv
+    );
+  } catch (error) {
+    throw new Error(`${error.message} ${buildDiscoveryFailureHelp(options.apiStyle, localEndpoint, machine)}`);
+  }
   if (discovery.endpointUrl !== localEndpoint) {
     console.log(
       `Detected reachable local endpoint ${discovery.endpointUrl} (requested ${localEndpoint}). Using reachable endpoint for setup.`
@@ -1168,6 +1272,9 @@ async function main() {
     liveMetrics: buildLiveMetrics()
   });
   const report = await buildReport();
+  const endpointSetupNotes = getEndpointSetupNotes(localEndpoint, options.apiStyle, machine);
+  const recommendedOllamaCommand =
+    options.apiStyle === "ollama" ? buildRecommendedOllamaServeCommand(machine.platform, localEndpoint) : undefined;
 
   const reportPath = await writeLocalReport(options.rootDir, report);
 
@@ -1193,6 +1300,9 @@ async function main() {
   if (options.apiKeyEnv) {
     console.log(`API key env: ${options.apiKeyEnv}`);
   }
+  if (recommendedOllamaCommand) {
+    console.log(`Recommended secure Ollama command: ${recommendedOllamaCommand}`);
+  }
   console.log(`Suggested tier: ${tier}`);
   console.log(
     `Discovered models: ${
@@ -1210,6 +1320,9 @@ async function main() {
   if (options.apiKeyEnv) {
     console.log(`- API key env: ${options.apiKeyEnv}`);
   }
+  if (recommendedOllamaCommand) {
+    console.log(`- Recommended secure Ollama command: ${recommendedOllamaCommand}`);
+  }
   console.log(`- Suggested tier: ${tier}`);
   if (verifiedOrchestrator.verification) {
     console.log(`- Orchestrator: ${verifiedOrchestrator.verification.baseUrl}`);
@@ -1218,6 +1331,12 @@ async function main() {
     console.log(`- Allowed orchestrator host: ${verifiedOrchestrator.verification.orchestratorHost}`);
   } else {
     console.log("- Orchestrator sync: skipped");
+  }
+  if (endpointSetupNotes.length > 0) {
+    console.log("- Local endpoint notes:");
+    for (const note of endpointSetupNotes) {
+      console.log(`  • ${note}`);
+    }
   }
 
   if (!verifiedOrchestrator.orchestratorUrl) {
@@ -1249,7 +1368,7 @@ async function main() {
     return;
   }
 
-  console.log("Agent monitor: running. Leave this terminal open to keep watching the local Ollama service.");
+  console.log("Agent monitor: running. Leave this terminal open to keep the agent gateway online and watch the local endpoint.");
   await runAgentMonitor({
     rootDir: options.rootDir,
     localEndpoint,
@@ -1263,7 +1382,20 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error(`Setup failed: ${error.message}`);
-  process.exitCode = 1;
-});
+export {
+  buildDiscoveryFailureHelp,
+  buildLocalEndpointCandidates,
+  buildRecommendedOllamaServeCommand,
+  getEndpointSetupNotes,
+  getRecommendedOllamaHost,
+  isLocalEndpointHost,
+  isPrivateIpv4Address,
+  parseArgs,
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`Setup failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

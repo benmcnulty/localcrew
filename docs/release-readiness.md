@@ -15,16 +15,18 @@ Fast path command:
 3. CI pass on pull request and `main`
    - `.github/workflows/ci.yml` must be green
 4. Security baseline
+   - local-network boundary validated (`LOCALCREW_API_NETWORK_SCOPE=local` rejects non-local clients)
    - API token behavior validated when `LOCALCREW_API_TOKEN` is set
-   - SSE endpoint auth behavior validated (`/api/events`)
+   - local billboard SSE behavior validated (`/api/events`)
 5. Dependency policy
-   - `package.json` contains zero runtime dependencies unless a documented exception is approved
+   - `package.json` contains zero `dependencies` and zero `devDependencies`
 
 ## Pre-Release Checklist
 
 - Verify local API and UI health
   - `GET /api/health`
   - open `/ui` and `/display`
+  - confirm `/api/events` connects locally
 - Validate orchestration surfaces
   - `/status`, `/hud`, `/explore`
 - Validate tool-chain reachability (if enabled)
@@ -52,7 +54,7 @@ Track at minimum:
 
 - queue depth and completion rate
 - error counts in telemetry by kind/model/resource
-- API health response and SSE stability for active displays
+- API health response, local-network admission, and SSE stability for active displays
 - audit stream continuity and write integrity
 
 ## Known Limitations (Current)

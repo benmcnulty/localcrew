@@ -187,6 +187,80 @@ describe("LocalCrewApp", () => {
     });
   });
 
+  test("builds a portal snapshot from live in-flight work and clears the model when idle", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      await seedPaddingTasks(rootDir);
+      let modelCallBlocked = false;
+      let releaseModelCall: (response: Response) => void = () => {
+        throw new Error("Expected a blocked model call resolver.");
+      };
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async (input) => {
+          if (String(input).endsWith("/api/tags")) {
+            return new Response("{}", { status: 200 });
+          }
+          if (!modelCallBlocked) {
+            modelCallBlocked = true;
+            return new Promise<Response>((resolve) => {
+              releaseModelCall = resolve;
+            });
+          }
+          return makeChatResponse("Completed the requested draft.");
+        },
+        speakFn: () => {}
+      });
+
+      await app.execute(parseCommand("/auto"));
+      const cyclePromise = app.runIdleCycle();
+
+      let queue = await app.getQueueSnapshot();
+      for (let attempt = 0; attempt < 100 && queue.activeTasks.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        queue = await app.getQueueSnapshot();
+      }
+
+      const liveSnapshot = app.buildPortalSnapshot();
+      expect(liveSnapshot.busy).toBe(true);
+      expect(liveSnapshot.resources?.some((resource) => resource.isBusy === true && typeof resource.model === "string")).toBe(true);
+
+      releaseModelCall(makeChatResponse("Preflight approved."));
+      await cyclePromise;
+
+      const idleSnapshot = app.buildPortalSnapshot();
+      expect(idleSnapshot.busy).toBe(false);
+      expect(idleSnapshot.resources?.every((resource) => resource.isBusy === false ? resource.model === null : true)).toBe(true);
+    });
+  });
+
+  test("reports online counts from live resource health instead of configured resource total", async () => {
+    await withTempDir(async (rootDir) => {
+      await seedResourceInventory(rootDir);
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        speakFn: () => {}
+      });
+
+      const appInternals = app as unknown as {
+        resourceHealth: Map<string, { status: "online" | "offline" | "degraded"; latencyMs: number; checkedAt: number }>;
+      };
+      const now = Date.now();
+      appInternals.resourceHealth.set("orchestrator", { status: "online", latencyMs: 12, checkedAt: now });
+      appInternals.resourceHealth.set("workhorse", { status: "offline", latencyMs: 5000, checkedAt: now });
+      appInternals.resourceHealth.set("helper", { status: "degraded", latencyMs: 140, checkedAt: now });
+      appInternals.resourceHealth.set("overflow", { status: "online", latencyMs: 18, checkedAt: now });
+
+      const status = await app.getStatusSnapshot();
+
+      expect(status.displayMetrics.fleetSummary.totalNodes).toBe(4);
+      expect(status.displayMetrics.fleetSummary.onlineNodes).toBe(3);
+      expect(status.displayMetrics.fleetSummary.errorNodes).toBe(1);
+      expect(status.displayMetrics.fleetSummary.utilizationPct).toBe(0);
+    });
+  });
+
   test("logs into the Local Crew Portal with orchestrator metadata and exposes the account username", async () => {
     await withTempDir(async (rootDir) => {
       await seedResourceInventory(rootDir);

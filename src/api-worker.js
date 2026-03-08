@@ -31,6 +31,32 @@ const server = createServer((request, response) => {
     return;
   }
 
+  const remoteAddress = request.socket?.remoteAddress || "";
+  const isLocalAddress = (() => {
+    const raw = String(remoteAddress).trim().toLowerCase();
+    const normalized = raw.startsWith("::ffff:") ? raw.slice(7) : raw;
+    if (!normalized) return false;
+    if (normalized === "::1") return true;
+    if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+    if (normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) return true;
+    const match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!match) return false;
+    const octets = match.slice(1).map(Number);
+    if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) return false;
+    return (
+      octets[0] === 10 ||
+      octets[0] === 127 ||
+      (octets[0] === 169 && octets[1] === 254) ||
+      (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168)
+    );
+  })();
+  const allowAnyNetwork = (process.env.LOCALCREW_API_NETWORK_SCOPE || "").trim().toLowerCase() === "any";
+  if (!allowAnyNetwork && !isLocalAddress) {
+    writeJson(response, 403, { error: "Forbidden. Local Crew only serves local-network clients by default." });
+    return;
+  }
+
   // SSE connections are handled locally — no IPC round-trip needed.
   const reqUrl = new URL(request.url ?? "/", "http://localhost");
   if (reqUrl.pathname === "/api/events") {
@@ -67,7 +93,8 @@ const server = createServer((request, response) => {
       method: request.method ?? "GET",
       url: request.url ?? "/",
       bodyText: Buffer.concat(chunks).toString("utf8"),
-      headers: reqHeaders
+      headers: reqHeaders,
+      remoteAddress
     });
   });
   request.on("error", (error) => {

@@ -181,7 +181,7 @@ describe("renderBanner", () => {
       resourceCount: 1,
     });
     const text = lines.join("\n");
-    expect(text).toContain("setup-agent.js");
+    expect(text).toContain("setup:agent");
   });
 
   test("shows ready message when multiple resources", () => {

@@ -49,6 +49,9 @@ The local browser-facing API is also env-driven:
 - `LOCALCREW_API_BIND_HOST`
 - `LOCALCREW_API_PUBLIC_HOST`
 - `LOCALCREW_API_PORT`
+- `LOCALCREW_API_NETWORK_SCOPE`
+
+The local API is LAN-scoped by default. `/ui`, `/display`, and the read-only billboard feeds remain usable without auth for local-network clients, while non-local client addresses are rejected unless the operator explicitly broadens `LOCALCREW_API_NETWORK_SCOPE`.
 
 ## Queue And Delegation
 

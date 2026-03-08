@@ -215,7 +215,7 @@ export function renderBanner(options: BannerOptions): string[] {
 
   if (resourceCount <= 1) {
     lines.push(
-      `  ${warnText("Single resource — run")} ${bold("node scripts/setup-agent.js")} ${warnText("on next device")}`
+      `  ${warnText("Single resource — run")} ${bold("npm run setup:agent")} ${warnText("on next device")}`
     );
   } else {
     lines.push(

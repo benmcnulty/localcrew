@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { startApiServer } from "../src/api-server.ts";
+import { isLocalApiClientAddress, startApiServer } from "../src/api-server.ts";
 import { LocalCrewApp } from "../src/app.ts";
 import { parseCommand } from "../src/commands.ts";
 import { saveResources, type ResourceProfile } from "../src/resources.ts";
@@ -78,6 +78,7 @@ const originalApiHost = process.env.LOCALCREW_API_HOST;
 const originalApiBindHost = process.env.LOCALCREW_API_BIND_HOST;
 const originalApiPublicHost = process.env.LOCALCREW_API_PUBLIC_HOST;
 const originalApiToken = process.env.LOCALCREW_API_TOKEN;
+const originalApiNetworkScope = process.env.LOCALCREW_API_NETWORK_SCOPE;
 
 afterEach(() => {
   if (originalApiPort === undefined) {
@@ -109,9 +110,30 @@ afterEach(() => {
   } else {
     process.env.LOCALCREW_API_TOKEN = originalApiToken;
   }
+
+  if (originalApiNetworkScope === undefined) {
+    delete process.env.LOCALCREW_API_NETWORK_SCOPE;
+  } else {
+    process.env.LOCALCREW_API_NETWORK_SCOPE = originalApiNetworkScope;
+  }
 });
 
 describe("API server", () => {
+  test("classifies local-network client addresses conservatively", () => {
+    expect(isLocalApiClientAddress("127.0.0.1")).toBe(true);
+    expect(isLocalApiClientAddress("::1")).toBe(true);
+    expect(isLocalApiClientAddress("::ffff:192.168.1.50")).toBe(true);
+    expect(isLocalApiClientAddress("10.0.0.22")).toBe(true);
+    expect(isLocalApiClientAddress("172.20.1.8")).toBe(true);
+    expect(isLocalApiClientAddress("192.168.1.9")).toBe(true);
+    expect(isLocalApiClientAddress("fe80::1")).toBe(true);
+    expect(isLocalApiClientAddress("fd12::abcd")).toBe(true);
+
+    expect(isLocalApiClientAddress("8.8.8.8")).toBe(false);
+    expect(isLocalApiClientAddress("2606:4700:4700::1111")).toBe(false);
+    expect(isLocalApiClientAddress("")).toBe(false);
+  });
+
   test("requires the Bearer header for protected routes when API auth is enabled", async () => {
     await withTempDir(async (rootDir) => {
       process.env.LOCALCREW_API_HOST = "127.0.0.1";
@@ -408,6 +430,44 @@ describe("API server", () => {
     },
     15000
   );
+
+  test("serves health, UI, display, and SSE smoke endpoints over the local API", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("Hello"),
+        speakFn: () => {}
+      });
+
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        const health = await fetch(`${api!.url}/api/health`).then((response) => response.json());
+        const ui = await fetch(`${api!.url}/ui`).then((response) => response.text());
+        const display = await fetch(`${api!.url}/display`).then((response) => response.text());
+        const script = await fetch(`${api!.url}/ui/app.js`).then((response) => response.text());
+        const styles = await fetch(`${api!.url}/ui/styles.css`).then((response) => response.text());
+        const events = await fetch(`${api!.url}/api/events`);
+
+        expect(health.ok).toBe(true);
+        expect(ui).toContain("Local Crew");
+        expect(display).toContain("/api/events");
+        expect(script).toContain("refreshView");
+        expect(styles).toContain(".topbar");
+        expect(events.status).toBe(200);
+        expect(events.headers.get("content-type") ?? "").toContain("text/event-stream");
+        await events.body?.cancel();
+      } finally {
+        await api?.close();
+      }
+    });
+  });
 
   test("allows SSE events without token for display billboard access", async () => {
     await withTempDir(async (rootDir) => {
