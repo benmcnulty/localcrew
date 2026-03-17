@@ -9,6 +9,21 @@ node_modules/
 local-handoff/
 ollama-profile-*.json
 
+# Claude Code state
+.claude/
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+
+# IDE directories
+.idea/
+.vscode/
+
+# Personal user profile (use user-profile.example.md as template)
+external-memory/orchestrator/user-profile.md
+
 # OS artifacts
 .DS_Store
 
