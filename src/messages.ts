@@ -264,6 +264,7 @@ export function buildAutoTaskMessages(options: {
   maxContextTokens?: number;
   dailySessionContext?: string;
   weatherEnabled?: boolean;
+  performanceSummary?: string;
 }): ChatMessage[] {
   const outgoing: ChatMessage[] = [
     {
@@ -328,6 +329,7 @@ export function buildAutoTaskMessages(options: {
     { label: "Roadmap", content: options.roadmap.trim() },
     { label: "Resource inventory", content: options.inventory.trim() },
     { label: "Recent changelog", content: options.changelog.trim(), minChars: 300 },
+    { label: "Performance summary", content: options.performanceSummary?.trim() || "", minChars: 100 },
   ];
 
   if (options.maxContextTokens && options.maxContextTokens > 0) {
