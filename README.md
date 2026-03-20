@@ -430,6 +430,8 @@ Tests TCP ports (Ollama 11434, Crew API 4310, Agent Gateway 4311) and HTTP endpo
 | [docs/release-readiness.md](docs/release-readiness.md) | Release gate criteria and known limitations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, code style, testing, and AI review requirements |
 | [AGENTS.md](AGENTS.md) | Module boundaries, conventions, and security rules (for AI agents) |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common issues and diagnostic steps |
+| [CHANGELOG.md](CHANGELOG.md) | Release history and notable changes |
 
 ## Development
 

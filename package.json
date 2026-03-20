@@ -5,7 +5,7 @@
   "private": false,
   "type": "module",
   "license": "MIT",
-  "author": "Ben",
+  "author": "Ben McNulty",
   "repository": {
     "type": "git",
     "url": "https://github.com/benmcnulty/localcrew"
