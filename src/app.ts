@@ -130,6 +130,7 @@ import { atomicWriteFile, getStoragePaths, type StoragePaths, withFileLock } fro
 import {
   appendAuditEvent,
   loadTelemetrySummary,
+  formatPerformanceSummary,
   readRecentAuditEvents,
   resetTelemetry
 } from "./telemetry.ts";
@@ -6606,7 +6607,8 @@ export class LocalCrewApp {
         currentDateTime: formatCurrentDateTime(),
         maxContextTokens: resourceProfile.maxContextTokens,
         dailySessionContext: this.getDailySessionContext(),
-        weatherEnabled: this.isWeatherEnabled()
+        weatherEnabled: this.isWeatherEnabled(),
+        performanceSummary: formatPerformanceSummary(telemetrySummary)
       });
 
       this.emitTaskEvent({

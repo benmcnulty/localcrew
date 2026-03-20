@@ -100,6 +100,74 @@ async function ensureTelemetryLayout(rootDir = process.cwd()): Promise<void> {
   }
 }
 
+/**
+ * Formats a compact human-readable performance digest for injection into
+ * autonomous task prompts. Enables the orchestrator to reason about resource
+ * and model performance during reflection and self-improvement tasks.
+ */
+export function formatPerformanceSummary(summary: TelemetrySummary): string {
+  if (summary.totalEvents === 0) {
+    return "(No performance data recorded yet — first cycle)";
+  }
+
+  const lines: string[] = [
+    `Session telemetry: ${summary.totalEvents} events, ${summary.byKind["ollama.chat"] ?? 0} model calls`
+  ];
+
+  // Per-resource performance
+  const resourceEntries = Object.entries(summary.resources)
+    .filter(([, b]) => b.calls > 0)
+    .sort((a, b) => b[1].calls - a[1].calls);
+  if (resourceEntries.length > 0) {
+    lines.push("Resource performance:");
+    for (const [alias, bucket] of resourceEntries) {
+      const successPct = Math.round(((bucket.calls - bucket.errors) / bucket.calls) * 100);
+      const avgMs = Math.round(bucket.totalDurationMs / bucket.calls);
+      const tokPerSec =
+        bucket.totalDurationMs > 0
+          ? Math.round(bucket.evalCount / (bucket.totalDurationMs / 1000))
+          : 0;
+      lines.push(
+        `  @${alias}: ${bucket.calls} calls, ${successPct}% success, ${avgMs}ms avg` +
+          (tokPerSec > 0 ? `, ${tokPerSec} tok/s` : "")
+      );
+    }
+  }
+
+  // Models with errors (top 4 by error count — surfaces failure patterns)
+  const modelsWithErrors = Object.entries(summary.models)
+    .filter(([, b]) => b.calls > 0 && b.errors > 0)
+    .sort((a, b) => b[1].errors - a[1].errors)
+    .slice(0, 4);
+  if (modelsWithErrors.length > 0) {
+    lines.push("Models with errors:");
+    for (const [key, bucket] of modelsWithErrors) {
+      lines.push(`  ${key}: ${bucket.errors}/${bucket.calls} failed`);
+    }
+  }
+
+  // Recent failures from audit trail
+  const recentFailures = summary.recent.filter((e) => !e.success).slice(0, 3);
+  if (recentFailures.length > 0) {
+    lines.push("Recent failures:");
+    for (const f of recentFailures) {
+      lines.push(`  [${f.scope}] ${f.summary}`);
+    }
+  }
+
+  // Tool usage
+  const toolParts: string[] = [];
+  if (summary.wikipedia.calls > 0) toolParts.push(`wikipedia:${summary.wikipedia.calls}`);
+  if (summary.search.calls > 0) toolParts.push(`search:${summary.search.calls}`);
+  if (summary.reddit.calls > 0) toolParts.push(`reddit:${summary.reddit.calls}`);
+  if (summary.weather.calls > 0) toolParts.push(`weather:${summary.weather.calls}`);
+  if (toolParts.length > 0) {
+    lines.push(`Tool calls: ${toolParts.join(", ")}`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function loadTelemetrySummary(rootDir = process.cwd()): Promise<TelemetrySummary> {
   const paths = getStoragePaths(rootDir);
   await ensureTelemetryLayout(rootDir);
