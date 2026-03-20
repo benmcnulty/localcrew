@@ -254,6 +254,39 @@ export async function fetchPortLogs(
   return await response.json() as PortFeedResult;
 }
 
+/**
+ * Fetch the public Port feed without authentication.
+ * Requires the backend to expose GET /api/port/public-feed (see feature request).
+ */
+export async function fetchPublicFeed(
+  options: {
+    section?: PortLogSection;
+    limit?: number;
+    username?: string;
+  },
+  fetchFn: FetchFn
+): Promise<PortFeedResult> {
+  const params = new URLSearchParams();
+  if (options.section && options.section !== "all") {
+    params.set("section", options.section);
+  }
+  if (typeof options.limit === "number") {
+    params.set("limit", String(options.limit));
+  }
+  if (options.username) {
+    params.set("username", options.username);
+  }
+
+  const url = `${PORTAL_BASE_URL}/api/port/public-feed${params.size > 0 ? `?${params.toString()}` : ""}`;
+  const response = await fetchFn(url, { method: "GET" });
+
+  if (!response.ok) {
+    throw new Error(`Public feed fetch failed (${response.status}): ${await readPortalError(response)}`);
+  }
+
+  return await response.json() as PortFeedResult;
+}
+
 export async function publishPortLog(
   session: PortalSession,
   options: PortPublishOptions,
