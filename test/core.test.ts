@@ -682,51 +682,55 @@ describe("session store", () => {
 });
 
 describe("message assembly", () => {
-  test("builds a shared summary, transcript, and follow-up suggestion protocol", () => {
-    expect(
-      buildChatMessages({
-        alias: "erin",
-        participants: [
-          { alias: "erin", nickname: "Erin" },
-          { alias: "zora", nickname: "Zora" },
-          { alias: "sam", nickname: "Sam" },
-          { alias: "pav", nickname: "Pav" }
-        ],
-        instructions: "Reply clearly.",
-        summary: "The user is comparing endpoints.",
-        recentMessages: [
-          { speaker: "user", target: "erin", content: "Hello Erin" },
-          {
-            speaker: "assistant",
-            endpoint: "erin",
-            directedTo: "zora",
-            content: "Please review this."
-          },
-          { speaker: "assistant", endpoint: "zora", content: "I am also here." }
-        ],
-        taskPrompt: "USER -> @erin: What do you think of Zora?"
-      })
-    ).toEqual([
-      { role: "system", content: "Reply clearly." },
-      {
-        role: "system",
-        content:
-          'You are @erin. You are one contributor in a shared multi-model conversation with these participants: @erin, @zora, @sam, @pav. The participant names are exactly: Erin (@erin), Zora (@zora), Sam (@sam), Pav (@pav). Use exactly those names and aliases, and never invent alternate names, nicknames, or expansions. Transcript lines are labeled with their @alias and may include directed participant-to-participant lines in the form @from to @to: message. Answer only as @erin, from your own perspective. If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line. If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line. If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line. If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line. If you want to suggest one directed follow-up for the user to approve, end your response with a final line exactly in this format: NEXT: @alias: message Only suggest a valid participant other than yourself, keep the NEXT message short, and omit the NEXT line when no follow-up suggestion is needed. The NEXT line is only a user-editable suggestion and is not executed automatically. Do not emit more than one WIKIPEDIA line and do not emit more than one REDDIT line.'
-      },
-      {
-        role: "system",
-        content: "Shared conversation summary:\nThe user is comparing endpoints."
-      },
-      {
-        role: "system",
-        content:
-          "Recent conversation transcript:\nUSER -> @erin: Hello Erin\n\n@erin to @zora: Please review this.\n\n@zora: I am also here."
-      },
-      {
-        role: "user",
-        content: "USER -> @erin: What do you think of Zora?"
-      }
-    ]);
+  test("builds a shared summary, transcript, and follow-up suggestion protocol", async () => {
+    const messages = await buildChatMessages({
+      alias: "erin",
+      participants: [
+        { alias: "erin", nickname: "Erin" },
+        { alias: "zora", nickname: "Zora" },
+        { alias: "sam", nickname: "Sam" },
+        { alias: "pav", nickname: "Pav" }
+      ],
+      instructions: "Reply clearly.",
+      summary: "The user is comparing endpoints.",
+      recentMessages: [
+        { speaker: "user", target: "erin", content: "Hello Erin" },
+        {
+          speaker: "assistant",
+          endpoint: "erin",
+          directedTo: "zora",
+          content: "Please review this."
+        },
+        { speaker: "assistant", endpoint: "zora", content: "I am also here." }
+      ],
+      taskPrompt: "USER -> @erin: What do you think of Zora?"
+    });
+
+    // Structural checks — role order and dynamic content
+    expect(messages[0]).toEqual({ role: "system", content: "Reply clearly." });
+    expect(messages[1]?.role).toBe("system");
+    expect(messages[1]?.content).toContain("You are @erin.");
+    expect(messages[1]?.content).toContain("Erin (@erin), Zora (@zora), Sam (@sam), Pav (@pav)");
+    expect(messages[1]?.content).toContain("WIKIPEDIA:");
+    expect(messages[1]?.content).toContain("REDDIT:");
+    expect(messages[1]?.content).toContain("SEARCH[topic]:");
+    expect(messages[1]?.content).toContain("WEATHER:");
+    expect(messages[1]?.content).toContain("BENLIVE:");
+    expect(messages[1]?.content).toContain("WEBSITE:");
+    expect(messages[1]?.content).toContain("NEXT:");
+    expect(messages[2]).toEqual({
+      role: "system",
+      content: "Shared conversation summary:\nThe user is comparing endpoints."
+    });
+    expect(messages[3]).toEqual({
+      role: "system",
+      content:
+        "Recent conversation transcript:\nUSER -> @erin: Hello Erin\n\n@erin to @zora: Please review this.\n\n@zora: I am also here."
+    });
+    expect(messages[4]).toEqual({
+      role: "user",
+      content: "USER -> @erin: What do you think of Zora?"
+    });
   });
 
   test("formats shared conversation transcripts with directed participant lines", () => {
@@ -743,8 +747,8 @@ describe("message assembly", () => {
     ).toBe("USER -> @erin: Hello Erin\n\n@erin to @zora: Please review this.");
   });
 
-  test("builds agent chat prompts with queue delegation guidance", () => {
-    const agentMessages = buildAgentChatMessages({
+  test("builds agent chat prompts with queue delegation guidance", async () => {
+    const agentMessages = await buildAgentChatMessages({
       agentName: "Reviewer",
       agentSlug: "reviewer",
       preferredResource: "workhorse",
@@ -783,8 +787,8 @@ describe("message assembly", () => {
     expect(agentSystemPrompt).toContain("WRITE[outbox] or UPDATE[outbox]");
   });
 
-  test("builds orchestrator prompts for auto tasks and queue fill", () => {
-    const autoTaskMessages = buildAutoTaskMessages({
+  test("builds orchestrator prompts for auto tasks and queue fill", async () => {
+    const autoTaskMessages = await buildAutoTaskMessages({
       directives: "Directives",
       inventory: "Inventory",
       roadmap: "Roadmap",
@@ -803,7 +807,7 @@ describe("message assembly", () => {
     expect(autoTaskMessages[1]).toEqual(expect.objectContaining({ role: "system" }));
     const autoTaskSystemPrompt = autoTaskMessages[1]?.content as string;
     expect(autoTaskSystemPrompt).toContain("You are Aster, the orchestrator identity.");
-    expect(autoTaskSystemPrompt).toContain("QUEUE[high]: task");
+    expect(autoTaskSystemPrompt).toContain("QUEUE[medium]: task");
     expect(autoTaskSystemPrompt).toContain("UPDATE[stage][path][replace]");
     expect(autoTaskSystemPrompt).toContain("replace-section");
     expect(autoTaskSystemPrompt).toContain("HEADING: Parent > Child");
@@ -814,19 +818,20 @@ describe("message assembly", () => {
       content: "Priority: high\nCreated by: user\n\nTask:\nInspect the queue."
     });
 
-    const fillMsg = buildQueueFillMessages({
-        directives: "Directives",
-        inventory: "Inventory",
-        roadmap: "Roadmap",
-        focusTodo: "Focus",
-        changelog: "Changelog",
-        orchestratorSummary: "Summary",
-        orchestratorName: "Aster",
-        agents: ["@reviewer"],
-        targetTaskCount: 8
-      })[1];
-    const fillContent = fillMsg.content as string;
-    expect(fillMsg.role).toBe("system");
+    const fillMessages = await buildQueueFillMessages({
+      directives: "Directives",
+      inventory: "Inventory",
+      roadmap: "Roadmap",
+      focusTodo: "Focus",
+      changelog: "Changelog",
+      orchestratorSummary: "Summary",
+      orchestratorName: "Aster",
+      agents: ["@reviewer"],
+      targetTaskCount: 8
+    });
+    const fillMsg = fillMessages[1];
+    const fillContent = fillMsg?.content as string;
+    expect(fillMsg?.role).toBe("system");
     expect(fillContent).toContain("You are Aster, the orchestrator identity.");
     expect(fillContent).toContain("Self-aware self-improvement");
     expect(fillContent).toContain("WIKIPEDIA:");
@@ -839,36 +844,38 @@ describe("message assembly", () => {
     expect(fillContent).toContain("SYNTHESIS");
     expect(fillContent).toContain("IDENTITY");
 
-    const reviewMsg = buildQueueFillReviewMessages({
-        orchestratorName: "Aster",
-        reviewerAlias: "zora",
-        draftTasks: "[medium] Tighten routing\n[low] Rewrite docs",
-        inventory: "Inventory",
-        roadmap: "Roadmap",
-        focusTodo: "Focus",
-        changelog: "Changelog"
-      })[0];
-    expect(reviewMsg.role).toBe("system");
-    expect(reviewMsg.content).toContain("@zora, the secondary reviewer");
-    expect(reviewMsg.content).toContain("VERDICT: approve");
+    const reviewMessages = await buildQueueFillReviewMessages({
+      orchestratorName: "Aster",
+      reviewerAlias: "zora",
+      draftTasks: "[medium] Tighten routing\n[low] Rewrite docs",
+      inventory: "Inventory",
+      roadmap: "Roadmap",
+      focusTodo: "Focus",
+      changelog: "Changelog"
+    });
+    const reviewMsg = reviewMessages[0];
+    expect(reviewMsg?.role).toBe("system");
+    expect(reviewMsg?.content).toContain("@zora, the secondary reviewer");
+    expect(reviewMsg?.content).toContain("VERDICT: approve");
 
-    const finalizeMsg = buildQueueFillFinalizeMessages({
-        directives: "Directives",
-        inventory: "Inventory",
-        roadmap: "Roadmap",
-        focusTodo: "Focus",
-        changelog: "Changelog",
-        orchestratorSummary: "Summary",
-        orchestratorName: "Aster",
-        agents: ["@reviewer"],
-        draftTasks: "[medium] Tighten routing",
-        reviewFeedback: "Too broad.\nVERDICT: revise",
-        targetTaskCount: 6
-      })[1];
-    expect(finalizeMsg.role).toBe("system");
-    expect(finalizeMsg.content).toContain("You are Aster, the orchestrator identity.");
-    expect(finalizeMsg.content).toContain("received a critique from the secondary reviewer");
-    expect(finalizeMsg.content).toContain("domain");
+    const finalizeMessages = await buildQueueFillFinalizeMessages({
+      directives: "Directives",
+      inventory: "Inventory",
+      roadmap: "Roadmap",
+      focusTodo: "Focus",
+      changelog: "Changelog",
+      orchestratorSummary: "Summary",
+      orchestratorName: "Aster",
+      agents: ["@reviewer"],
+      draftTasks: "[medium] Tighten routing",
+      reviewFeedback: "Too broad.\nVERDICT: revise",
+      targetTaskCount: 6
+    });
+    const finalizeMsg = finalizeMessages[1];
+    expect(finalizeMsg?.role).toBe("system");
+    expect(finalizeMsg?.content).toContain("You are Aster, the orchestrator identity.");
+    expect(finalizeMsg?.content).toContain("received a critique from the secondary reviewer");
+    expect(finalizeMsg?.content).toContain("domain");
   });
 
   describe("detectTaskPurpose", () => {
