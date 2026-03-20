@@ -98,33 +98,33 @@ const BASE_AUTO_OPTIONS = {
 } as const;
 
 describe("buildAgentChatMessages – temporal grounding", () => {
-  test("injects currentDateTime as a system message when provided", () => {
+  test("injects currentDateTime as a system message when provided", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildAgentChatMessages({ ...BASE_AGENT_OPTIONS, currentDateTime: dt });
+    const messages = await buildAgentChatMessages({ ...BASE_AGENT_OPTIONS, currentDateTime: dt });
     const systemMessages = messages.filter((m) => m.role === "system");
     const dtMessage = systemMessages.find((m) => m.content.includes(dt));
     expect(dtMessage).toBeDefined();
     expect(dtMessage?.content).toBe(`Current date and time: ${dt}`);
   });
 
-  test("omits datetime system message when currentDateTime is not provided", () => {
-    const messages = buildAgentChatMessages({ ...BASE_AGENT_OPTIONS });
+  test("omits datetime system message when currentDateTime is not provided", async () => {
+    const messages = await buildAgentChatMessages({ ...BASE_AGENT_OPTIONS });
     const hasDatetime = messages.some((m) => m.content.startsWith("Current date and time:"));
     expect(hasDatetime).toBe(false);
   });
 });
 
 describe("buildAutoTaskMessages – temporal grounding", () => {
-  test("injects currentDateTime after the resource inventory block", () => {
+  test("injects currentDateTime after the resource inventory block", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildAutoTaskMessages({ ...BASE_AUTO_OPTIONS, currentDateTime: dt });
+    const messages = await buildAutoTaskMessages({ ...BASE_AUTO_OPTIONS, currentDateTime: dt });
     const dtIndex = messages.findIndex((m) => m.content.startsWith("Current date and time:"));
     const inventoryIndex = messages.findIndex((m) => m.content.startsWith("Resource inventory:"));
     expect(dtIndex).toBeGreaterThan(inventoryIndex);
   });
 
-  test("omits datetime system message when currentDateTime is not provided", () => {
-    const messages = buildAutoTaskMessages({ ...BASE_AUTO_OPTIONS });
+  test("omits datetime system message when currentDateTime is not provided", async () => {
+    const messages = await buildAutoTaskMessages({ ...BASE_AUTO_OPTIONS });
     const hasDatetime = messages.some((m) => m.content.startsWith("Current date and time:"));
     expect(hasDatetime).toBe(false);
   });
@@ -142,24 +142,24 @@ const BASE_FILL_OPTIONS = {
 } as const;
 
 describe("buildQueueFillMessages – temporal grounding", () => {
-  test("injects currentDateTime when provided", () => {
+  test("injects currentDateTime when provided", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS, currentDateTime: dt });
+    const messages = await buildQueueFillMessages({ ...BASE_FILL_OPTIONS, currentDateTime: dt });
     const dtMessage = messages.find((m) => m.content.startsWith("Current date and time:"));
     expect(dtMessage).toBeDefined();
     expect(dtMessage?.content).toBe(`Current date and time: ${dt}`);
   });
 
-  test("omits datetime when not provided", () => {
-    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
+  test("omits datetime when not provided", async () => {
+    const messages = await buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
     expect(messages.some((m) => m.content.startsWith("Current date and time:"))).toBe(false);
   });
 });
 
 describe("buildQueueFillReviewMessages – temporal grounding", () => {
-  test("injects currentDateTime before the user message", () => {
+  test("injects currentDateTime before the user message", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildQueueFillReviewMessages({
+    const messages = await buildQueueFillReviewMessages({
       orchestratorName: "Captain",
       reviewerAlias: "zora",
       draftTasks: "[medium] tighten routing docs",
@@ -177,9 +177,9 @@ describe("buildQueueFillReviewMessages – temporal grounding", () => {
 });
 
 describe("buildQueueFillFinalizeMessages – temporal grounding", () => {
-  test("injects currentDateTime when provided", () => {
+  test("injects currentDateTime when provided", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildQueueFillFinalizeMessages({
+    const messages = await buildQueueFillFinalizeMessages({
       ...BASE_FILL_OPTIONS,
       draftTasks: "[medium] tighten routing docs",
       reviewFeedback: "VERDICT: approve",
@@ -203,40 +203,40 @@ describe("buildTaskPreflightMessages", () => {
     inventory: "1 device with 16GB RAM."
   } as const;
 
-  test("returns messages array with system + user messages", () => {
-    const messages = buildTaskPreflightMessages(BASE_PREFLIGHT);
+  test("returns messages array with system + user messages", async () => {
+    const messages = await buildTaskPreflightMessages(BASE_PREFLIGHT);
     expect(messages.some((m) => m.role === "system")).toBe(true);
     expect(messages.some((m) => m.role === "user")).toBe(true);
   });
 
-  test("user message contains the task text", () => {
-    const messages = buildTaskPreflightMessages(BASE_PREFLIGHT);
+  test("user message contains the task text", async () => {
+    const messages = await buildTaskPreflightMessages(BASE_PREFLIGHT);
     const user = messages.find((m) => m.role === "user");
     expect(user?.content).toContain(BASE_PREFLIGHT.task);
   });
 
-  test("system message references orchestrator name", () => {
-    const messages = buildTaskPreflightMessages(BASE_PREFLIGHT);
+  test("system message references orchestrator name", async () => {
+    const messages = await buildTaskPreflightMessages(BASE_PREFLIGHT);
     const system = messages.find((m) => m.role === "system");
     expect(system?.content).toContain(BASE_PREFLIGHT.orchestratorName);
   });
 
-  test("injects currentDateTime as a system message when provided", () => {
+  test("injects currentDateTime as a system message when provided", async () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
-    const messages = buildTaskPreflightMessages({ ...BASE_PREFLIGHT, currentDateTime: dt });
+    const messages = await buildTaskPreflightMessages({ ...BASE_PREFLIGHT, currentDateTime: dt });
     const dtMessage = messages.find((m) => m.content.startsWith("Current date and time:"));
     expect(dtMessage).toBeDefined();
     expect(dtMessage?.content).toBe(`Current date and time: ${dt}`);
   });
 
-  test("omits datetime message when currentDateTime is not provided", () => {
-    const messages = buildTaskPreflightMessages(BASE_PREFLIGHT);
+  test("omits datetime message when currentDateTime is not provided", async () => {
+    const messages = await buildTaskPreflightMessages(BASE_PREFLIGHT);
     expect(messages.some((m) => m.content.startsWith("Current date and time:"))).toBe(false);
   });
 
-  test("truncates long directives to keep context budget tight", () => {
+  test("truncates long directives to keep context budget tight", async () => {
     const longDirectives = "x".repeat(2000);
-    const messages = buildTaskPreflightMessages({ ...BASE_PREFLIGHT, directives: longDirectives });
+    const messages = await buildTaskPreflightMessages({ ...BASE_PREFLIGHT, directives: longDirectives });
     const directivesMessage = messages.find((m) => m.content.startsWith("Core directives summary:"));
     expect(directivesMessage?.content.length).toBeLessThan(1000);
   });
@@ -316,8 +316,8 @@ describe("buildAgentIdentityBlock", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildQueueFillMessages – domain tags", () => {
-  test("system prompt instructs generation of domain-tagged tasks", () => {
-    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
+  test("system prompt instructs generation of domain-tagged tasks", async () => {
+    const messages = await buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
     const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
     expect(allSystem).toContain("{domain:");
     expect(allSystem).toContain("SYSTEM");
@@ -327,8 +327,8 @@ describe("buildQueueFillMessages – domain tags", () => {
     expect(allSystem).toContain("IDENTITY");
   });
 
-  test("requests 10-12 tasks across five domains", () => {
-    const messages = buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
+  test("requests 10-12 tasks across five domains", async () => {
+    const messages = await buildQueueFillMessages({ ...BASE_FILL_OPTIONS });
     const allSystem = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
     expect(allSystem).toContain("Generate exactly 8 tasks");
     expect(allSystem).toContain("If the target count is at least 5, include every domain at least once");
@@ -336,8 +336,8 @@ describe("buildQueueFillMessages – domain tags", () => {
 });
 
 describe("buildQueueFillFinalizeMessages – domain tags", () => {
-  test("finalize prompt preserves domain distribution instruction", () => {
-    const messages = buildQueueFillFinalizeMessages({
+  test("finalize prompt preserves domain distribution instruction", async () => {
+    const messages = await buildQueueFillFinalizeMessages({
       ...BASE_FILL_OPTIONS,
       draftTasks: "{domain:SYSTEM} [medium] tighten routing docs",
       reviewFeedback: "VERDICT: approve"

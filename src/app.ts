@@ -84,6 +84,16 @@ import {
   buildTaskPreflightMessages,
   parseTaskDomain
 } from "./messages.ts";
+import {
+  extractContentTerms,
+  isLowInformationAutonomousTask,
+  isSubstantiveOutput,
+  isTaskDuplicate,
+  LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN,
+  outputAddressesTask,
+  outputAlignedWithGoal,
+  verifyTaskOutput
+} from "./quality.ts";
 import { chatWithOllamaDetailed, listOllamaModels, type FetchFn } from "./ollama.ts";
 import { pingResource, probeResourceModels } from "./resource-discovery.ts";
 import type { ResourceHealthResult, ResourceHealthStatus } from "./resource-discovery.ts";
@@ -198,8 +208,6 @@ const AUTONOMOUS_DISALLOWED_FILE_PATH_PATTERN =
   /(?:^|\/)(?:scripts?|bin|src|app|api|server|client|public|dist|build|test|tests|__tests__)\//i;
 const AUTONOMOUS_DISALLOWED_FILE_EXTENSION_PATTERN =
   /\.(?:py|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|ps1|bat|cmd|rb|php|pl|lua|java|go|rs|swift|kt|scala|cs|cpp|c|h|hpp|sql)$/i;
-const LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN =
-  /^(?:implement|review|compare|evaluate|check|analyze|analysis|fix|optimize|improve|research|plan|draft|refine|update|test|verify|document|write|summarize|summarise|create|build|design|explore|investigate|audit)$/i;
 const INTERNAL_MEMORY_PATH_HINT_PATTERN =
   /(?:^|\/)(?:internal|internal-memory|memory|index|indexes|summary|summaries|heuristics|routing|telemetry|diagnostics|notes|verification|plans)(?:\/|[-_])/i;
 const INTERNAL_WIKIPEDIA_SYSTEM_TERMS =
@@ -768,124 +776,6 @@ function extractPreflightGoal(preflightContext: string): string | null {
   return goal.length > 0 ? goal : null;
 }
 
-function extractContentTerms(text: string): string[] {
-  const stopWords = new Set([
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "to",
-    "of",
-    "in",
-    "on",
-    "for",
-    "with",
-    "by",
-    "from",
-    "this",
-    "that",
-    "these",
-    "those",
-    "is",
-    "are",
-    "be",
-    "as",
-    "at",
-    "it",
-    "its",
-    "into",
-    "should",
-    "must",
-    "can",
-    "will",
-    "would",
-    "about",
-    "after",
-    "before",
-    "through",
-    "across"
-  ]);
-
-  const counts = new Map<string, number>();
-  for (const token of text.toLowerCase().match(/[a-z0-9_.-]+/g) ?? []) {
-    if (token.length < 3 || stopWords.has(token)) {
-      continue;
-    }
-    counts.set(token, (counts.get(token) ?? 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 10)
-    .map(([token]) => token);
-}
-
-function isSubstantiveOutput(output: string): boolean {
-  const stripped = output
-    .replace(/^(sure|of course|i['’]ll|let me|here['’]s|certainly)[^.]*\.\s*/gi, "")
-    .replace(/\n---+\n/g, "\n")
-    .trim();
-  return stripped.length >= 10;
-}
-
-function outputAddressesTask(output: string, taskContent: string): boolean {
-  const taskTerms = extractContentTerms(taskContent);
-  if (taskTerms.length === 0) {
-    return true;
-  }
-  const normalizedOutput = output.toLowerCase();
-  const found = taskTerms.filter((term) => normalizedOutput.includes(term));
-  return found.length >= Math.max(1, Math.ceil(taskTerms.length * 0.3));
-}
-
-function outputAlignedWithGoal(output: string, goal: string): boolean {
-  const goalTerms = extractContentTerms(goal);
-  if (goalTerms.length === 0) {
-    return true;
-  }
-  const normalizedOutput = output.toLowerCase();
-  return goalTerms.some((term) => normalizedOutput.includes(term));
-}
-
-function verifyTaskOutput(options: {
-  task: AutoQueueTask;
-  output: string;
-  preflightGoal: string | null;
-  claimedWriteCount: number;
-  verifiedWriteCount: number;
-  postProcessErrors: string[];
-}): {
-  passed: boolean;
-  reason: string;
-  signals: {
-    substantive: boolean;
-    addressesTask: boolean;
-    artifactsVerified: boolean;
-    goalAligned: boolean;
-  };
-} {
-  const signals = {
-    substantive: isSubstantiveOutput(options.output),
-    addressesTask: outputAddressesTask(options.output, options.task.content),
-    artifactsVerified:
-      options.postProcessErrors.length === 0 &&
-      (options.claimedWriteCount === 0 || options.verifiedWriteCount >= options.claimedWriteCount),
-    goalAligned: options.preflightGoal
-      ? outputAlignedWithGoal(options.output, options.preflightGoal)
-      : true
-  };
-
-  const passed = signals.substantive && signals.artifactsVerified;
-  const reason = [
-    `substantive=${signals.substantive ? "yes" : "no"}`,
-    `addressesTask=${signals.addressesTask ? "yes" : "no"}`,
-    `artifactsVerified=${signals.artifactsVerified ? "yes" : "no"}`,
-    `goalAligned=${signals.goalAligned ? "yes" : "no"}`
-  ].join(", ");
-
-  return { passed, reason, signals };
-}
 
 function buildPrompt(
   mode: ReplMode,
@@ -960,66 +850,6 @@ function formatAuditEventLine(event: AuditEvent): string {
   return `- ${event.timestamp} [${event.kind}] ${event.scope}: ${event.summary}${event.success ? "" : " (failed)"}`;
 }
 
-function isLowInformationAutonomousTask(content: string): boolean {
-  const normalized = content.trim().replace(/[“”"]/g, "");
-  if (!normalized) {
-    return true;
-  }
-
-  const words = normalized.split(/\s+/).filter(Boolean);
-  if (words.length >= 5) {
-    return false;
-  }
-
-  if (LOW_INFORMATION_AUTONOMOUS_TASK_PATTERN.test(normalized)) {
-    return true;
-  }
-
-  return words.length <= 2;
-}
-
-/**
- * Extract significant keywords from a task string for overlap comparison.
- * Strips common low-information words so we match on substantive topics.
- */
-function extractTaskKeywords(content: string): Set<string> {
-  const stopWords = new Set([
-    "the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "is", "are", "was",
-    "with", "by", "from", "at", "that", "this", "it", "be", "as", "has", "have", "had",
-    "not", "but", "if", "its", "all", "into", "our", "their", "can", "will", "do", "does",
-    "more", "most", "each", "every", "any", "no", "been", "would", "should", "could",
-    "than", "also", "only", "how", "what", "when", "where", "which", "who", "that",
-    "review", "update", "improve", "enhance", "optimize", "implement", "add", "create",
-    "ensure", "check", "verify", "analyze", "generate", "build", "make", "use",
-    "system", "current", "existing", "new", "based", "local", "crew",
-  ]);
-  const words = content.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
-  return new Set(words.filter((w) => w.length > 2 && !stopWords.has(w)));
-}
-
-/**
- * Check if a proposed task is too similar to an existing one based on keyword overlap.
- * Returns true if >= 60% of the proposed task's keywords match an existing task.
- */
-function isTaskDuplicate(
-  proposed: string,
-  existingTasks: ReadonlyArray<{ content: string }>
-): boolean {
-  const proposedKeywords = extractTaskKeywords(proposed);
-  if (proposedKeywords.size === 0) return false;
-
-  for (const existing of existingTasks) {
-    const existingKeywords = extractTaskKeywords(existing.content);
-    if (existingKeywords.size === 0) continue;
-    let overlap = 0;
-    for (const word of proposedKeywords) {
-      if (existingKeywords.has(word)) overlap++;
-    }
-    const overlapRatio = overlap / proposedKeywords.size;
-    if (overlapRatio >= 0.6) return true;
-  }
-  return false;
-}
 
 /** Rotating pool of diverse fallback tasks when the model fails to produce parseable output. */
 const FALLBACK_TASK_POOL: Array<{ priority: "medium" | "low"; content: string }> = [
@@ -4494,7 +4324,7 @@ export class LocalCrewApp {
     const recentMessages = getConversationMessages(this.sessions).slice(
       getConversationCompactedUntil(this.sessions)
     );
-    const outgoingMessages = buildChatMessages({
+    const outgoingMessages = await buildChatMessages({
       alias: normalizedAlias,
       participants: Object.entries(this.config.endpoints).map(([alias, endpointConfig]) => ({
         alias,
@@ -5758,7 +5588,7 @@ export class LocalCrewApp {
     endpoint: EndpointConfig;
     resourceAlias: string;
   }): Promise<string | null> {
-    const messages = buildTaskPreflightMessages({
+    const messages = await buildTaskPreflightMessages({
       orchestratorName: this.getOrchestratorName(),
       task: options.task.content,
       priority: options.task.priority,
@@ -5852,7 +5682,7 @@ export class LocalCrewApp {
     const extraContextBlocks = await this.getAgentExtraContext(agent);
     const selection = chooseResourceForTask(userMessage, agent.preferredResource, this.rootDir);
     const endpoint = getResourceEndpoint(selection.alias, selection.purpose, this.rootDir);
-    const outgoingMessages = buildAgentChatMessages({
+    const outgoingMessages = await buildAgentChatMessages({
       agentName: agent.name,
       agentSlug: agent.slug,
       preferredResource: agent.preferredResource,
@@ -6037,7 +5867,7 @@ export class LocalCrewApp {
       "Finalize the autonomous queue backlog after critique and preserve reasoning headroom for execution."
     );
     const fillDateTime = formatCurrentDateTime();
-    const draftMessages = buildQueueFillMessages({
+    const draftMessages = await buildQueueFillMessages({
       directives: documents.directives,
       inventory: documents.inventory,
       roadmap: documents.roadmap,
@@ -6128,7 +5958,7 @@ export class LocalCrewApp {
     let reviewFeedback = "VERDICT: revise";
     if (reviewerResource) {
       const reviewEndpoint = getResourceEndpoint(reviewerResource.alias, "default", this.rootDir);
-      const reviewMessages = buildQueueFillReviewMessages({
+      const reviewMessages = await buildQueueFillReviewMessages({
         orchestratorName: this.getOrchestratorName(),
         reviewerAlias: reviewerResource.alias,
         draftTasks: draftTaskText,
@@ -6200,7 +6030,7 @@ export class LocalCrewApp {
       };
     }
 
-    const finalizeMessages = buildQueueFillFinalizeMessages({
+    const finalizeMessages = await buildQueueFillFinalizeMessages({
       directives: documents.directives,
       inventory: documents.inventory,
       roadmap: documents.roadmap,
@@ -6588,7 +6418,7 @@ export class LocalCrewApp {
         ].join("\n"));
       }
 
-      const outgoingMessages = buildAutoTaskMessages({
+      const outgoingMessages = await buildAutoTaskMessages({
         directives: documents.directives,
         inventory: documents.inventory,
         roadmap: documents.roadmap,
