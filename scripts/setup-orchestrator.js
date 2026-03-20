@@ -516,6 +516,73 @@ async function resolveSetupOptions(setup) {
     : true;
   const jobSearchEnabled = await promptYesNo("Include job search in daily autonomous sessions?", jobDefault);
 
+  // --- Web Tool Authorization ---
+  console.log("");
+  console.log("Web Tool Authorization");
+  console.log("━".repeat(22));
+  console.log("Local Crew can access external web services during autonomous sessions.");
+  console.log("Each tool makes outbound HTTP requests. Authorize individually:");
+  const existingAuth = existingPrefs.toolAuthorization ?? {};
+  const toolAuthWikipedia = await promptYesNo("  Wikipedia — factual lookups via Wikimedia API", existingAuth.wikipedia !== false);
+  const toolAuthReddit = await promptYesNo("  Reddit — community discussion search", existingAuth.reddit !== false);
+  const toolAuthWebSearch = await promptYesNo("  Web Search — DuckDuckGo search for news, jobs, tech", existingAuth.webSearch !== false);
+  const toolAuthWeather = wantWeather || await promptYesNo("  Weather — Open-Meteo weather forecasts", existingAuth.weather !== false);
+  const toolAuthBenlive = await promptYesNo("  Ben Live — content from benlive.tv project hub", existingAuth.benlive !== false);
+  const toolAuthWebsite = await promptYesNo("  Website — your personal website content", existingAuth.website === true);
+
+  // --- Port Connection ---
+  console.log("");
+  console.log("Port Connection (Optional)");
+  console.log("━".repeat(26));
+  console.log("Connect to benlive.tv/port for community feeds and inter-orchestrator");
+  console.log("knowledge sharing. No data is shared without explicit commands.");
+  console.log("Your orchestrator remains fully functional without Port.");
+  const portDefault = existingPrefs.portRecommended === true;
+  const portRecommended = await promptYesNo("  Connect to Port?", portDefault);
+  if (portRecommended && !portDefault) {
+    console.log("  → Sign in at benlive.tv/port, copy your device token, then run /login <token> after start.");
+  }
+
+  // --- Code Generation Agent ---
+  console.log("");
+  console.log("Code Generation Agent (Optional)");
+  console.log("━".repeat(32));
+  console.log("Authorize a premium coding agent for tasks requiring advanced code generation.");
+  console.log("The orchestrator can delegate implementation work to an external CLI tool.");
+  console.log("This spawns a subprocess on your machine using your logged-in account.");
+
+  const detectedAgents = await detectSetupCodeAgents();
+  if (detectedAgents.length > 0) {
+    console.log(`  Detected: ${detectedAgents.join(", ")}`);
+  }
+
+  const existingCodeAgent = existingPrefs.codeAgent;
+  const codeAgentDefault = existingAuth.toCode === true || Boolean(existingCodeAgent);
+  const enableCodeAgent = await promptYesNo("  Enable code generation agent?", codeAgentDefault);
+  let codeAgentPrefs = existingCodeAgent ? { ...existingCodeAgent } : undefined;
+  if (enableCodeAgent) {
+    const providerOptions = ["claude-code", "codex", "copilot", "custom"];
+    const defaultProvider = existingCodeAgent?.provider ?? (detectedAgents[0] ?? "claude-code");
+    const providerAnswer = await promptWithPrefill(
+      `  Provider [${providerOptions.join("/")}]: `,
+      defaultProvider
+    );
+    const provider = providerOptions.includes(providerAnswer.trim()) ? providerAnswer.trim() : defaultProvider;
+
+    let apiKeyEnvDefault = existingCodeAgent?.apiKeyEnv ?? "";
+    if (provider === "claude-code" && !apiKeyEnvDefault) apiKeyEnvDefault = "ANTHROPIC_API_KEY";
+    const apiKeyAnswer = await promptWithPrefill("  API key env var (blank if CLI handles auth): ", apiKeyEnvDefault);
+
+    const workDirDefault = existingCodeAgent?.workingDir ?? process.cwd();
+    const workDirAnswer = await promptWithPrefill("  Default working directory: ", workDirDefault);
+
+    codeAgentPrefs = {
+      provider,
+      ...(apiKeyAnswer.trim() ? { apiKeyEnv: apiKeyAnswer.trim() } : {}),
+      workingDir: workDirAnswer.trim() || process.cwd()
+    };
+  }
+
   // Build location preferences:
   // - Weather declined → clear any existing zipCode/city so the tool hint is suppressed.
   // - Weather enabled with input → store the location as zipCode.
@@ -531,9 +598,37 @@ async function resolveSetupOptions(setup) {
     name: promptedName || initialName,
     preferences: {
       ...locationPrefs,
-      jobSearchEnabled
+      jobSearchEnabled,
+      toolAuthorization: {
+        wikipedia: toolAuthWikipedia,
+        reddit: toolAuthReddit,
+        webSearch: toolAuthWebSearch,
+        weather: toolAuthWeather,
+        benlive: toolAuthBenlive,
+        website: toolAuthWebsite,
+        toCode: enableCodeAgent
+      },
+      ...(portRecommended ? { portRecommended: true } : {}),
+      ...(enableCodeAgent && codeAgentPrefs ? { codeAgent: codeAgentPrefs } : {})
     }
   };
+}
+
+/** Detect installed coding agent CLIs using which/where. */
+async function detectSetupCodeAgents() {
+  const { spawn } = await import("node:child_process");
+  const whichCmd = process.platform === "win32" ? "where" : "which";
+  const checks = [["claude-code", "claude"], ["codex", "codex"], ["copilot", "gh"]];
+  const found = [];
+  for (const [label, cmd] of checks) {
+    const ok = await new Promise((resolve) => {
+      const child = spawn(whichCmd, [cmd], { stdio: "ignore", env: { PATH: process.env.PATH ?? "" } });
+      child.on("close", (code) => resolve(code === 0));
+      child.on("error", () => resolve(false));
+    });
+    if (ok) found.push(label);
+  }
+  return found;
 }
 
 function buildManagedEnvBlock({ setup, machine, discovered }) {

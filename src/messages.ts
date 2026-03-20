@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ChatMessage, ConversationMessage } from "./types.ts";
+import type { ChatMessage, ConversationMessage, ToolAuthorization } from "./types.ts";
 import { budgetContextBlocks } from "./utils.ts";
 import { composePromptBlock, loadPromptComponent } from "./prompt-loader.ts";
 
@@ -50,15 +50,13 @@ export function formatConversationTranscript(messages: ReadonlyArray<Conversatio
 // ---------------------------------------------------------------------------
 
 const FALLBACK_GROUNDING = [
-  'If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions. Do not emit more than one WIKIPEDIA line.',
-  'If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line.',
-  'If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line.',
-  'WEATHER_PLACEHOLDER',
-  'If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.',
-  'If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.'
+  '{{#if wikipediaEnabled}}If grounded factual context from Wikipedia would materially help, end with one final line exactly in this format: WIKIPEDIA: search query. Use Wikipedia only for external factual knowledge, not for local routing, prompt, naming, resource, or model-diagnosis decisions. Do not emit more than one WIKIPEDIA line.{{/if}}',
+  '{{#if redditEnabled}}If focused real-world community experience or technical solutions from Reddit would materially help, end with one final line exactly in this format: REDDIT: search query. Use Reddit only for specific technical topics, not for internal Local Crew decisions. Do not emit more than one REDDIT line.{{/if}}',
+  '{{#if webSearchEnabled}}If current web search results for news, jobs, software engineering, or AI engineering topics would materially help, end with one final line exactly in this format: SEARCH[topic]: search query, where topic is one of: news, jobs, software-engineering, ai-engineering. Use web search only for current real-world information, not for internal Local Crew decisions. Do not emit more than one SEARCH line.{{/if}}',
+  '{{#if weatherEnabled}}If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.{{/if}}',
+  '{{#if benliveEnabled}}If content from benlive.tv (the project home base with developer updates, blog posts, and platform information) would help, end with one final line exactly in this format: BENLIVE: topic or /path. Do not emit more than one BENLIVE line.{{/if}}',
+  '{{#if websiteEnabled}}If content from the user personal website would help (requires /preferences website configuration), end with one final line exactly in this format: WEBSITE: topic or /path. Do not emit more than one WEBSITE line.{{/if}}'
 ].join(' ');
-
-const FALLBACK_WEATHER_LINE = 'If current weather information would help, end with one final line exactly in this format: WEATHER: location (city name or zip code), or just WEATHER: to use the configured default location. Do not emit more than one WEATHER line.';
 
 const FALLBACK_QUEUE = [
   'If you want the orchestrator queue to take on follow-up work, end with one or more final lines exactly in the form QUEUE[medium]: task, QUEUE[low]: task, QUEUE[medium][resource-alias]: task, QUEUE[medium][resource-alias][model-name]: task, or add an optional role tag such as QUEUE[medium][resource-alias]{reviewer}: task.',
@@ -79,23 +77,44 @@ const FALLBACK_NEXT = [
   'The NEXT line is only a user-editable suggestion and is not executed automatically.'
 ].join(' ');
 
-/** Build the grounding block for a given builder, applying the weather conditional. */
-async function buildGroundingBlock(
+/** Per-tool grounding flags. Undefined/absent means enabled (backward compat). */
+interface GroundingFlags {
+  wikipediaEnabled?: boolean;
+  redditEnabled?: boolean;
+  webSearchEnabled?: boolean;
+  weatherEnabled?: boolean;
+  benliveEnabled?: boolean;
+  websiteEnabled?: boolean;
+}
+
+/** Compute GroundingFlags from weatherEnabled + optional toolAuthorization. */
+function computeGroundingFlags(
   weatherEnabled: boolean | undefined,
+  auth?: ToolAuthorization
+): GroundingFlags {
+  return {
+    wikipediaEnabled: auth?.wikipedia !== false,
+    redditEnabled: auth?.reddit !== false,
+    webSearchEnabled: auth?.webSearch !== false,
+    weatherEnabled: weatherEnabled !== false && auth?.weather !== false,
+    benliveEnabled: auth?.benlive !== false,
+    websiteEnabled: auth?.website !== false,
+  };
+}
+
+/** Build the grounding block for a given builder, applying per-tool conditionals. */
+async function buildGroundingBlock(
+  flags: GroundingFlags,
   rootDir?: string
 ): Promise<string> {
-  const fallback = weatherEnabled !== false
-    ? FALLBACK_GROUNDING.replace('WEATHER_PLACEHOLDER', FALLBACK_WEATHER_LINE)
-    : FALLBACK_GROUNDING.replace(' WEATHER_PLACEHOLDER', '');
-
   const block = await loadPromptComponent(
     "components/tools/grounding.md",
-    fallback,
+    FALLBACK_GROUNDING,
     rootDir
   );
   return block
-    .replace(/\{\{#if weatherEnabled\}\}([\s\S]*?)\{\{\/if\}\}/g, (_m, inner) =>
-      weatherEnabled !== false ? inner : ""
+    .replace(/\{\{#if (\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (_m, flag, inner) =>
+      flags[flag as keyof GroundingFlags] !== false ? inner : ""
     )
     .trim();
 }
@@ -108,6 +127,7 @@ export async function buildChatMessages(options: {
   recentMessages: ReadonlyArray<ConversationMessage>;
   taskPrompt: string;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const outgoing: ChatMessage[] = [];
@@ -138,7 +158,10 @@ export async function buildChatMessages(options: {
     options.rootDir
   );
 
-  const groundingBlock = await buildGroundingBlock(options.weatherEnabled, options.rootDir);
+  const groundingBlock = await buildGroundingBlock(
+    computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+    options.rootDir
+  );
 
   const nextBlock = await loadPromptComponent(
     "components/tools/next.md",
@@ -189,11 +212,15 @@ export async function buildAgentChatMessages(options: {
   extraContextBlocks?: string[];
   currentDateTime?: string;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
+  portPublishEnabled?: boolean;
+  toCodeEnabled?: boolean;
+  codeAgentProvider?: string;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const identityFallback = `You are ${options.agentName} (@${options.agentSlug}), a persistent agent identity managed by ${options.orchestratorName}, the orchestrator. Your preferred inference resource is ${options.preferredResource}. Stay aligned with your specification and maintain continuity with your private memory.`;
 
-  const [identityBlock, groundingBlock, queueBlock, writeBlock] = await Promise.all([
+  const [identityBlock, groundingBlock, queueBlock, writeBlock, portPublishBlock, toCodeBlock] = await Promise.all([
     composePromptBlock(
       ["components/identity/agent.md"],
       {
@@ -206,9 +233,26 @@ export async function buildAgentChatMessages(options: {
       { "components/identity/agent.md": identityFallback },
       options.rootDir
     ),
-    buildGroundingBlock(options.weatherEnabled, options.rootDir),
+    buildGroundingBlock(
+      computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+      options.rootDir
+    ),
     loadPromptComponent("components/tools/queue.md", FALLBACK_QUEUE, options.rootDir),
-    loadPromptComponent("components/tools/write.md", FALLBACK_WRITE, options.rootDir)
+    loadPromptComponent("components/tools/write.md", FALLBACK_WRITE, options.rootDir),
+    composePromptBlock(
+      ["components/tools/port-publish.md"],
+      {},
+      { portPublishEnabled: !!options.portPublishEnabled },
+      { "components/tools/port-publish.md": "" },
+      options.rootDir
+    ),
+    composePromptBlock(
+      ["components/tools/to-code.md"],
+      { codeAgentProvider: options.codeAgentProvider ?? "claude-code" },
+      { toCodeEnabled: !!options.toCodeEnabled },
+      { "components/tools/to-code.md": "" },
+      options.rootDir
+    ),
   ]);
 
   const agentGuidance = [
@@ -216,6 +260,8 @@ export async function buildAgentChatMessages(options: {
     groundingBlock,
     queueBlock,
     writeBlock,
+    portPublishBlock,
+    toCodeBlock,
     "Use WRITE[internal] or UPDATE[internal] for local memory/process artifacts that belong inside `.localcrew/`. Use WRITE[active] or UPDATE[active] only for drafts tied to a user-supplied external dropbox document. Use WRITE[outbox] or UPDATE[outbox] for user-facing deliverables and external feature request tickets.",
     "For markdown documents, prefer HEADING: Parent > Child selectors in SEARCH or ANCHOR blocks instead of brittle raw text. Local Crew maintains copyable heading references in `.localcrew/system/secure/orchestrator/navigation/document-sitemap.md` and per-document outline sidecars under `.localcrew/system/secure/orchestrator/navigation/outlines/`.",
     "Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work unless the user explicitly asked for a file deliverable. If a useful improvement would require external application, API, UI, or script changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work."
@@ -349,12 +395,16 @@ export async function buildAutoTaskMessages(options: {
   maxContextTokens?: number;
   dailySessionContext?: string;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
+  portPublishEnabled?: boolean;
+  toCodeEnabled?: boolean;
+  codeAgentProvider?: string;
   performanceSummary?: string;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const identityFallback = `You are ${options.orchestratorName}, the orchestrator identity. The selected inference resource for this task is @${options.resourceAlias}. Selection rationale: ${options.resourceRationale} You are using that resource as a tool, but you still answer as ${options.orchestratorName}.${options.maxContextTokens ? ` This resource has a context window of approximately ${options.maxContextTokens.toLocaleString()} tokens. Keep your reasoning and output proportionate to this limit. If a task is too large for one context pass, break it into smaller follow-up QUEUE items that each fit comfortably.` : ""}`;
 
-  const [identityBlock, autoModeBlock, groundingBlock, queueBlock, writeBlock, containmentBlock, canonicalMemoryBlock] = await Promise.all([
+  const [identityBlock, autoModeBlock, groundingBlock, queueBlock, writeBlock, containmentBlock, canonicalMemoryBlock, portPublishBlock, toCodeBlock] = await Promise.all([
     composePromptBlock(
       ["components/identity/orchestrator-auto.md"],
       {
@@ -368,11 +418,28 @@ export async function buildAutoTaskMessages(options: {
       options.rootDir
     ),
     loadPromptComponent("components/stance/auto-mode.md", "Keep outputs concise and actionable. In auto mode, your default stance is self-aware self-improvement of the local orchestration system.", options.rootDir),
-    buildGroundingBlock(options.weatherEnabled, options.rootDir),
+    buildGroundingBlock(
+      computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+      options.rootDir
+    ),
     loadPromptComponent("components/tools/queue.md", FALLBACK_QUEUE, options.rootDir),
     loadPromptComponent("components/tools/write.md", FALLBACK_WRITE, options.rootDir),
     loadPromptComponent("components/guardrails/containment.md", "Stay inside internal process improvement unless the user explicitly asks for external system changes.", options.rootDir),
-    loadPromptComponent("components/format/canonical-memory.md", "To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], WRITE[internal][roadmap.md], or WRITE[internal][daily-work.md] only when regenerating the whole file. Prefer UPDATE[internal] variants for targeted revisions.", options.rootDir)
+    loadPromptComponent("components/format/canonical-memory.md", "To update canonical orchestrator memory files, use WRITE[internal][summary.md], WRITE[internal][focus-todo.md], WRITE[internal][roadmap.md], or WRITE[internal][daily-work.md] only when regenerating the whole file. Prefer UPDATE[internal] variants for targeted revisions.", options.rootDir),
+    composePromptBlock(
+      ["components/tools/port-publish.md"],
+      {},
+      { portPublishEnabled: !!options.portPublishEnabled },
+      { "components/tools/port-publish.md": "" },
+      options.rootDir
+    ),
+    composePromptBlock(
+      ["components/tools/to-code.md"],
+      { codeAgentProvider: options.codeAgentProvider ?? "claude-code" },
+      { toCodeEnabled: !!options.toCodeEnabled },
+      { "components/tools/to-code.md": "" },
+      options.rootDir
+    ),
   ]);
 
   const taskQualityBlock = "Every queued task must be self-contained, concrete, and specific enough to execute without guessing. Never emit placeholder tasks such as implement, review, compare, or evaluate without an explicit object and outcome. When a task benefits from collaboration, decompose it into multiple targeted QUEUE lines with different resource aliases and role tags instead of leaving the collaboration implicit. Do not emit executable scripts, source files, or ad-hoc automation from contained autonomous work. If a useful improvement would require external application, API, UI, script, or source-code changes, write a markdown feature request ticket to WRITE[outbox][feature-requests/short-name.md] instead of treating it as executable autonomous work.";
@@ -385,7 +452,9 @@ export async function buildAutoTaskMessages(options: {
     queueBlock,
     writeBlock,
     taskQualityBlock,
-    canonicalMemoryBlock
+    canonicalMemoryBlock,
+    portPublishBlock,
+    toCodeBlock,
   ].filter(Boolean).join(" ");
 
   const outgoing: ChatMessage[] = [
@@ -513,6 +582,7 @@ export async function buildQueueFillMessages(options: {
   recentCompletedTopics?: ReadonlyArray<string>;
   targetTaskCount?: number;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const targetTaskCount = options.targetTaskCount ?? 8;
@@ -528,7 +598,10 @@ export async function buildQueueFillMessages(options: {
     ),
     loadPromptComponent("components/stance/queue-draft.md", "The queue is running low and needs a fresh batch of work. Self-aware self-improvement of the local orchestration system is your default stance right now.", options.rootDir),
     loadPromptComponent("components/format/domain-taxonomy.md", "SYSTEM: Routing quality. RESEARCH: Career context. KNOWLEDGE: Learning content. SYNTHESIS: Pattern extraction. IDENTITY: Agent development.", options.rootDir),
-    buildGroundingBlock(options.weatherEnabled, options.rootDir)
+    buildGroundingBlock(
+      computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+      options.rootDir
+    ),
   ]);
 
   const taskOutputFormat = `Output only task lines in the exact format {domain:SYSTEM} [high] task, {domain:SYSTEM} [medium] task, or {domain:SYSTEM} [low] task. Generate exactly ${targetTaskCount} tasks. Keep the batch diverse across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY. If the target count is at least 5, include every domain at least once; otherwise choose the highest-value mix without duplicating topics. Distribute requestedResource assignments explicitly so every resource alias in the inventory receives work when capacity allows. Include at least one high-priority task. Do not output any explanation before or after the task lines.`;
@@ -614,6 +687,7 @@ export async function buildQueueFillReviewMessages(options: {
   resourceRoster?: string;
   currentDateTime?: string;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const reviewerFallback = `You are @${options.reviewerAlias}, the secondary reviewer for ${options.orchestratorName}'s auto-mode planning.`;
@@ -631,7 +705,10 @@ export async function buildQueueFillReviewMessages(options: {
       options.rootDir
     ),
     loadPromptComponent("components/stance/queue-review.md", reviewStanceFallback, options.rootDir),
-    buildGroundingBlock(options.weatherEnabled, options.rootDir)
+    buildGroundingBlock(
+      computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+      options.rootDir
+    ),
   ]);
 
   const outgoing: ChatMessage[] = [
@@ -697,6 +774,7 @@ export async function buildQueueFillFinalizeMessages(options: {
   currentDateTime?: string;
   targetTaskCount?: number;
   weatherEnabled?: boolean;
+  toolAuthorization?: ToolAuthorization;
   rootDir?: string;
 }): Promise<ChatMessage[]> {
   const targetTaskCount = options.targetTaskCount ?? 6;
@@ -711,7 +789,10 @@ export async function buildQueueFillFinalizeMessages(options: {
       options.rootDir
     ),
     loadPromptComponent("components/stance/queue-finalize.md", "The queue is running low — finalize a substantive batch to keep all resources busy. Self-aware self-improvement of the local orchestration system is your default stance right now.", options.rootDir),
-    buildGroundingBlock(options.weatherEnabled, options.rootDir)
+    buildGroundingBlock(
+      computeGroundingFlags(options.weatherEnabled, options.toolAuthorization),
+      options.rootDir
+    ),
   ]);
 
   const taskOutputFormat = `Output only approved task lines in the exact format [high] task, [medium] task, or [low] task, with each task prefixed by its domain tag (e.g. {domain:SYSTEM}). Finalize exactly ${targetTaskCount} tasks from the approved draft. If the target count is at least 5, preserve coverage across SYSTEM, RESEARCH, KNOWLEDGE, SYNTHESIS, and IDENTITY; otherwise choose the highest-value mix. Ensure every available resource receives work when capacity allows. Maintain the priority mix (at least one high, majority medium). Reject any task without a clear outcome; keep the batch substantive enough to sustain parallel execution across all connected devices without any device going idle between cycles. Do not output any explanation before or after the task lines.`;

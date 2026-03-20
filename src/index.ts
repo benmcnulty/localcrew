@@ -598,6 +598,13 @@ export async function runRepl(rootDir = process.cwd()): Promise<void> {
       writeLine(stdout, "");
     }
 
+    // Port connection reminder (shown once if portRecommended but not connected)
+    const portReminder = app.getPortConnectionReminder();
+    if (portReminder) {
+      writeLine(stdout, dim(portReminder));
+      writeLine(stdout, "");
+    }
+
     // ── Main REPL loop ──────────────────────────────────────────────────
     while (true) {
       let inputLine: string;

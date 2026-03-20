@@ -25,6 +25,7 @@ import { getEnvNumber } from "./env.ts";
 import {
   PORTAL_BASE_URL,
   fetchPortLogs,
+  fetchPublicFeed,
   loadPortalSession,
   publishPortLog,
   savePortalSession,
@@ -185,7 +186,7 @@ import {
   buildDailyWorkTaskContent,
   type DailyWorkSnapshot,
 } from "./daily-work.ts";
-import { fetchBenLive } from "./benlive.ts";
+import { fetchBenLive, fetchBenLivePortFeed } from "./benlive.ts";
 import { fetchWebsite } from "./website.ts";
 import { formatCurrentDateTime, isNetworkError, titleCase } from "./utils.ts";
 import {
@@ -396,6 +397,42 @@ function parseBenLiveRequest(content: string): { replyText: string; topicOrPath?
   }
 
   return { replyText, topicOrPath };
+}
+
+/**
+ * Parse a TO_CODE request from model output.
+ * Supports single-line: `TO_CODE: task description`
+ * and block form: `TO_CODE[working-directory]:\ndetailed task\nENDCODE`
+ */
+function parseCodeRequest(content: string): {
+  replyText: string;
+  prompt?: string;
+  workingDir?: string;
+} {
+  const trimmedContent = content.trim();
+
+  // Block form: TO_CODE[dir]:\n...\nENDCODE
+  const blockMatch = trimmedContent.match(/TO_CODE(?:\[([^\]]*)\])?:\s*\n([\s\S]*?)\nENDCODE/i);
+  if (blockMatch) {
+    const workingDir = blockMatch[1]?.trim() || undefined;
+    const prompt = blockMatch[2]?.trim();
+    if (prompt) {
+      const replyText = trimmedContent.slice(0, blockMatch.index).trimEnd();
+      return { replyText, prompt, workingDir };
+    }
+  }
+
+  // Single-line form: TO_CODE: task description
+  const lineMatch = trimmedContent.match(/(?:^|\n)TO_CODE:\s*(.+)\s*$/is);
+  if (lineMatch) {
+    const prompt = lineMatch[1].trim();
+    if (prompt) {
+      const replyText = trimmedContent.slice(0, lineMatch.index).trimEnd();
+      return { replyText, prompt };
+    }
+  }
+
+  return { replyText: trimmedContent };
 }
 
 function parseWebsiteRequest(content: string): { replyText: string; topicOrPath?: string } {
@@ -1917,6 +1954,34 @@ export class LocalCrewApp {
 
   private isWeatherEnabled(): boolean {
     return !!(this.config.preferences?.zipCode || this.config.preferences?.city);
+  }
+
+  /**
+   * Check whether a given external tool is authorized via preferences.
+   * When toolAuthorization is absent (old installs), all tools are authorized.
+   */
+  private isToolAuthorized(tool: keyof import("./types.ts").ToolAuthorization): boolean {
+    const auth = this.config.preferences?.toolAuthorization;
+    if (!auth) return true;
+    return auth[tool] !== false;
+  }
+
+  /** True when the portal session is active and not expired. */
+  private isPortalSessionActive(): boolean {
+    if (!this.portalSession) return false;
+    return new Date(this.portalSession.expiresAt) > new Date();
+  }
+
+  /** Build grounding-related tool authorization for builder calls. */
+  private getToolAuthorization(): import("./types.ts").ToolAuthorization | undefined {
+    return this.config.preferences?.toolAuthorization;
+  }
+
+  /** Return a Port connection reminder if portRecommended is set but no session is active. */
+  getPortConnectionReminder(): string | null {
+    if (!this.config.preferences?.portRecommended) return null;
+    if (this.isPortalSessionActive()) return null;
+    return `Port connection recommended but not active. Run /login <token> to connect.`;
   }
 
   async getDailyWorkSnapshot(): Promise<DailyWorkSnapshot> {
@@ -4041,7 +4106,12 @@ export class LocalCrewApp {
     }
 
     try {
-      const result = await fetchBenLive(parsed.topicOrPath, this.fetchFn);
+      // Route "port [section]" requests to the public Port feed
+      const portMatch = parsed.topicOrPath.match(/^port\s*(\S+)?$/i);
+      const isBenLivePortFeed = !!portMatch;
+      const result = isBenLivePortFeed
+        ? await fetchBenLivePortFeed(portMatch?.[1], this.fetchFn)
+        : await fetchBenLive(parsed.topicOrPath, this.fetchFn);
       await appendAuditEvent(
         {
           timestamp: new Date().toISOString(),
@@ -4182,6 +4252,224 @@ export class LocalCrewApp {
     }
   }
 
+  /* ---- PORT_PUBLISH Tool ---- */
+
+  private async resolvePortPublishTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    // Parse PORT_PUBLISH[audience][section]: content
+    const match = options.rawReply.match(/PORT_PUBLISH\[(\w+)\]\[(\w[\w-]*)\]:\s*(.+?)(?:\s*$)/ms);
+    if (!match) return options.rawReply;
+
+    const [fullMatch, audience, section, content] = match;
+
+    // Authorization gates (all deterministic)
+    if (!this.isPortalSessionActive()) {
+      this.warn("PORT_PUBLISH: No active portal session. Skipping publish.");
+      return options.rawReply.replace(fullMatch, "").trim() || options.rawReply;
+    }
+    if (!this.isToolAuthorized("benlive")) {
+      this.warn("PORT_PUBLISH: benlive tool not authorized. Skipping publish.");
+      return options.rawReply.replace(fullMatch, "").trim() || options.rawReply;
+    }
+    if (!this.config.preferences?.autoPublishToPort) {
+      this.warn("PORT_PUBLISH: autoPublishToPort preference not enabled. Skipping publish.");
+      return options.rawReply.replace(fullMatch, "").trim() || options.rawReply;
+    }
+
+    const validAudiences = ["public", "mates", "profile"];
+    const validSections = ["general", "advice", "help", "daily-log"];
+    if (!validAudiences.includes(audience) || !validSections.includes(section)) {
+      this.warn(`PORT_PUBLISH: Invalid audience "${audience}" or section "${section}". Skipping.`);
+      return options.rawReply;
+    }
+
+    try {
+      const { publishPortLog } = await import("./portal.ts");
+      await publishPortLog(
+        this.portalSession!,
+        {
+          content: content.trim(),
+          audience: audience as "public" | "mates" | "profile",
+          section: section as "general" | "advice" | "help" | "daily-log",
+        },
+        this.fetchFn ?? fetch
+      );
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "port.publish",
+          summary: `PORT_PUBLISH [${audience}][${section}] completed.`,
+          success: true,
+          actor: options.actor,
+          metadata: { audience, section, chars: content.length }
+        },
+        this.rootDir
+      );
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "port.publish",
+          summary: `PORT_PUBLISH [${audience}][${section}] failed.`,
+          success: false,
+          actor: options.actor,
+          error: (error as Error).message,
+        },
+        this.rootDir
+      );
+      this.warn(`PORT_PUBLISH failed: ${(error as Error).message}`);
+    }
+
+    // Return reply without the PORT_PUBLISH line
+    return options.rawReply.replace(fullMatch, "").trim() || options.rawReply;
+  }
+
+  /* ---- TO_CODE Tool ---- */
+
+  /** Max TO_CODE invocations per auto session (deterministic rate limit). */
+  private toCodeInvocationCount = 0;
+
+  private async resolveCodeTool(options: {
+    scope: string;
+    actor: string;
+    endpoint: EndpointConfig;
+    resourceAlias: string;
+    messages: ChatMessage[];
+    rawReply: string;
+    target?: string;
+  }): Promise<string> {
+    const parsed = parseCodeRequest(options.rawReply);
+    if (!parsed.prompt) return options.rawReply;
+
+    // Containment check — suppress in non-auto contexts
+    if (!options.scope.startsWith("auto.")) {
+      return options.rawReply;
+    }
+
+    const codeAgentPrefs = this.config.preferences?.codeAgent;
+    if (!codeAgentPrefs) {
+      this.warn("TO_CODE: No code agent configured. Skipping.");
+      return options.rawReply;
+    }
+
+    // Rate limit: max 3 invocations per auto session
+    if (this.toCodeInvocationCount >= 3) {
+      this.warn(`TO_CODE: Rate limit reached (3 invocations per session). Skipping.`);
+      return options.rawReply;
+    }
+
+    // Working directory constraint
+    const requestedDir = parsed.workingDir ?? codeAgentPrefs.workingDir ?? process.cwd();
+    if (codeAgentPrefs.workingDir) {
+      const { resolve } = await import("node:path");
+      const resolved = resolve(requestedDir);
+      const allowed = resolve(codeAgentPrefs.workingDir);
+      if (!resolved.startsWith(allowed)) {
+        this.warn(`TO_CODE: Requested working directory "${requestedDir}" is outside configured workingDir "${codeAgentPrefs.workingDir}". Skipping.`);
+        return options.rawReply;
+      }
+    }
+
+    const { executeCodeAgent, CODE_AGENT_PRESETS } = await import("./code-agent.ts");
+    const preset = CODE_AGENT_PRESETS[codeAgentPrefs.provider as keyof typeof CODE_AGENT_PRESETS];
+    const config = preset
+      ? { ...preset, apiKeyEnv: codeAgentPrefs.apiKeyEnv, workingDir: codeAgentPrefs.workingDir }
+      : {
+          provider: codeAgentPrefs.provider,
+          command: codeAgentPrefs.provider,
+          apiKeyEnv: codeAgentPrefs.apiKeyEnv,
+          workingDir: codeAgentPrefs.workingDir,
+        };
+
+    this.toCodeInvocationCount++;
+
+    await appendAuditEvent(
+      {
+        timestamp: new Date().toISOString(),
+        kind: "system",
+        scope: "code.proposed",
+        summary: `TO_CODE: ${parsed.prompt.slice(0, 120)}`,
+        success: true,
+        actor: options.actor,
+        metadata: { provider: codeAgentPrefs.provider, workingDir: requestedDir }
+      },
+      this.rootDir
+    );
+
+    let result;
+    try {
+      result = await executeCodeAgent(config, parsed.prompt, requestedDir);
+    } catch (error) {
+      await appendAuditEvent(
+        {
+          timestamp: new Date().toISOString(),
+          kind: "system",
+          scope: "code.failed",
+          summary: `TO_CODE execution error: ${(error as Error).message}`,
+          success: false,
+          actor: options.actor,
+        },
+        this.rootDir
+      );
+      this.warn(`TO_CODE execution failed: ${(error as Error).message}`);
+      return parsed.replyText || options.rawReply;
+    }
+
+    await appendAuditEvent(
+      {
+        timestamp: new Date().toISOString(),
+        kind: "system",
+        scope: result.success ? "code.completed" : "code.failed",
+        summary: `TO_CODE ${result.success ? "completed" : "failed"} (${result.durationMs}ms, exit ${result.exitCode}).`,
+        success: result.success,
+        actor: options.actor,
+        durationMs: result.durationMs,
+        metadata: { provider: result.provider, timedOut: result.timedOut, exitCode: result.exitCode }
+      },
+      this.rootDir
+    );
+
+    if (!result.success) {
+      this.warn(`TO_CODE: Agent exited with code ${result.exitCode}.${result.timedOut ? " (timed out)" : ""}`);
+    }
+
+    // Re-prompt the orchestrator with the coding agent's output
+    const agentOutputSummary = result.output.slice(0, 4000) || "(no output)";
+    const stderrSummary = result.stderr.slice(0, 1000);
+
+    const followUp = await this.callModel({
+      scope: `${options.scope}.code-followup`,
+      actor: options.actor,
+      endpoint: options.endpoint,
+      resourceAlias: options.resourceAlias,
+      target: options.target,
+      summary: `Follow-up after TO_CODE execution.`,
+      messages: [
+        ...options.messages,
+        { role: "assistant", content: options.rawReply },
+        {
+          role: "system",
+          content: `Coding agent output (${result.provider}, exit ${result.exitCode}):\n${agentOutputSummary}${stderrSummary ? `\n\nStderr:\n${stderrSummary}` : ""}`
+        },
+        {
+          role: "user",
+          content: "The coding agent completed the task above. Summarize what was done and assess the result."
+        }
+      ]
+    });
+
+    return followUp.text;
+  }
+
   /* ---- Unified External Tools Resolution ---- */
 
   private async resolveExternalTools(options: {
@@ -4194,12 +4482,14 @@ export class LocalCrewApp {
     target?: string;
   }): Promise<string> {
     let reply = options.rawReply;
-    reply = await this.resolveWikipediaTool({ ...options, rawReply: reply });
-    reply = await this.resolveRedditTool({ ...options, rawReply: reply });
-    reply = await this.resolveSearchTool({ ...options, rawReply: reply });
-    reply = await this.resolveWeatherTool({ ...options, rawReply: reply });
-    reply = await this.resolveBenLiveTool({ ...options, rawReply: reply });
-    reply = await this.resolveWebsiteTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("wikipedia")) reply = await this.resolveWikipediaTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("reddit")) reply = await this.resolveRedditTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("webSearch")) reply = await this.resolveSearchTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("weather")) reply = await this.resolveWeatherTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("benlive")) reply = await this.resolveBenLiveTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("website")) reply = await this.resolveWebsiteTool({ ...options, rawReply: reply });
+    reply = await this.resolvePortPublishTool({ ...options, rawReply: reply });
+    if (this.isToolAuthorized("toCode")) reply = await this.resolveCodeTool({ ...options, rawReply: reply });
     return reply;
   }
 
@@ -4334,7 +4624,8 @@ export class LocalCrewApp {
       summary: getConversationSummary(this.sessions),
       recentMessages,
       taskPrompt: options.taskPrompt,
-      weatherEnabled: this.isWeatherEnabled()
+      weatherEnabled: this.isWeatherEnabled(),
+      toolAuthorization: this.getToolAuthorization()
     });
 
     let rawAssistantReply: string;
@@ -5694,7 +5985,11 @@ export class LocalCrewApp {
       resourceRoster: this.getResourceRosterText(),
       extraContextBlocks,
       currentDateTime: formatCurrentDateTime(),
-      weatherEnabled: this.isWeatherEnabled()
+      weatherEnabled: this.isWeatherEnabled(),
+      toolAuthorization: this.getToolAuthorization(),
+      portPublishEnabled: this.isPortalSessionActive() && this.isToolAuthorized("benlive") && this.config.preferences?.autoPublishToPort === true,
+      toCodeEnabled: this.isToolAuthorized("toCode") && !!this.config.preferences?.codeAgent,
+      codeAgentProvider: this.config.preferences?.codeAgent?.provider
     });
 
     let rawReply: string;
@@ -5880,7 +6175,8 @@ export class LocalCrewApp {
       currentDateTime: fillDateTime,
       recentCompletedTopics: this.getRecentCompletedTopics(),
       targetTaskCount: remainingQueueCapacity,
-      weatherEnabled: this.isWeatherEnabled()
+      weatherEnabled: this.isWeatherEnabled(),
+      toolAuthorization: this.getToolAuthorization()
     });
 
     let draftReply: string;
@@ -5968,7 +6264,8 @@ export class LocalCrewApp {
         changelog: documents.changelog,
         resourceRoster,
         currentDateTime: fillDateTime,
-        weatherEnabled: this.isWeatherEnabled()
+        weatherEnabled: this.isWeatherEnabled(),
+        toolAuthorization: this.getToolAuthorization()
       });
 
       try {
@@ -6044,7 +6341,8 @@ export class LocalCrewApp {
       resourceRoster,
       currentDateTime: fillDateTime,
       targetTaskCount: remainingQueueCapacity,
-      weatherEnabled: this.isWeatherEnabled()
+      weatherEnabled: this.isWeatherEnabled(),
+      toolAuthorization: this.getToolAuthorization()
     });
 
     let finalReply: string;
@@ -6418,6 +6716,28 @@ export class LocalCrewApp {
         ].join("\n"));
       }
 
+      // Phase 5: inject Port network learnings during Reflect-phase tasks
+      const isReflectTask = /\breflect\b|\bphase.{0,5}1\b|\bstructured introspection\b/i.test(task.content);
+      if (isReflectTask && this.isPortalSessionActive() && this.isToolAuthorized("benlive")) {
+        try {
+          const { parseSharedLearnings, identifyNovelLearnings, formatLearningsForReflect } = await import("./optimization-digest.ts");
+          const feedResult = await fetchBenLivePortFeed("advice", this.fetchFn ?? fetch);
+          const incoming = parseSharedLearnings(feedResult.text);
+          if (incoming.length > 0) {
+            const learningsPath = join(getStoragePaths(this.rootDir).orchestratorDir, "learnings.md");
+            const localLearnings = await readFile(learningsPath, "utf8").catch(() => "");
+            const novel = identifyNovelLearnings(incoming, localLearnings);
+            if (novel.length > 0) {
+              extraContextBlocks.push(
+                `Port network learnings (evaluate for local relevance):\n${formatLearningsForReflect(novel)}`
+              );
+            }
+          }
+        } catch {
+          // Non-fatal: proceed without Port learnings if fetch fails
+        }
+      }
+
       const outgoingMessages = await buildAutoTaskMessages({
         directives: documents.directives,
         inventory: documents.inventory,
@@ -6438,6 +6758,10 @@ export class LocalCrewApp {
         maxContextTokens: resourceProfile.maxContextTokens,
         dailySessionContext: this.getDailySessionContext(),
         weatherEnabled: this.isWeatherEnabled(),
+        toolAuthorization: this.getToolAuthorization(),
+        portPublishEnabled: this.isPortalSessionActive() && this.isToolAuthorized("benlive") && this.config.preferences?.autoPublishToPort === true,
+        toCodeEnabled: this.isToolAuthorized("toCode") && !!this.config.preferences?.codeAgent,
+        codeAgentProvider: this.config.preferences?.codeAgent?.provider,
         performanceSummary: formatPerformanceSummary(telemetrySummary)
       });
 
@@ -7348,6 +7672,27 @@ export class LocalCrewApp {
         }
       }
 
+      if (command.type === "port.public-feed") {
+        try {
+          const result = await fetchPublicFeed(
+            { section: command.section !== "all" ? command.section : undefined, limit: 20 },
+            this.fetchFn ?? fetch
+          );
+
+          return {
+            lines: this.formatPortFeedLines(result),
+            errors: [],
+            shouldExit: false
+          };
+        } catch (error) {
+          return {
+            lines: [],
+            errors: [`Port public feed failed: ${error instanceof Error ? error.message : String(error)}`],
+            shouldExit: false
+          };
+        }
+      }
+
       if (command.type === "chatMode") {
         await this.setAutoEnabled(false);
         this.runtime = {
@@ -7945,6 +8290,39 @@ export class LocalCrewApp {
             shouldExit: false
           };
         }
+      }
+
+      if (command.type === "preferences.tools") {
+        const auth = this.config.preferences?.toolAuthorization;
+        const toolNames: (keyof import("./types.ts").ToolAuthorization)[] = [
+          "wikipedia", "reddit", "webSearch", "weather", "benlive", "website", "toCode"
+        ];
+        const lines = ["Tool authorization (absent = authorized by default):"];
+        for (const name of toolNames) {
+          const enabled = !auth || auth[name] !== false;
+          lines.push(`  ${name}: ${enabled ? "on" : "off"}`);
+        }
+        lines.push("Use /preferences tools <name> on|off to toggle.");
+        return { lines, errors: [], shouldExit: false };
+      }
+
+      if (command.type === "preferences.tools.set") {
+        const prefs = this.config.preferences ?? {};
+        const auth = { ...prefs.toolAuthorization } as unknown as Record<string, boolean>;
+        auth[command.name] = command.enabled;
+        this.config = {
+          ...this.config,
+          preferences: {
+            ...prefs,
+            toolAuthorization: auth as unknown as import("./types.ts").ToolAuthorization
+          }
+        };
+        await saveConfig(this.config, this.rootDir);
+        return {
+          lines: [`Tool ${command.name} ${command.enabled ? "enabled" : "disabled"}.`],
+          errors: [],
+          shouldExit: false
+        };
       }
 
       if (command.type === "daily.status") {

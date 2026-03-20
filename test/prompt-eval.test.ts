@@ -54,6 +54,8 @@ describe("Component integrity", () => {
       "tools/queue.md",
       "tools/write.md",
       "tools/next.md",
+      "tools/port-publish.md",
+      "tools/to-code.md",
       "identity/orchestrator-chat.md",
       "identity/orchestrator-auto.md",
       "identity/orchestrator-preflight.md",
@@ -113,7 +115,8 @@ describe("Component integrity", () => {
       role: "orchestrator",
       date: "2026-03-19",
       userProfile: "Software engineer.",
-      focusTodo: "- [high] Keep routing quality high."
+      focusTodo: "- [high] Keep routing quality high.",
+      codeAgentProvider: "claude-code"
     };
 
     const files = await collectMarkdownFiles(COMPONENTS_DIR);
@@ -121,6 +124,13 @@ describe("Component integrity", () => {
       const content = await readFile(file, "utf8");
       const afterConditionals = applyConditionals(content, {
         weatherEnabled: true,
+        wikipediaEnabled: true,
+        redditEnabled: true,
+        webSearchEnabled: true,
+        benliveEnabled: true,
+        websiteEnabled: true,
+        portPublishEnabled: true,
+        toCodeEnabled: true,
         showExtra: true,
         hasContextLimit: true
       });
@@ -148,13 +158,50 @@ describe("Structural invariants", () => {
     expect(content).toContain("WEBSITE:");
   });
 
-  test("grounding.md wraps WEATHER line in {{#if weatherEnabled}} conditional", async () => {
+  test("grounding.md wraps each of the 6 tools in its own {{#if}} conditional", async () => {
     const content = await readComponent("tools/grounding.md");
+    // All 6 conditionals must be present
+    expect(content).toContain("{{#if wikipediaEnabled}}");
+    expect(content).toContain("{{#if redditEnabled}}");
+    expect(content).toContain("{{#if webSearchEnabled}}");
     expect(content).toContain("{{#if weatherEnabled}}");
-    const withWeather = applyConditionals(content, { weatherEnabled: true });
-    expect(withWeather).toContain("WEATHER:");
-    const withoutWeather = applyConditionals(content, { weatherEnabled: false });
+    expect(content).toContain("{{#if benliveEnabled}}");
+    expect(content).toContain("{{#if websiteEnabled}}");
+
+    // Verify each tool strips correctly when its flag is false
+    const allOn = { wikipediaEnabled: true, redditEnabled: true, webSearchEnabled: true, weatherEnabled: true, benliveEnabled: true, websiteEnabled: true };
+    const withAll = applyConditionals(content, allOn);
+    expect(withAll).toContain("WIKIPEDIA:");
+    expect(withAll).toContain("WEATHER:");
+    expect(withAll).toContain("BENLIVE:");
+
+    const withoutWeather = applyConditionals(content, { ...allOn, weatherEnabled: false });
     expect(withoutWeather).not.toContain("WEATHER:");
+    expect(withoutWeather).toContain("WIKIPEDIA:");
+
+    const withoutBenlive = applyConditionals(content, { ...allOn, benliveEnabled: false });
+    expect(withoutBenlive).not.toContain("BENLIVE:");
+
+    const withoutWikipedia = applyConditionals(content, { ...allOn, wikipediaEnabled: false });
+    expect(withoutWikipedia).not.toContain("WIKIPEDIA:");
+  });
+
+  test("port-publish.md wraps content in {{#if portPublishEnabled}} conditional", async () => {
+    const content = await readComponent("tools/port-publish.md");
+    expect(content).toContain("{{#if portPublishEnabled}}");
+    const withPort = applyConditionals(content, { portPublishEnabled: true });
+    expect(withPort).toContain("PORT_PUBLISH");
+    const withoutPort = applyConditionals(content, { portPublishEnabled: false });
+    expect(withoutPort).not.toContain("PORT_PUBLISH");
+  });
+
+  test("to-code.md wraps content in {{#if toCodeEnabled}} conditional", async () => {
+    const content = await readComponent("tools/to-code.md");
+    expect(content).toContain("{{#if toCodeEnabled}}");
+    const withCode = applyConditionals(content, { toCodeEnabled: true });
+    expect(withCode).toContain("TO_CODE");
+    const withoutCode = applyConditionals(content, { toCodeEnabled: false });
+    expect(withoutCode).not.toContain("TO_CODE");
   });
 
   test("write.md contains both WRITE and UPDATE format definitions", async () => {
@@ -235,7 +282,7 @@ describe("Composition correctness", () => {
         "components/format/canonical-memory.md"
       ],
       sharedVars,
-      { weatherEnabled: true, hasContextLimit: false },
+      { weatherEnabled: true, wikipediaEnabled: true, redditEnabled: true, webSearchEnabled: true, benliveEnabled: true, websiteEnabled: true, hasContextLimit: false },
       undefined,
       ROOT_DIR
     );
@@ -257,7 +304,7 @@ describe("Composition correctness", () => {
         "components/tools/next.md"
       ],
       sharedVars,
-      { weatherEnabled: false },
+      { weatherEnabled: false, wikipediaEnabled: true, redditEnabled: true, webSearchEnabled: true, benliveEnabled: true, websiteEnabled: false },
       undefined,
       ROOT_DIR
     );
@@ -277,7 +324,7 @@ describe("Composition correctness", () => {
         "components/tools/queue.md"
       ],
       sharedVars,
-      { weatherEnabled: true },
+      { weatherEnabled: true, wikipediaEnabled: true, redditEnabled: true, webSearchEnabled: true, benliveEnabled: true, websiteEnabled: true },
       undefined,
       ROOT_DIR
     );
@@ -295,7 +342,7 @@ describe("Composition correctness", () => {
         "components/tools/grounding.md"
       ],
       sharedVars,
-      { weatherEnabled: false },
+      { weatherEnabled: false, wikipediaEnabled: true, redditEnabled: false, webSearchEnabled: true, benliveEnabled: true, websiteEnabled: false },
       undefined,
       ROOT_DIR
     );
@@ -335,17 +382,18 @@ describe("Composition correctness", () => {
   });
 
   test("WEATHER conditional: absent when weatherEnabled=false, present when true", async () => {
+    const allOn = { weatherEnabled: true, wikipediaEnabled: true, redditEnabled: true, webSearchEnabled: true, benliveEnabled: true, websiteEnabled: true };
     const withWeather = await composePromptBlock(
       ["components/tools/grounding.md"],
       {},
-      { weatherEnabled: true },
+      allOn,
       undefined,
       ROOT_DIR
     );
     const withoutWeather = await composePromptBlock(
       ["components/tools/grounding.md"],
       {},
-      { weatherEnabled: false },
+      { ...allOn, weatherEnabled: false },
       undefined,
       ROOT_DIR
     );
