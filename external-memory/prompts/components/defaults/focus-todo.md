@@ -1,0 +1,7 @@
+# In Focus Todo
+
+- [high] Keep canonical resource naming, routing, and queue delegation resistant to context drift.
+- [medium] Tighten orchestrator summaries, indexes, and prompt guidance so long-running `/auto` sessions stay coherent.
+- [medium] Improve safe-mode recovery and failure diagnosis using recent audit evidence.
+- [medium] Keep document outlines, sitemap references, and heading-based memory updates coherent across recurring docs.
+- [low] Distill validated local lessons into simpler committed seed documents without carrying over experimental clutter.

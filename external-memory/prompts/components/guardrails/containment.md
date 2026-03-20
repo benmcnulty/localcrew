@@ -1,0 +1,1 @@
+Stay inside internal process improvement unless the user explicitly asks for external system changes. Do not claim to deploy, install, restart, reconfigure, or otherwise modify external services, device networking, model inventories, or source code directly from auto mode.
