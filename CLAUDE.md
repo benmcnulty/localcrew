@@ -52,6 +52,7 @@ Local Crew is a local-first multi-device inference orchestrator with a REPL CLI 
 
 | Layer | Location | Tracked |
 |---|---|---|
+| Prompt components | `external-memory/prompts/components/` | Yes |
 | Committed seed data | `external-memory/` | Yes |
 | Local runtime state | `.localcrew/` | No (gitignored) |
 | Env config | `.env`, `.env.local` | No (gitignored) |
@@ -73,7 +74,9 @@ Key local state files:
 | `config.ts` | Load/save participant config from `.localcrew/config.json` |
 | `resources.ts` | Resource CRUD, tier-based routing, capacity summary, network topology |
 | `orchestrator-store.ts` | Agent specs, system documents, auto state persistence |
-| `messages.ts` | Build prompt message arrays for chat/auto/agent contexts |
+| `messages.ts` | Build prompt message arrays for chat/auto/agent contexts (async, loads from components) |
+| `prompt-loader.ts` | Load, cache, interpolate, and compose prompt component files |
+| `quality.ts` | Pure quality-verification functions (substantive output, duplicate detection, term extraction) |
 | `ollama.ts` | HTTP calls to inference endpoints (all three provider styles) |
 | `resource-discovery.ts` | Probe resource endpoints for available models |
 | `api-server.ts` | Fork `api-worker.js` as a child process; proxy HTTP ↔ IPC |
@@ -107,6 +110,10 @@ The HTTP API runs in a **forked child process** (`api-worker.js`) to avoid block
 ### Auto Mode & Queue
 
 In `/auto`, the orchestrator processes queued tasks by tier-routing to resources. When the queue is empty, it checks `external-memory/inbox` for dropbox documents. Tasks can request Wikipedia grounding by emitting `WIKIPEDIA: query` in model output — Local Crew fetches, chunks, logs, and re-prompts.
+
+### Prompt Architecture
+
+All prompt text lives in `external-memory/prompts/components/`. See `docs/PROMPT_ARCHITECTURE.md` for the full component catalog, context assembly map per builder, template variable reference, and editing guide.
 
 ## Code Style
 
