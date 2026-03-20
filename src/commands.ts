@@ -32,7 +32,7 @@ function usage(command: string): string {
     case "/login":
       return "Usage: /login [token]";
     case "/port":
-      return 'Usage: /port | /port status | /port feed [public|mates|profile] [all|general|advice|help|daily-log] | /port post [public|mates|profile] [general|advice|help|daily-log] "message" | /port reply <logId> "message"';
+      return 'Usage: /port | /port status | /port feed [public|mates|profile] [all|general|advice|help|daily-log] | /port public [all|general|advice|help|daily-log] | /port post [public|mates|profile] [general|advice|help|daily-log] "message" | /port reply <logId> "message"';
     case "/end":
       return "Usage: /end";
     case "/help":
@@ -74,7 +74,7 @@ function usage(command: string): string {
     case "/reset":
       return "Usage: /reset";
     case "/preferences":
-      return 'Usage: /preferences | /preferences set <key> <value> — keys: city, zipCode (or zip), website, directive, interval, dailyDirective';
+      return 'Usage: /preferences | /preferences set <key> <value> — keys: city, zipCode (or zip), website, directive, interval, dailyDirective | /preferences tools [<name> on|off] — names: wikipedia, reddit, webSearch, weather, benlive, website, toCode';
     case "/daily":
       return "Usage: /daily | /daily start | /daily finish";
     case "/promote":
@@ -416,6 +416,17 @@ export function parseCommand(input: string): Command {
           ...(audience ? { audience } : {}),
           ...(section ? { section } : {})
         };
+      }
+
+      if (subcommand === "public") {
+        if (rest.length > 2) {
+          throw new CommandParseError(usage("/port"));
+        }
+        const section = rest[1] ? parsePortSectionName(rest[1].toLowerCase()) : "all";
+        if (!section) {
+          throw new CommandParseError(usage("/port"));
+        }
+        return { type: "port.public-feed", section };
       }
 
       if (subcommand === "reply") {
@@ -791,6 +802,24 @@ export function parseCommand(input: string): Command {
     case "/preferences":
       if (rest.length === 0) {
         return { type: "preferences.get" };
+      }
+      if (rest[0].toLowerCase() === "tools") {
+        if (rest.length === 1) {
+          return { type: "preferences.tools" };
+        }
+        if (rest.length === 3) {
+          const validNames = ["wikipedia", "reddit", "webSearch", "weather", "benlive", "website", "toCode"] as const;
+          const name = rest[1] as (typeof validNames)[number];
+          if (!validNames.includes(name)) {
+            throw new CommandParseError(usage("/preferences"));
+          }
+          const toggle = parseBooleanToggle(rest[2].toLowerCase());
+          if (toggle === undefined) {
+            throw new CommandParseError(usage("/preferences"));
+          }
+          return { type: "preferences.tools.set", name, enabled: toggle };
+        }
+        throw new CommandParseError(usage("/preferences"));
       }
       if (rest.length >= 3 && rest[0].toLowerCase() === "set") {
         const key = rest[1].toLowerCase();

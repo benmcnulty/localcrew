@@ -314,7 +314,7 @@ function normalizePreferences(raw: unknown): UserPreferences | undefined {
 }
 
 export function setPreference(config: AppConfig, key: string, value: string): AppConfig {
-  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled", "modelProfile", "dailyWorkIntervalHours", "dailyWorkDirective"];
+  const validKeys: (keyof UserPreferences)[] = ["zipCode", "city", "personalWebsiteUrl", "dailyDigestDirective", "jobSearchEnabled", "modelProfile", "dailyWorkIntervalHours", "dailyWorkDirective", "portRecommended", "autoPublishToPort"];
   if (!validKeys.includes(key as keyof UserPreferences)) {
     throw new Error(`Invalid preference key "${key}". Valid keys: ${validKeys.join(", ")}`);
   }
@@ -339,6 +339,16 @@ export function setPreference(config: AppConfig, key: string, value: string): Ap
     return {
       ...config,
       preferences: { ...existing, jobSearchEnabled: boolValue }
+    };
+  }
+
+  // Boolean flags
+  if (key === "portRecommended" || key === "autoPublishToPort") {
+    const v = trimmed.toLowerCase();
+    const boolValue = v === "true" || v === "yes" || v === "1" || v === "y";
+    return {
+      ...config,
+      preferences: { ...existing, [key]: boolValue }
     };
   }
 

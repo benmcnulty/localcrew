@@ -13,6 +13,23 @@ export type ModelProfileMode = "all-llamas" | "custom" | "auto";
  */
 export type ResourceRole = "primary-orchestrator" | "orchestrator" | "agent";
 
+/** Provider options for premium external coding agent delegation (Phase 7). */
+export type CodeAgentProvider = "claude-code" | "codex" | "copilot" | "custom";
+
+/**
+ * Per-tool authorization flags. When absent from UserPreferences, all tools
+ * are authorized (backward compat). When present, each field gates its tool.
+ */
+export interface ToolAuthorization {
+  wikipedia: boolean;
+  reddit: boolean;
+  webSearch: boolean;
+  weather: boolean;
+  benlive: boolean;
+  website: boolean;
+  toCode: boolean;
+}
+
 export interface ChatMessage {
   role: Role;
   content: string;
@@ -42,6 +59,18 @@ export interface UserPreferences {
   dailyWorkDirective?: string;
   jobSearchEnabled?: boolean;
   modelProfile?: ModelProfileMode;
+  /** Per-tool authorization flags. Absent = all tools authorized (backward compat). */
+  toolAuthorization?: ToolAuthorization;
+  /** Set by setup wizard; triggers a Port connection reminder on startup. */
+  portRecommended?: boolean;
+  /** When true, orchestrator publishes validated HIGH-confidence learnings via PORT_PUBLISH. */
+  autoPublishToPort?: boolean;
+  /** Premium coding agent configuration for TO_CODE delegation. */
+  codeAgent?: {
+    provider: CodeAgentProvider;
+    apiKeyEnv?: string;
+    workingDir?: string;
+  };
 }
 
 export interface AppConfig {
@@ -426,6 +455,7 @@ export type Command =
   | { type: "login"; token?: string }
   | { type: "port.status" }
   | { type: "port.feed"; feed: PortFeedName; section: PortSectionName }
+  | { type: "port.public-feed"; section: PortSectionName }
   | { type: "port.post"; content: string; audience?: PortFeedName; section?: PortPublishSectionName }
   | { type: "port.reply"; logId: string; content: string }
   | { type: "endMode" }
@@ -483,6 +513,8 @@ export type Command =
   | { type: "reset" }
   | { type: "preferences.get" }
   | { type: "preferences.set"; key: string; value: string }
+  | { type: "preferences.tools" }
+  | { type: "preferences.tools.set"; name: keyof ToolAuthorization; enabled: boolean }
   | { type: "daily.status" }
   | { type: "daily.start" }
   | { type: "daily.finish" }
