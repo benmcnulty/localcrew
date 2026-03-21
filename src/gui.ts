@@ -3999,6 +3999,7 @@ export function getDisplayHtml(): string {
   // Crisp digital rain: snapped glyph grid, bounded frame cadence, and
   // visible-row rendering only so the overlay stays sharp at any DPI.
   var MX={on:false,stream:[],streamReadIdx:0,maxStream:12000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/32};
+  var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
   MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false,desynchronized:true}):null;
@@ -4020,7 +4021,7 @@ export function getDisplayHtml(): string {
   }
 
   function mxGetChar(){
-    if(MX.streamReadIdx>=MX.stream.length)return '';
+    if(MX.streamReadIdx>=MX.stream.length)return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
     var c=MX.stream[MX.streamReadIdx];
     MX.streamReadIdx++;
     if(MX.streamReadIdx>2048&&MX.streamReadIdx>=Math.floor(MX.stream.length/2)){
