@@ -12,9 +12,7 @@ Fast path command:
    - `bunx tsc --noEmit`
 2. Regression suite
    - `npm test`
-3. CI pass on pull request and `main`
-   - `.github/workflows/ci.yml` must be green
-4. Security baseline
+3. Security baseline
    - local-network boundary validated (`LOCALCREW_API_NETWORK_SCOPE=local` rejects non-local clients)
    - API token behavior validated when `LOCALCREW_API_TOKEN` is set
    - local billboard SSE behavior validated (`/api/events`)

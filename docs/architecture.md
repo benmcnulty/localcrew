@@ -4,7 +4,7 @@
 
 Local Crew has two related but separate concepts:
 
-- Participants: `@erin`, `@zora`, `@sam`, `@pav` are the starter personalities used in direct chat and group chat. Their nicknames, resource bindings, instructions, and models are editable at runtime.
+- Participants: `@cap`, `@vic`, `@min`, `@pav` are the starter personalities used in direct chat and group chat. Their nicknames, resource bindings, instructions, and models are editable at runtime.
 - Resources: local Ollama or OpenAI-compatible endpoints registered in `.localcrew/resources.json` are the underlying inference nodes the orchestrator can delegate work to in `/auto`.
 
 ## Storage
