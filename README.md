@@ -13,10 +13,10 @@ The local HTTP surface is built for LAN use out of the box. `/ui` and `/display`
 │  You                                             │
 │   ↕                                              │
 │  Orchestrator (CLI + API + Browser UI)           │
-│   ├── @erin  → MacBook (llama3.1:8b, top tier)   │
-│   ├── @zora  → Desktop (qwen3:14b, top tier)     │
-│   ├── @min   → Mini PC (granite4:3b, mid tier)   │
-│   └── @pav   → Laptop  (llama3.2:3b, mid tier)   │
+│   ├── @cap  → Device A (llama3.1:8b, top tier)   │
+│   ├── @vic  → Device B (qwen3:14b, top tier)     │
+│   ├── @min  → Device C (gemma3:4b, mid tier)     │
+│   └── @pav  → Device D (llama3.2:3b, mid tier)   │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -188,7 +188,7 @@ Local Crew supports hierarchical device topologies where multiple devices can se
 ```
 Primary: @orchestrator (32k ctx)
   └─ agent: @min (8k ctx)
-Sub-Orchestrator: @zora (16k ctx)
+Sub-Orchestrator: @vic (16k ctx)
   └─ agent: @pav (8k ctx)
 ```
 

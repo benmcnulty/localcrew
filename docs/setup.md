@@ -65,10 +65,10 @@ For a full operations checklist (logging, rollback, report handoff), use [docs/o
    - or use the `Resources` section in `/ui`
 5. Configure the starter chat roster and test the network:
    - `/participant list`
-   - `/nickname @erin "Your Preferred Name"`
-   - `/bind @erin orchestrator`
-   - `/models @erin`
-   - `/model erin llama3.1:8b`
+   - `/nickname @cap "Your Preferred Name"`
+   - `/bind @cap orchestrator`
+   - `/models @cap`
+   - `/model cap llama3.1:8b`
    - `/direct orchestrator "Ping test"`
    - or use the matching forms in `/ui`
 
@@ -250,9 +250,9 @@ A sub-orchestrator is a device that independently coordinates a group of subordi
 
 **Example output:**
 ```
-Primary: @erin (32k ctx)
+Primary: @cap (32k ctx)
   └─ agent: @min (8k ctx)
-Sub-Orchestrator: @zora (16k ctx)
+Sub-Orchestrator: @vic (16k ctx)
   └─ agent: @pav (8k ctx)
 ```
 

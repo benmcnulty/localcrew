@@ -45,7 +45,7 @@ Local Crew is a local-first multi-device inference orchestrator with a REPL CLI 
 
 ### Two Key Concepts
 
-- **Participants** (`@erin`, `@zora`, etc.): Named chat personas with nicknames, instructions, resource bindings, and model selections. Stored in `.localcrew/config.json`.
+- **Participants** (`@cap`, `@vic`, etc.): Named chat personas with nicknames, instructions, resource bindings, and model selections. Stored in `.localcrew/config.json`.
 - **Resources**: Underlying inference endpoints (Ollama, OpenAI-compatible, Anthropic) registered in `.localcrew/resources.json`. Routed by tier: `top` → `mid` → `low`.
 
 ### Storage Boundary
