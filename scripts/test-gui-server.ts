@@ -17,17 +17,17 @@ const mockStatus = {
   nextTask: { content: "Analyze market trends" },
   lastCompleted: { content: "Generate weekly report" },
   telemetry: { totalEvents: 42, totalTokens: 15000 },
-  activeResources: ["cap", "zora"],
+  activeResources: ["cap", "vic"],
 };
 
 const mockResources = [
   { alias: "cap", label: "Primary GPU", baseUrl: "http://localhost:11434", tier: "top", apiStyle: "ollama", models: ["llama3.2"], hardware: { vram: "24GB" } },
-  { alias: "zora", label: "Backup CPU", baseUrl: "http://10.0.0.2:11434", tier: "mid", apiStyle: "ollama", models: ["mistral"], hardware: { vram: "8GB" } },
+  { alias: "vic", label: "Backup CPU", baseUrl: "http://10.0.0.2:11434", tier: "mid", apiStyle: "ollama", models: ["mistral"], hardware: { vram: "8GB" } },
 ];
 
 const mockParticipants = [
-  { alias: "erin", nickname: "Erin", resource: "cap", model: "llama3.2", instructions: "Helpful assistant" },
-  { alias: "zora", nickname: "Zora", resource: "zora", model: "mistral", instructions: "Creative writer" },
+  { alias: "cap", nickname: "Cap", resource: "cap", model: "llama3.2", instructions: "Helpful assistant" },
+  { alias: "vic", nickname: "Vic", resource: "vic", model: "mistral", instructions: "Creative writer" },
 ];
 
 const mockQueue = {
@@ -59,7 +59,7 @@ const mockDailyWork = {
   content: "# Daily Work Briefing\n\n## Summary\nAll systems operational. 12 tasks completed today.\n\n## Key Metrics\n- **Token throughput**: 15,000 tokens processed\n- **Active resources**: 2 online\n- **Queue depth**: 3 pending tasks\n\n## Completed Tasks\n- Generate weekly report\n- Process incoming documents\n- Update knowledge base",
 };
 
-const mockTopology = "Primary Orchestrator: TestCrew\n  ├── cap (top) — Primary GPU\n  └── zora (mid) — Backup CPU";
+const mockTopology = "Primary Orchestrator: TestCrew\n  ├── cap (top) — Primary GPU\n  └── vic (mid) — Backup CPU";
 
 const mockTree = {
   tree: [
@@ -179,7 +179,7 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       status: ["Mode: command", "Resources: 2 online", "Queue: 3 pending"],
       queue: ["Pending: 3 tasks", "1. Analyze market trends", "2. Write documentation", "3. Review code changes"],
       metrics: ["Events: 42", "Tokens: 15,000", "Uptime: 2h 30m"],
-      detail: ["Orchestrator: TestCrew", "Resources: cap (top), zora (mid)"],
+      detail: ["Orchestrator: TestCrew", "Resources: cap (top), vic (mid)"],
     };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ lines: mockLines[tab] || ["No data for tab: " + tab] }));

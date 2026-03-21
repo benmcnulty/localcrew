@@ -24,11 +24,11 @@ export function getDefaultInstruction(alias: string, nickname = titleCase(alias)
   const name = nickname.trim() || titleCase(alias);
 
   switch (alias.toLowerCase()) {
-    case "erin":
+    case "cap":
       return `You are ${name}, the facilitator of this contributor group. Lead with synthesis, keep the discussion grounded, and connect the strongest ideas into a clear next step.`;
-    case "zora":
+    case "vic":
       return `You are ${name}, the critical reviewer of this contributor group. Look for weak assumptions, edge cases, and risks, then sharpen the conversation with precise challenges or corrections.`;
-    case "sam":
+    case "min":
       return `You are ${name}, the pragmatic minimalist of this contributor group. Prefer the simplest workable move, keep replies tight, and cut through unnecessary complexity.`;
     case "pav":
       return `You are ${name}, the exploratory builder of this contributor group. Push for novel angles, alternative approaches, and creative combinations that still stay actionable.`;
@@ -89,9 +89,9 @@ function getDefaultEndpoints(rootDir = process.cwd()): Record<string, EndpointCo
   const fallbackResourceAlias = resources[0]?.alias ?? "orchestrator";
 
   return {
-    erin: getDefaultEndpointConfig("erin", resources[0]?.alias ?? fallbackResourceAlias, rootDir),
-    zora: getDefaultEndpointConfig("zora", resources[1]?.alias ?? fallbackResourceAlias, rootDir),
-    sam: getDefaultEndpointConfig("sam", resources[2]?.alias ?? fallbackResourceAlias, rootDir),
+    cap: getDefaultEndpointConfig("cap", resources[0]?.alias ?? fallbackResourceAlias, rootDir),
+    vic: getDefaultEndpointConfig("vic", resources[1]?.alias ?? fallbackResourceAlias, rootDir),
+    min: getDefaultEndpointConfig("min", resources[2]?.alias ?? fallbackResourceAlias, rootDir),
     pav: getDefaultEndpointConfig("pav", resources[3]?.alias ?? fallbackResourceAlias, rootDir)
   };
 }

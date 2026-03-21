@@ -84,16 +84,16 @@ export const VOICE_PRESETS: VoicePreset[] = [
 ];
 
 const DEFAULT_VOICE_PRESETS: Record<string, string> = {
-  erin: "allison",
-  zora: "zoe",
-  sam: "samantha",
+  cap: "allison",
+  vic: "zoe",
+  min: "samantha",
   pav: "evan"
 };
 
 const GENERATED_DEFAULT_VOICE_PRESETS: Record<string, string[]> = {
-  erin: ["siri", "reed_us", "flo_us"],
-  zora: ["zoe", "eddy_uk", "sandy_uk"],
-  sam: ["samantha", "eddy_us", "sandy_us"],
+  cap: ["siri", "reed_us", "flo_us"],
+  vic: ["zoe", "eddy_uk", "sandy_uk"],
+  min: ["samantha", "eddy_us", "sandy_us"],
   pav: ["daniel", "flo_uk", "reed_us"]
 };
 
