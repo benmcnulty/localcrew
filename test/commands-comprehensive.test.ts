@@ -121,32 +121,32 @@ describe("parseCommand — /model untested variants", () => {
   });
 
   test("/model with one arg returns model.set", () => {
-    expect(parseCommand("/model erin")).toEqual({
+    expect(parseCommand("/model cap")).toEqual({
       type: "model.set",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/model normalizes alias", () => {
-    expect(parseCommand("/model @Erin")).toEqual({
+    expect(parseCommand("/model @Cap")).toEqual({
       type: "model.set",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/model assign with multi-word model name", () => {
-    expect(parseCommand("/model erin some-model:latest")).toEqual({
+    expect(parseCommand("/model cap some-model:latest")).toEqual({
       type: "model.assign",
-      alias: "erin",
+      alias: "cap",
       model: "some-model:latest",
     });
   });
 
   test("/model with invalid purpose name falls through to assign", () => {
-    // e.g. /model zora debugging model → becomes model.assign since "debugging" is not a known purpose
-    expect(parseCommand("/model zora debugging model")).toEqual({
+    // e.g. /model vic debugging model → becomes model.assign since "debugging" is not a known purpose
+    expect(parseCommand("/model vic debugging model")).toEqual({
       type: "model.assign",
-      alias: "zora",
+      alias: "vic",
       model: "debugging model",
     });
   });
@@ -162,21 +162,21 @@ describe("parseCommand — /default", () => {
   });
 
   test("/default with alias returns default.set", () => {
-    expect(parseCommand("/default erin")).toEqual({
+    expect(parseCommand("/default cap")).toEqual({
       type: "default.set",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/default normalizes alias", () => {
-    expect(parseCommand("/default @Erin")).toEqual({
+    expect(parseCommand("/default @Cap")).toEqual({
       type: "default.set",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/default with extra args throws", () => {
-    expect(() => parseCommand("/default erin zora")).toThrow(CommandParseError);
+    expect(() => parseCommand("/default cap vic")).toThrow(CommandParseError);
   });
 });
 
@@ -190,9 +190,9 @@ describe("parseCommand — /nickname untested variants", () => {
   });
 
   test("/nickname @alias returns nickname.get with alias", () => {
-    expect(parseCommand("/nickname @erin")).toEqual({
+    expect(parseCommand("/nickname @cap")).toEqual({
       type: "nickname.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
@@ -204,14 +204,14 @@ describe("parseCommand — /nickname untested variants", () => {
   });
 
   test("/nickname normalizes alias", () => {
-    expect(parseCommand("/nickname @ERIN")).toEqual({
+    expect(parseCommand("/nickname @CAP")).toEqual({
       type: "nickname.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/nickname with 3+ args throws", () => {
-    expect(() => parseCommand("/nickname @erin too many args")).toThrow(
+    expect(() => parseCommand("/nickname @cap too many args")).toThrow(
       CommandParseError
     );
   });
@@ -227,9 +227,9 @@ describe("parseCommand — /bind untested variants", () => {
   });
 
   test("/bind @alias returns bind.get with alias", () => {
-    expect(parseCommand("/bind @erin")).toEqual({
+    expect(parseCommand("/bind @cap")).toEqual({
       type: "bind.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
@@ -241,14 +241,14 @@ describe("parseCommand — /bind untested variants", () => {
   });
 
   test("/bind normalizes alias", () => {
-    expect(parseCommand("/bind @ERIN")).toEqual({
+    expect(parseCommand("/bind @CAP")).toEqual({
       type: "bind.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/bind with 3+ args throws", () => {
-    expect(() => parseCommand("/bind @erin res extra")).toThrow(
+    expect(() => parseCommand("/bind @cap res extra")).toThrow(
       CommandParseError
     );
   });
@@ -317,9 +317,9 @@ describe("parseCommand — /voice untested variants", () => {
   });
 
   test("/voice @alias returns voice.get with alias", () => {
-    expect(parseCommand("/voice @erin")).toEqual({
+    expect(parseCommand("/voice @cap")).toEqual({
       type: "voice.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
@@ -331,22 +331,22 @@ describe("parseCommand — /voice untested variants", () => {
   });
 
   test("/voice @alias preset returns voice.set with alias", () => {
-    expect(parseCommand("/voice @erin samantha")).toEqual({
+    expect(parseCommand("/voice @cap samantha")).toEqual({
       type: "voice.set",
-      alias: "erin",
+      alias: "cap",
       preset: "samantha",
     });
   });
 
   test("/voice @alias normalizes alias", () => {
-    expect(parseCommand("/voice @ERIN")).toEqual({
+    expect(parseCommand("/voice @CAP")).toEqual({
       type: "voice.get",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/voice with 3+ args throws", () => {
-    expect(() => parseCommand("/voice @erin preset extra")).toThrow(
+    expect(() => parseCommand("/voice @cap preset extra")).toThrow(
       CommandParseError
     );
   });
@@ -362,9 +362,9 @@ describe("parseCommand — /instructions untested variants", () => {
   });
 
   test("/instructions @alias returns instructions.edit with alias", () => {
-    expect(parseCommand("/instructions @erin")).toEqual({
+    expect(parseCommand("/instructions @cap")).toEqual({
       type: "instructions.edit",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
@@ -376,17 +376,17 @@ describe("parseCommand — /instructions untested variants", () => {
   });
 
   test("/instructions @alias with text returns instructions.set", () => {
-    expect(parseCommand('/instructions @erin "Be concise."')).toEqual({
+    expect(parseCommand('/instructions @cap "Be concise."')).toEqual({
       type: "instructions.set",
-      alias: "erin",
+      alias: "cap",
       text: "Be concise.",
     });
   });
 
   test("/instructions normalizes alias", () => {
-    expect(parseCommand("/instructions @ERIN")).toEqual({
+    expect(parseCommand("/instructions @CAP")).toEqual({
       type: "instructions.edit",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
@@ -443,7 +443,7 @@ describe("parseCommand — /priority untested variants", () => {
 
 describe("parseCommand — /rename error paths", () => {
   test("/rename with 1 arg throws", () => {
-    expect(() => parseCommand("/rename erin")).toThrow(CommandParseError);
+    expect(() => parseCommand("/rename cap")).toThrow(CommandParseError);
   });
 
   test("/rename with 3+ args throws", () => {
@@ -544,13 +544,13 @@ describe("parseCommand — /participant error paths", () => {
   });
 
   test("/participant unknown subcommand throws", () => {
-    expect(() => parseCommand("/participant promote erin")).toThrow(
+    expect(() => parseCommand("/participant promote cap")).toThrow(
       CommandParseError
     );
   });
 
   test("/participant add with too few args throws", () => {
-    expect(() => parseCommand("/participant add erin")).toThrow(
+    expect(() => parseCommand("/participant add cap")).toThrow(
       CommandParseError
     );
   });
@@ -669,21 +669,21 @@ describe("parseDirectedMessage — edge cases", () => {
   });
 
   test("returns null for single @alias without 'to'", () => {
-    expect(parseDirectedMessage("@erin hello")).toBeNull();
+    expect(parseDirectedMessage("@cap hello")).toBeNull();
   });
 
   test("handles unquoted text after colon", () => {
-    expect(parseDirectedMessage("@erin to @zora: hello there")).toEqual({
-      fromAlias: "erin",
-      toAlias: "zora",
+    expect(parseDirectedMessage("@cap to @vic: hello there")).toEqual({
+      fromAlias: "cap",
+      toAlias: "vic",
       text: "hello there",
     });
   });
 
   test("normalizes aliases to lowercase", () => {
-    expect(parseDirectedMessage('@ERIN to @ZORA: "hi"')).toEqual({
-      fromAlias: "erin",
-      toAlias: "zora",
+    expect(parseDirectedMessage('@CAP to @VIC: "hi"')).toEqual({
+      fromAlias: "cap",
+      toAlias: "vic",
       text: "hi",
     });
   });
@@ -701,15 +701,15 @@ describe("extractAddressedMessage — edge cases", () => {
   });
 
   test("@alias alone returns alias with empty text", () => {
-    expect(extractAddressedMessage("@erin")).toEqual({
-      alias: "erin",
+    expect(extractAddressedMessage("@cap")).toEqual({
+      alias: "cap",
       text: "",
     });
   });
 
   test("leading whitespace is trimmed", () => {
-    expect(extractAddressedMessage("  @erin hello")).toEqual({
-      alias: "erin",
+    expect(extractAddressedMessage("  @cap hello")).toEqual({
+      alias: "cap",
       text: "hello",
     });
   });
@@ -721,14 +721,14 @@ describe("extractAddressedMessage — edge cases", () => {
 
 describe("parseCommand — crosstalk edge cases", () => {
   test("crosstalk with empty text throws", () => {
-    expect(() => parseCommand('@erin to @zora: ""')).toThrow(CommandParseError);
+    expect(() => parseCommand('@cap to @vic: ""')).toThrow(CommandParseError);
   });
 
   test("crosstalk normalizes aliases", () => {
-    expect(parseCommand('@ERIN to @ZORA: "hello"')).toEqual({
+    expect(parseCommand('@CAP to @VIC: "hello"')).toEqual({
       type: "crosstalk",
-      fromAlias: "erin",
-      toAlias: "zora",
+      fromAlias: "cap",
+      toAlias: "vic",
       text: "hello",
     });
   });
@@ -842,17 +842,17 @@ describe("parseCommand — /topology edge cases", () => {
 
 describe("parseCommand — message routing", () => {
   test("@alias with no text sends empty message", () => {
-    expect(parseCommand("@erin")).toEqual({
+    expect(parseCommand("@cap")).toEqual({
       type: "message",
-      alias: "erin",
+      alias: "cap",
       text: "",
     });
   });
 
   test("@alias normalizes to lowercase and strips @", () => {
-    expect(parseCommand("@ERIN hello")).toEqual({
+    expect(parseCommand("@CAP hello")).toEqual({
       type: "message",
-      alias: "erin",
+      alias: "cap",
       text: "hello",
     });
   });
@@ -965,25 +965,25 @@ describe("parseCommand — /participant normalization", () => {
   });
 
   test("/participant edit normalizes alias", () => {
-    expect(parseCommand("/participant edit @ERIN")).toEqual({
+    expect(parseCommand("/participant edit @CAP")).toEqual({
       type: "participant.edit",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/participant remove normalizes alias", () => {
-    expect(parseCommand("/participant remove @ERIN")).toEqual({
+    expect(parseCommand("/participant remove @CAP")).toEqual({
       type: "participant.remove",
-      alias: "erin",
+      alias: "cap",
     });
   });
 
   test("/participant add normalizes all aliases", () => {
-    expect(parseCommand('/participant add @ERIN WORKHORSE "Erin"')).toEqual({
+    expect(parseCommand('/participant add @CAP WORKHORSE "Cap"')).toEqual({
       type: "participant.add",
-      alias: "erin",
+      alias: "cap",
       resourceAlias: "workhorse",
-      nickname: "Erin",
+      nickname: "Cap",
     });
   });
 });

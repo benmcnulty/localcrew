@@ -167,11 +167,11 @@ describe("LocalCrewApp", () => {
 
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
-      const result = await app.execute(parseCommand("Hello Erin"));
+      const result = await app.execute(parseCommand("Hello Cap"));
       const status = await app.getStatusSnapshot();
       const orchestrator = status.activeResources.find((resource) => resource.alias === "orchestrator");
 
@@ -239,7 +239,7 @@ describe("LocalCrewApp", () => {
       await seedResourceInventory(rootDir);
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
@@ -503,17 +503,17 @@ describe("LocalCrewApp", () => {
         rootDir,
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
-          return makeChatResponse("Hello from Erin");
+          return makeChatResponse("Hello from Cap");
         },
         speakFn: () => {}
       });
 
-      const result = await app.execute(parseCommand("Hello Erin"));
+      const result = await app.execute(parseCommand("Hello Cap"));
 
-      expect(result.lines).toEqual(["@erin: Hello from Erin"]);
+      expect(result.lines).toEqual(["@cap: Hello from Cap"]);
       expect(seenBodies[0]?.messages?.at(-1)).toEqual({
         role: "user",
-        content: "USER -> @erin: Hello Erin"
+        content: "USER -> @cap: Hello Cap"
       });
     });
   });
@@ -522,13 +522,13 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Reply from Zora"),
+        fetchFn: async () => makeChatResponse("Reply from Vic"),
         speakFn: () => {}
       });
 
-      const result = await app.execute(parseCommand("@zora Hello Zora"));
+      const result = await app.execute(parseCommand("@vic Hello Vic"));
 
-      expect(result.lines).toEqual(["@zora: Reply from Zora"]);
+      expect(result.lines).toEqual(["@vic: Reply from Vic"]);
     });
   });
 
@@ -539,19 +539,19 @@ describe("LocalCrewApp", () => {
         rootDir,
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
-          return makeChatResponse("Hello from Erin");
+          return makeChatResponse("Hello from Cap");
         },
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("/model zora"));
+      await app.execute(parseCommand("/model vic"));
       await app.execute(parseCommand("/chat"));
       const result = await app.execute(parseCommand("Still goes to default"));
 
-      expect(result.lines).toEqual(["@erin: Hello from Erin"]);
+      expect(result.lines).toEqual(["@cap: Hello from Cap"]);
       expect(seenBodies[0]?.messages?.at(-1)).toEqual({
         role: "user",
-        content: "USER -> @erin: Still goes to default"
+        content: "USER -> @cap: Still goes to default"
       });
     });
   });
@@ -561,29 +561,29 @@ describe("LocalCrewApp", () => {
       const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
-          makeChatResponse('Erin reply\nNEXT: @zora: "I have introduced myself, please go next."'),
+          makeChatResponse('Cap reply\nNEXT: @vic: "I have introduced myself, please go next."'),
         speakFn: () => {}
       });
 
       const result = await app.execute(parseCommand("Start the discussion."));
       const sessions = await loadSessions(rootDir);
 
-      expect(result.lines).toEqual(["@erin: Erin reply"]);
+      expect(result.lines).toEqual(["@cap: Cap reply"]);
       expect(result.followUpRequest).toEqual({
-        fromAlias: "erin",
-        toAlias: "zora",
+        fromAlias: "cap",
+        toAlias: "vic",
         message: "I have introduced myself, please go next."
       });
       expect(sessions.conversation.messages).toEqual([
         {
           speaker: "user",
-          target: "erin",
+          target: "cap",
           content: "Start the discussion."
         },
         {
           speaker: "assistant",
-          endpoint: "erin",
-          content: "Erin reply"
+          endpoint: "cap",
+          content: "Cap reply"
         }
       ]);
     });
@@ -593,25 +593,25 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Zora reply"),
+        fetchFn: async () => makeChatResponse("Vic reply"),
         speakFn: () => {}
       });
 
-      const result = await app.execute(parseCommand('@erin to @zora: "Please go next."'));
+      const result = await app.execute(parseCommand('@cap to @vic: "Please go next."'));
       const sessions = await loadSessions(rootDir);
 
-      expect(result.lines).toEqual(["@zora: Zora reply"]);
+      expect(result.lines).toEqual(["@vic: Vic reply"]);
       expect(sessions.conversation.messages).toEqual([
         {
           speaker: "assistant",
-          endpoint: "erin",
-          directedTo: "zora",
+          endpoint: "cap",
+          directedTo: "vic",
           content: "Please go next."
         },
         {
           speaker: "assistant",
-          endpoint: "zora",
-          content: "Zora reply"
+          endpoint: "vic",
+          content: "Vic reply"
         }
       ]);
     });
@@ -627,18 +627,18 @@ describe("LocalCrewApp", () => {
         fetchFn: async (_input, init) => {
           seenBodies.push(JSON.parse(String(init?.body)));
           callIndex += 1;
-          return makeChatResponse(callIndex === 1 ? "Erin reply" : "Zora reply");
+          return makeChatResponse(callIndex === 1 ? "Cap reply" : "Vic reply");
         },
         speakFn: () => {}
       });
 
       await app.execute(parseCommand("/group"));
-      await app.execute(parseCommand("Hello Erin"));
-      const result = await app.execute(parseCommand("@zora What do you think of Erin?"));
+      await app.execute(parseCommand("Hello Cap"));
+      const result = await app.execute(parseCommand("@vic What do you think of Cap?"));
 
-      expect(result.lines).toEqual(["@zora: Zora reply"]);
+      expect(result.lines).toEqual(["@vic: Vic reply"]);
       expect(
-        seenBodies[1]?.messages?.some((message) => message.content.includes("@erin: Erin reply"))
+        seenBodies[1]?.messages?.some((message) => message.content.includes("@cap: Cap reply"))
       ).toBe(true);
       expect(seenBodies[1]?.messages?.[0]?.content).toContain("critical reviewer");
     });
@@ -654,8 +654,8 @@ describe("LocalCrewApp", () => {
 
       expect(beforeMode.lines[0]).toContain("Current mode: command");
       expect(inChat.lines[0]).toContain("Current mode: /chat");
-      expect(inChat.lines[0]).toContain("Plain messages go to @erin");
-      expect(inChat.lines[1]).toContain("Current participant: @erin");
+      expect(inChat.lines[0]).toContain("Plain messages go to @cap");
+      expect(inChat.lines[1]).toContain("Current participant: @cap");
       expect(inChat.lines.some((line) => line.includes("Direct message: @alias message"))).toBe(
         true
       );
@@ -670,9 +670,9 @@ describe("LocalCrewApp", () => {
 
       expect(result.editRequest).toEqual({
         kind: "instructions",
-        target: "erin",
-        prompt: "instructions[@erin]> ",
-        initialText: getDefaultInstruction("erin")
+        target: "cap",
+        prompt: "instructions[@cap]> ",
+        initialText: getDefaultInstruction("cap")
       });
     });
   });
@@ -700,11 +700,11 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("Hello Erin"));
+      await app.execute(parseCommand("Hello Cap"));
       const result = await app.execute(parseCommand("/hud"));
       const lines = await app.getHudLines("status");
 
@@ -1366,17 +1366,17 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({ rootDir, platform: "darwin" });
 
-      await app.execute(parseCommand('/instructions @zora "Reply in one sentence."'));
-      await app.execute(parseCommand("/default zora"));
+      await app.execute(parseCommand('/instructions @vic "Reply in one sentence."'));
+      await app.execute(parseCommand("/default vic"));
       await app.execute(parseCommand("/sound off"));
-      await app.execute(parseCommand("/voice @zora daniel"));
+      await app.execute(parseCommand("/voice @vic daniel"));
 
       const config = await loadConfig(rootDir);
 
-      expect(config.endpoints.zora.instructions).toBe("Reply in one sentence.");
-      expect(config.defaultEndpoint).toBe("zora");
+      expect(config.endpoints.vic.instructions).toBe("Reply in one sentence.");
+      expect(config.defaultEndpoint).toBe("vic");
       expect(config.soundEnabled).toBe(false);
-      expect(config.endpoints.zora.voicePreset).toBe("daniel");
+      expect(config.endpoints.vic.voicePreset).toBe("daniel");
     });
   });
 
@@ -1391,7 +1391,7 @@ describe("LocalCrewApp", () => {
       expect(soundResult.lines[0]).toContain("available only on macOS");
       expect(voiceResult.lines[0]).toContain("available only on macOS");
       expect(config.soundEnabled).toBe(true);
-      expect(config.endpoints.zora.voicePreset).toBe("zoe");
+      expect(config.endpoints.vic.voicePreset).toBe("zoe");
     });
   });
 
@@ -1517,13 +1517,13 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
       await app.execute(parseCommand("/chat"));
-      await app.execute(parseCommand("Hello Erin"));
-      await app.execute(parseCommand("/rename erin atlas"));
+      await app.execute(parseCommand("Hello Cap"));
+      await app.execute(parseCommand("/rename cap atlas"));
 
       const config = await loadConfig(rootDir);
       const sessions = await loadSessions(rootDir);
@@ -1532,11 +1532,11 @@ describe("LocalCrewApp", () => {
       expect(config.defaultEndpoint).toBe("atlas");
       expect(config.endpoints.atlas.instructions).toContain("facilitator");
       expect(config.endpoints.atlas.instructions).toContain("Atlas");
-      expect(config.endpoints.erin).toBeUndefined();
+      expect(config.endpoints.cap).toBeUndefined();
       expect(sessions.conversation.messages[0]).toEqual({
         speaker: "user",
         target: "atlas",
-        content: "Hello Erin"
+        content: "Hello Cap"
       });
     });
   });
@@ -1545,17 +1545,17 @@ describe("LocalCrewApp", () => {
     await withTempDir(async (rootDir) => {
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
       await app.execute(parseCommand("/chat"));
-      await app.execute(parseCommand("Hello Erin"));
+      await app.execute(parseCommand("Hello Cap"));
       await app.execute(parseCommand("/reset"));
 
       const sessions = await loadSessions(rootDir);
 
-      expect(app.getPrompt()).toBe("chat[default:@erin current:@erin]> ");
+      expect(app.getPrompt()).toBe("chat[default:@cap current:@cap]> ");
       expect(sessions.conversation.messages).toEqual([]);
       expect(getConversationCompactedUntil(sessions)).toBe(0);
       expect(getConversationSummary(sessions)).toBe("");
@@ -1573,11 +1573,11 @@ describe("LocalCrewApp", () => {
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand('/instructions @zora "Reply in one sentence."'));
-      await app.execute(parseCommand("/default zora"));
-      await app.execute(parseCommand("/model sam"));
+      await app.execute(parseCommand('/instructions @vic "Reply in one sentence."'));
+      await app.execute(parseCommand("/default vic"));
+      await app.execute(parseCommand("/model min"));
       await app.execute(parseCommand("/chat"));
-      await app.execute(parseCommand("Hello Erin"));
+      await app.execute(parseCommand("Hello Cap"));
       await app.createAgentFromWorkflow({
         name: "reviewer",
         summary: "Reviews delegation plans.",
@@ -1598,9 +1598,9 @@ describe("LocalCrewApp", () => {
 
       expect(result.lines).toEqual(["Application state cleared."]);
       expect(app.getPrompt()).toBe("crew> ");
-      expect(config.defaultEndpoint).toBe("erin");
+      expect(config.defaultEndpoint).toBe("cap");
       expect(config.soundEnabled).toBe(true);
-      expect(config.endpoints.zora.instructions).toBe(getDefaultInstruction("zora"));
+      expect(config.endpoints.vic.instructions).toBe(getDefaultInstruction("vic"));
       expect(sessions.conversation.messages).toEqual([]);
       expect(getConversationCompactedUntil(sessions)).toBe(0);
       expect(getConversationSummary(sessions)).toBe("");
@@ -1633,7 +1633,7 @@ describe("LocalCrewApp", () => {
 
       const sessions = await loadSessions(rootDir);
 
-      expect(result.lines).toEqual(["Compacted shared conversation using @erin."]);
+      expect(result.lines).toEqual(["Compacted shared conversation using @cap."]);
       expect(getConversationCompactedUntil(sessions)).toBe(4);
       expect(getConversationSummary(sessions)).toBe("Shared summary from the default model.");
     });
@@ -1644,7 +1644,7 @@ describe("LocalCrewApp", () => {
       const app = await LocalCrewApp.create({
         rootDir,
         fetchFn: async () =>
-          makeChatResponse("Hello from Erin", {
+          makeChatResponse("Hello from Cap", {
             promptEvalCount: 15,
             evalCount: 11,
             totalDuration: 200_000_000
@@ -1652,7 +1652,7 @@ describe("LocalCrewApp", () => {
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("Hello Erin"));
+      await app.execute(parseCommand("Hello Cap"));
       const summary = await loadTelemetrySummary(rootDir);
       const recent = await readRecentAuditEvents(2, rootDir);
 
@@ -1660,7 +1660,7 @@ describe("LocalCrewApp", () => {
       expect(summary.byKind["ollama.chat"]).toBe(1);
       expect(Object.keys(summary.models)).toContain("orchestrator/llama3.1:8b");
       expect(recent[0]?.kind).toBe("ollama.chat");
-      expect(recent[0]?.responseText).toBe("Hello from Erin");
+      expect(recent[0]?.responseText).toBe("Hello from Cap");
     });
   });
 
@@ -1711,7 +1711,7 @@ describe("LocalCrewApp", () => {
 
           ollamaCallCount += 1;
           return makeChatResponse(
-            ollamaCallCount === 1 ? "WIKIPEDIA: Grace Hopper" : "Grounded answer from Erin"
+            ollamaCallCount === 1 ? "WIKIPEDIA: Grace Hopper" : "Grounded answer from Cap"
           );
         },
         speakFn: () => {}
@@ -1720,7 +1720,7 @@ describe("LocalCrewApp", () => {
       const result = await app.execute(parseCommand("Tell me about Grace Hopper."));
       const summary = await loadTelemetrySummary(rootDir);
 
-      expect(result.lines).toEqual(["@erin: Grounded answer from Erin"]);
+      expect(result.lines).toEqual(["@cap: Grounded answer from Cap"]);
       expect(summary.wikipedia.calls).toBe(1);
       expect(summary.byKind["ollama.chat"]).toBe(2);
     });
@@ -1903,7 +1903,7 @@ describe("LocalCrewApp", () => {
               "print('hud')",
               "ENDWRITE",
               "QUEUE[medium][erlin]: Implement a telemetry collector API endpoint.",
-              "QUEUE[low][zorin]: Review and finalize telemetry collector implementation details with Zora."
+              "QUEUE[low][vicin]: Review and finalize telemetry collector implementation details with Vic."
             ].join("\n")
           ),
         speakFn: () => {}
@@ -2667,9 +2667,9 @@ describe("LocalCrewApp", () => {
 
       expect(invalidResult.errors).toEqual(['Unknown endpoint alias "nope".']);
       expect(validResult.lines[0]).toContain(
-        "Current participant: @erin (Erin) using @orchestrator/llama3.1:8b [policy=fixed] [profile=auto]."
+        "Current participant: @cap (Cap) using @orchestrator/llama3.1:8b [policy=fixed] [profile=auto]."
       );
-      expect(validResult.lines[0]).toContain("Plain messages still go to @erin.");
+      expect(validResult.lines[0]).toContain("Plain messages still go to @cap.");
     });
   });
 

@@ -213,8 +213,8 @@ describe("buildStyledPrompt", () => {
   test("command mode prompt contains crew", () => {
     const result = buildStyledPrompt({
       mode: "command",
-      currentEndpoint: "erin",
-      defaultEndpoint: "erin",
+      currentEndpoint: "cap",
+      defaultEndpoint: "cap",
       queueDepth: 0,
       priority: "medium",
       autoBusy: false,
@@ -227,22 +227,22 @@ describe("buildStyledPrompt", () => {
   test("chat mode prompt contains chat and endpoint", () => {
     const result = buildStyledPrompt({
       mode: "chat",
-      currentEndpoint: "erin",
-      defaultEndpoint: "erin",
+      currentEndpoint: "cap",
+      defaultEndpoint: "cap",
       queueDepth: 0,
       priority: "medium",
       autoBusy: false,
       resourceCount: 2,
     });
     expect(result).toContain("chat");
-    expect(result).toContain("erin");
+    expect(result).toContain("cap");
   });
 
   test("auto mode prompt contains queue depth", () => {
     const result = buildStyledPrompt({
       mode: "auto",
-      currentEndpoint: "erin",
-      defaultEndpoint: "erin",
+      currentEndpoint: "cap",
+      defaultEndpoint: "cap",
       queueDepth: 5,
       priority: "high",
       autoBusy: true,
@@ -255,8 +255,8 @@ describe("buildStyledPrompt", () => {
   test("agent mode prompt contains agent name", () => {
     const result = buildStyledPrompt({
       mode: "agent",
-      currentEndpoint: "erin",
-      defaultEndpoint: "erin",
+      currentEndpoint: "cap",
+      defaultEndpoint: "cap",
       currentAgent: "data-analyst",
       queueDepth: 0,
       priority: "medium",
@@ -271,8 +271,8 @@ describe("buildStyledPrompt", () => {
     setColorEnabled(false);
     const result = buildStyledPrompt({
       mode: "command",
-      currentEndpoint: "erin",
-      defaultEndpoint: "erin",
+      currentEndpoint: "cap",
+      defaultEndpoint: "cap",
       queueDepth: 0,
       priority: "medium",
       autoBusy: false,

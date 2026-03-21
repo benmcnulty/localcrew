@@ -144,7 +144,7 @@ describe("API server", () => {
 
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 
@@ -211,12 +211,12 @@ describe("API server", () => {
             );
           }
 
-          return makeChatResponse("Hello from Erin");
+          return makeChatResponse("Hello from Cap");
         },
         speakFn: () => {}
       });
 
-      await app.execute(parseCommand("Hello Erin"));
+      await app.execute(parseCommand("Hello Cap"));
       await app.execute(parseCommand("/auto"));
       await app.execute(parseCommand("Queue telemetry analysis."));
 
@@ -414,7 +414,7 @@ describe("API server", () => {
         );
         expect(models.resourceAlias).toBe("helper");
         expect(models.models.map((model: { name: string }) => model.name)).toContain("qwen2.5:0.5b");
-        expect(directChat.result.lines[0]).toBe("@helper/qwen2.5:0.5b: Hello from Erin");
+        expect(directChat.result.lines[0]).toBe("@helper/qwen2.5:0.5b: Hello from Cap");
         expect(overflowDelete.result.lines[0]).toContain("Removed resource @overflow.");
         expect(participantDelete.result.lines[0]).toContain("Removed participant @reviewer.");
         expect(dropbox.inbox.map((entry: { relativePath: string }) => entry.relativePath)).toContain("remote.md");
@@ -480,7 +480,7 @@ describe("API server", () => {
 
       const app = await LocalCrewApp.create({
         rootDir,
-        fetchFn: async () => makeChatResponse("Hello from Erin"),
+        fetchFn: async () => makeChatResponse("Hello from Cap"),
         speakFn: () => {}
       });
 

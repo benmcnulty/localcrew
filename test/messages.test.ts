@@ -71,11 +71,11 @@ describe("formatCurrentDateTime", () => {
 // ---------------------------------------------------------------------------
 
 const BASE_AGENT_OPTIONS = {
-  agentName: "Zora",
-  agentSlug: "zora",
+  agentName: "Vic",
+  agentSlug: "vic",
   preferredResource: "orchestrator",
   orchestratorName: "Captain",
-  spec: "You are Zora.",
+  spec: "You are Vic.",
   summary: "",
   recentMessages: [],
   taskPrompt: "Hello"
@@ -161,7 +161,7 @@ describe("buildQueueFillReviewMessages – temporal grounding", () => {
     const dt = "2026-03-02 (Monday) 15:42 UTC (UTC)";
     const messages = await buildQueueFillReviewMessages({
       orchestratorName: "Captain",
-      reviewerAlias: "zora",
+      reviewerAlias: "vic",
       draftTasks: "[medium] tighten routing docs",
       inventory: "1 device.",
       roadmap: "Improve.",

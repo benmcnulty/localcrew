@@ -141,18 +141,18 @@ describe("config bootstrap", () => {
       const paths = getStoragePaths(rootDir);
       const raw = await readFile(paths.configPath, "utf8");
 
-      expect(config.defaultEndpoint).toBe("erin");
+      expect(config.defaultEndpoint).toBe("cap");
       expect(config.soundEnabled).toBe(true);
       expect(new Set(Object.values(config.endpoints).map((endpoint) => endpoint.voicePreset)).size).toBe(
         4
       );
-      expect(config.endpoints.erin.voicePreset).toBe("allison");
-      expect(config.endpoints.zora.voicePreset).toBe("zoe");
-      expect(config.endpoints.sam.voicePreset).toBe("samantha");
+      expect(config.endpoints.cap.voicePreset).toBe("allison");
+      expect(config.endpoints.vic.voicePreset).toBe("zoe");
+      expect(config.endpoints.min.voicePreset).toBe("samantha");
       expect(config.endpoints.pav.voicePreset).toBe("evan");
-      expect(config.endpoints.sam.instructions).toContain("pragmatic minimalist");
+      expect(config.endpoints.min.instructions).toContain("pragmatic minimalist");
       expect(config.endpoints.pav.instructions).toContain("exploratory builder");
-      expect(JSON.parse(raw).endpoints.erin.voicePreset).toBe("allison");
+      expect(JSON.parse(raw).endpoints.cap.voicePreset).toBe("allison");
     });
   });
 
@@ -164,13 +164,13 @@ describe("config bootstrap", () => {
         paths.configPath,
         `${JSON.stringify(
           {
-            defaultEndpoint: "sam",
+            defaultEndpoint: "min",
             soundEnabled: true,
             endpoints: {
-              sam: {
+              min: {
                 baseUrl: "http://localhost:11436",
                 model: "llama3.2:1b",
-                instructions: getDefaultInstruction("sam"),
+                instructions: getDefaultInstruction("min"),
                 voicePreset: "sandy_us"
               }
             }
@@ -182,7 +182,7 @@ describe("config bootstrap", () => {
 
       const config = await loadConfig(rootDir);
 
-      expect(config.endpoints.sam.voicePreset).toBe("samantha");
+      expect(config.endpoints.min.voicePreset).toBe("samantha");
     });
   });
 
@@ -194,25 +194,25 @@ describe("config bootstrap", () => {
         paths.configPath,
         `${JSON.stringify(
           {
-            defaultEndpoint: "erin",
+            defaultEndpoint: "cap",
             soundEnabled: true,
             endpoints: {
-              erin: {
+              cap: {
                 baseUrl: "http://127.0.0.1:11434",
                 model: "llama3.1:8b",
-                instructions: getDefaultInstruction("erin"),
+                instructions: getDefaultInstruction("cap"),
                 voicePreset: "siri"
               },
-              zora: {
+              vic: {
                 baseUrl: "http://localhost:11435",
                 model: "llama3.1:latest",
-                instructions: getDefaultInstruction("zora"),
+                instructions: getDefaultInstruction("vic"),
                 voicePreset: "zoe"
               },
-              sam: {
+              min: {
                 baseUrl: "http://localhost:11436",
                 model: "llama3.2:1b",
-                instructions: getDefaultInstruction("sam"),
+                instructions: getDefaultInstruction("min"),
                 voicePreset: "samantha"
               },
               pav: {
@@ -230,9 +230,9 @@ describe("config bootstrap", () => {
 
       const config = await loadConfig(rootDir);
 
-      expect(config.endpoints.erin.voicePreset).toBe("allison");
-      expect(config.endpoints.zora.voicePreset).toBe("zoe");
-      expect(config.endpoints.sam.voicePreset).toBe("samantha");
+      expect(config.endpoints.cap.voicePreset).toBe("allison");
+      expect(config.endpoints.vic.voicePreset).toBe("zoe");
+      expect(config.endpoints.min.voicePreset).toBe("samantha");
       expect(config.endpoints.pav.voicePreset).toBe("evan");
     });
   });
@@ -558,7 +558,7 @@ describe("session store", () => {
             messages: [
               {
                 speaker: "user",
-                target: "erin",
+                target: "cap",
                 content: "hello"
               }
             ],
@@ -568,7 +568,7 @@ describe("session store", () => {
         },
         {
           compactedUntil: 1,
-          summary: "User greeted Erin."
+          summary: "User greeted Cap."
         }
       );
 
@@ -578,12 +578,12 @@ describe("session store", () => {
       expect(getConversationMessages(reloaded)).toEqual([
         {
           speaker: "user",
-          target: "erin",
+          target: "cap",
           content: "hello"
         }
       ]);
       expect(getConversationCompactedUntil(reloaded)).toBe(1);
-      expect(getConversationSummary(reloaded)).toBe("User greeted Erin.");
+      expect(getConversationSummary(reloaded)).toBe("User greeted Cap.");
     });
   });
 
@@ -597,19 +597,19 @@ describe("session store", () => {
           conversation: {
             messages: [],
             endpointStates: {
-              erin: {
+              cap: {
                 compactedUntil: 4,
-                summary: "Shared summary from @erin."
+                summary: "Shared summary from @cap."
               }
             }
           }
         })
       );
 
-      const sessions = await loadSessions(rootDir, "erin");
+      const sessions = await loadSessions(rootDir, "cap");
 
       expect(getConversationCompactedUntil(sessions)).toBe(4);
-      expect(getConversationSummary(sessions)).toBe("Shared summary from @erin.");
+      expect(getConversationSummary(sessions)).toBe("Shared summary from @cap.");
     });
   });
 
@@ -620,21 +620,21 @@ describe("session store", () => {
           messages: [
             {
               speaker: "user",
-              target: "erin",
+              target: "cap",
               content: "Hello"
             },
             {
               speaker: "assistant",
-              endpoint: "erin",
-              directedTo: "zora",
+              endpoint: "cap",
+              directedTo: "vic",
               content: "Please go next."
             }
           ],
           compactedUntil: 2,
-          summary: "@erin asked @zora for a follow-up."
+          summary: "@cap asked @vic for a follow-up."
         }
       },
-      "erin",
+      "cap",
       "atlas"
     );
 
@@ -647,11 +647,11 @@ describe("session store", () => {
       {
         speaker: "assistant",
         endpoint: "atlas",
-        directedTo: "zora",
+        directedTo: "vic",
         content: "Please go next."
       }
     ]);
-    expect(renamed.conversation.summary).toBe("@atlas asked @zora for a follow-up.");
+    expect(renamed.conversation.summary).toBe("@atlas asked @vic for a follow-up.");
   });
 
   test("treats legacy per-endpoint session files as an empty shared conversation", async () => {
@@ -662,7 +662,7 @@ describe("session store", () => {
         paths.sessionsPath,
         JSON.stringify({
           sessions: {
-            erin: {
+            cap: {
               messages: [
                 {
                   role: "user",
@@ -684,33 +684,33 @@ describe("session store", () => {
 describe("message assembly", () => {
   test("builds a shared summary, transcript, and follow-up suggestion protocol", async () => {
     const messages = await buildChatMessages({
-      alias: "erin",
+      alias: "cap",
       participants: [
-        { alias: "erin", nickname: "Erin" },
-        { alias: "zora", nickname: "Zora" },
-        { alias: "sam", nickname: "Sam" },
+        { alias: "cap", nickname: "Cap" },
+        { alias: "vic", nickname: "Vic" },
+        { alias: "min", nickname: "Min" },
         { alias: "pav", nickname: "Pav" }
       ],
       instructions: "Reply clearly.",
       summary: "The user is comparing endpoints.",
       recentMessages: [
-        { speaker: "user", target: "erin", content: "Hello Erin" },
+        { speaker: "user", target: "cap", content: "Hello Cap" },
         {
           speaker: "assistant",
-          endpoint: "erin",
-          directedTo: "zora",
+          endpoint: "cap",
+          directedTo: "vic",
           content: "Please review this."
         },
-        { speaker: "assistant", endpoint: "zora", content: "I am also here." }
+        { speaker: "assistant", endpoint: "vic", content: "I am also here." }
       ],
-      taskPrompt: "USER -> @erin: What do you think of Zora?"
+      taskPrompt: "USER -> @cap: What do you think of Vic?"
     });
 
     // Structural checks — role order and dynamic content
     expect(messages[0]).toEqual({ role: "system", content: "Reply clearly." });
     expect(messages[1]?.role).toBe("system");
-    expect(messages[1]?.content).toContain("You are @erin.");
-    expect(messages[1]?.content).toContain("Erin (@erin), Zora (@zora), Sam (@sam), Pav (@pav)");
+    expect(messages[1]?.content).toContain("You are @cap.");
+    expect(messages[1]?.content).toContain("Cap (@cap), Vic (@vic), Min (@min), Pav (@pav)");
     expect(messages[1]?.content).toContain("WIKIPEDIA:");
     expect(messages[1]?.content).toContain("REDDIT:");
     expect(messages[1]?.content).toContain("SEARCH[topic]:");
@@ -725,26 +725,26 @@ describe("message assembly", () => {
     expect(messages[3]).toEqual({
       role: "system",
       content:
-        "Recent conversation transcript:\nUSER -> @erin: Hello Erin\n\n@erin to @zora: Please review this.\n\n@zora: I am also here."
+        "Recent conversation transcript:\nUSER -> @cap: Hello Cap\n\n@cap to @vic: Please review this.\n\n@vic: I am also here."
     });
     expect(messages[4]).toEqual({
       role: "user",
-      content: "USER -> @erin: What do you think of Zora?"
+      content: "USER -> @cap: What do you think of Vic?"
     });
   });
 
   test("formats shared conversation transcripts with directed participant lines", () => {
     expect(
       formatConversationTranscript([
-        { speaker: "user", target: "erin", content: "Hello Erin" },
+        { speaker: "user", target: "cap", content: "Hello Cap" },
         {
           speaker: "assistant",
-          endpoint: "erin",
-          directedTo: "zora",
+          endpoint: "cap",
+          directedTo: "vic",
           content: "Please review this."
         }
       ])
-    ).toBe("USER -> @erin: Hello Erin\n\n@erin to @zora: Please review this.");
+    ).toBe("USER -> @cap: Hello Cap\n\n@cap to @vic: Please review this.");
   });
 
   test("builds agent chat prompts with queue delegation guidance", async () => {
@@ -846,7 +846,7 @@ describe("message assembly", () => {
 
     const reviewMessages = await buildQueueFillReviewMessages({
       orchestratorName: "Aster",
-      reviewerAlias: "zora",
+      reviewerAlias: "vic",
       draftTasks: "[medium] Tighten routing\n[low] Rewrite docs",
       inventory: "Inventory",
       roadmap: "Roadmap",
@@ -855,7 +855,7 @@ describe("message assembly", () => {
     });
     const reviewMsg = reviewMessages[0];
     expect(reviewMsg?.role).toBe("system");
-    expect(reviewMsg?.content).toContain("@zora, the secondary reviewer");
+    expect(reviewMsg?.content).toContain("@vic, the secondary reviewer");
     expect(reviewMsg?.content).toContain("VERDICT: approve");
 
     const finalizeMessages = await buildQueueFillFinalizeMessages({
