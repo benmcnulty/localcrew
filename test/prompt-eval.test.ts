@@ -107,8 +107,8 @@ describe("Component integrity", () => {
       resourceAlias: "orchestrator",
       resourceRationale: "Primary resource.",
       maxContextTokens: "32000",
-      agentName: "Zora",
-      agentSlug: "zora",
+      agentName: "Vic",
+      agentSlug: "vic",
       preferredResource: "orchestrator",
       reviewerAlias: "reviewer",
       name: "TestName",
@@ -264,8 +264,8 @@ describe("Composition correctness", () => {
     alias: "crew",
     participantList: "@a, @b",
     participantRoster: "Alice (@a), Bob (@b)",
-    agentName: "Zora",
-    agentSlug: "zora",
+    agentName: "Vic",
+    agentSlug: "vic",
     preferredResource: "orchestrator",
     reviewerAlias: "reviewer"
   };
@@ -328,7 +328,7 @@ describe("Composition correctness", () => {
       undefined,
       ROOT_DIR
     );
-    expect(result).toContain("Zora (@zora)");
+    expect(result).toContain("Vic (@vic)");
     expect(result).toContain("WIKIPEDIA:");
     expect(result).toContain("WRITE[");
     expect(result).toContain("QUEUE[");

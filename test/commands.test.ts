@@ -24,9 +24,9 @@ describe("tokenizeInput", () => {
 
 describe("parseCommand", () => {
   test("treats plain text as a general chat message", () => {
-    expect(parseCommand("Hello Erin")).toEqual({
+    expect(parseCommand("Hello Cap")).toEqual({
       type: "message",
-      text: "Hello Erin"
+      text: "Hello Cap"
     });
   });
 
