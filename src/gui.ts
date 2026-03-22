@@ -3996,9 +3996,12 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
-  // Lightweight digital rain: few columns, single fillText per column,
-  // 16fps cap. Designed to share GPU with inference workloads gracefully.
-  var MX={on:false,maxStream:4000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/16};
+  // Classic drop-style rain: each column draws ONE character per frame
+  // at its head position. The semi-transparent black overlay each frame
+  // creates the fading trail automatically. This means total fillText
+  // calls per frame = number of columns (typically 40-60), which is
+  // extremely lightweight for any GPU.
+  var MX={on:false,maxStream:4000,raf:null,drops:[],lastT:0,lastDrawT:0,frameMs:1000/20};
   var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>|;:.~^/_-';
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
@@ -4030,9 +4033,11 @@ export function getDisplayHtml(): string {
     return c;
   }
 
+  var mxCellH=20;
+  var mxCellW=14;
+
   function mxSizeCanvas(){
     if(!MX.cvs)return;
-    // Use 1x DPI — no retina scaling needed for this effect
     var w=window.innerWidth;
     var h=window.innerHeight;
     if(!w||!h)return;
@@ -4043,55 +4048,19 @@ export function getDisplayHtml(): string {
     if(MX.ctx)MX.ctx.setTransform(1,0,0,1,0,0);
   }
 
-  function mxBuildColumns(w,h){
-    // ~30 columns max — sparse, readable rain
-    var numCols=Math.max(12,Math.min(Math.floor(w/48),30));
-    MX.columns=[];
+  function mxInitDrops(w,h){
+    var numCols=Math.floor(w/mxCellW);
+    var rows=Math.floor(h/mxCellH);
+    MX.drops=[];
     for(var i=0;i<numCols;i++){
-      MX.columns.push(mxMakeCol(w,h,false));
+      // Each drop tracks: column index, current row, speed (rows per tick)
+      MX.drops.push({
+        col:i,
+        row:Math.floor(Math.random()*rows), // stagger start positions
+        speed:0.4+Math.random()*0.8 // 0.4-1.2 rows per tick
+      });
     }
   }
-
-  // Column: a short string of characters that falls as a unit.
-  // One fillText call per column per frame — the key perf win.
-  function mxMakeCol(w,h,startAbove){
-    var fs=16;
-    var lineH=20;
-    var len=Math.floor(8+Math.random()*16);
-    // Build the column string from stream characters
-    var str='';
-    for(var i=0;i<len;i++)str+=mxGetChar()+'\\n';
-    // Speed: 40..160 px/sec
-    var speed=40+Math.random()*120;
-    var alpha=0.3+Math.random()*0.7;
-    var laneCount=Math.max(6,Math.floor(w/20));
-    var x=Math.floor(Math.random()*laneCount)*20;
-    if(x>w-14)x=w-14;
-    var totalH=len*lineH;
-    var y=startAbove? -(totalH+Math.random()*h*0.4) : -(totalH*Math.random());
-    return {x:x,y:y,speed:speed,str:str,len:len,lineH:lineH,fs:fs,alpha:alpha,totalH:totalH,stepCarry:0};
-  }
-
-  function mxRespawn(col,w,h){
-    var nc=mxMakeCol(w,h,true);
-    col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.str=nc.str;col.len=nc.len;
-    col.lineH=nc.lineH;col.fs=nc.fs;col.alpha=nc.alpha;col.totalH=nc.totalH;col.stepCarry=0;
-  }
-
-  // Pre-build a vertical gradient for trail fade — reused every frame
-  var mxGrad=null;
-  function mxEnsureGrad(ctx,h){
-    if(mxGrad&&MX._gradH===h)return mxGrad;
-    mxGrad=ctx.createLinearGradient(0,0,0,h);
-    mxGrad.addColorStop(0,'rgba(0,255,65,0.08)');
-    mxGrad.addColorStop(0.7,'rgba(0,255,65,0.6)');
-    mxGrad.addColorStop(0.92,'rgba(0,255,65,1)');
-    mxGrad.addColorStop(1,'rgba(220,255,220,1)');
-    MX._gradH=h;
-    return mxGrad;
-  }
-
-  var mxFont='16px monospace';
 
   function mxFrame(ts){
     if(!MX.on){MX.raf=null;return;}
@@ -4100,67 +4069,45 @@ export function getDisplayHtml(): string {
     var w=MX.cvs.width;
     var h=MX.cvs.height;
 
-    var elapsed=MX.lastT?Math.min(ts-MX.lastT,100):16.67;
     MX.lastT=ts;
     if(MX.lastDrawT&&ts-MX.lastDrawT<MX.frameMs){
       MX.raf=requestAnimationFrame(mxFrame);
       return;
     }
     MX.lastDrawT=ts;
-    var dt=elapsed/1000;
 
-    // Fade previous frame
-    ctx.fillStyle='rgba(0,0,0,0.12)';
+    // Fade: semi-transparent black overlay creates the trail effect.
+    // This is the entire trail rendering — no per-character fade math.
+    ctx.fillStyle='rgba(0,0,0,0.15)';
     ctx.fillRect(0,0,w,h);
 
-    ctx.font=mxFont;
+    ctx.font='16px monospace';
     ctx.textBaseline='top';
 
-    var cols=MX.columns;
-    for(var ci=0;ci<cols.length;ci++){
-      var col=cols[ci];
-      col.y+=col.speed*dt;
-      col.stepCarry+=col.speed*dt;
+    var rows=Math.floor(h/mxCellH);
+    var drops=MX.drops;
 
-      if(col.y>h+10){
-        mxRespawn(col,w,h);
-        continue;
-      }
+    for(var i=0;i<drops.length;i++){
+      var d=drops[i];
+      var ch=mxGetChar();
+      var px=d.col*mxCellW;
+      var py=Math.floor(d.row)*mxCellH;
 
-      // Rotate characters as they advance a full row
-      while(col.stepCarry>=col.lineH){
-        col.stepCarry-=col.lineH;
-        // Drop oldest char, add new one at bottom
-        col.str=col.str.substring(col.str.indexOf('\\n')+1)+mxGetChar()+'\\n';
-      }
+      // Head character: bright white-green
+      ctx.fillStyle='#d8ffd8';
+      ctx.globalAlpha=1;
+      ctx.fillText(ch,px,py);
 
-      // Skip columns entirely above viewport
-      if(col.y+col.totalH<0)continue;
+      // Advance the drop
+      d.row+=d.speed;
 
-      // Draw the column — one fillText per visible character
-      // but batch into 2 draws: trail (green) + head (white)
-      ctx.globalAlpha=col.alpha;
-      ctx.fillStyle='#00ff41';
-      var lines=col.str.split('\\n');
-      var headIdx=lines.length-2; // last non-empty line
-      for(var li=0;li<lines.length;li++){
-        if(!lines[li])continue;
-        var cy=Math.round(col.y+li*col.lineH);
-        if(cy<-col.lineH||cy>h)continue;
-        if(li===headIdx){
-          ctx.globalAlpha=Math.min(col.alpha*1.3,1);
-          ctx.fillStyle='#d8ffd8';
-          ctx.fillText(lines[li],col.x,cy);
-          ctx.fillStyle='#00ff41';
-          ctx.globalAlpha=col.alpha;
-        }else{
-          // Fade: top chars dimmer
-          var fade=li/Math.max(headIdx,1);
-          ctx.globalAlpha=col.alpha*(0.1+fade*0.9);
-          ctx.fillText(lines[li],col.x,cy);
-        }
+      // Reset when off screen — random delay creates organic stagger
+      if(d.row>rows+Math.random()*20){
+        d.row=-(Math.random()*12);
+        d.speed=0.4+Math.random()*0.8;
       }
     }
+
     ctx.globalAlpha=1.0;
     MX.raf=requestAnimationFrame(mxFrame);
   }
@@ -4171,6 +4118,7 @@ export function getDisplayHtml(): string {
     MX.on=true;
     MX.overlay.classList.add('active');
     MX.lastT=0;
+    MX.lastDrawT=0;
     requestAnimationFrame(function(){
       mxSizeCanvas();
       if(MX.ctx&&MX.cvs){
@@ -4179,7 +4127,7 @@ export function getDisplayHtml(): string {
       }
       var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
       var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
-      mxBuildColumns(w,h);
+      mxInitDrops(w,h);
       MX.raf=requestAnimationFrame(mxFrame);
     });
   }
@@ -4188,7 +4136,7 @@ export function getDisplayHtml(): string {
     MX.on=false;
     MX.overlay.classList.remove('active');
     if(MX.raf){cancelAnimationFrame(MX.raf);MX.raf=null;}
-    MX.columns=[];
+    MX.drops=[];
     mxRingW=0;mxRingR=0;mxRingLen=0;
     MX.lastT=0;
     MX.lastDrawT=0;
@@ -4203,7 +4151,7 @@ export function getDisplayHtml(): string {
       mxSizeCanvas();
       var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
       var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
-      mxBuildColumns(w,h);
+      mxInitDrops(w,h);
     }
   });
 
