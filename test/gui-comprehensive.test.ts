@@ -797,11 +797,10 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("numCols");
   });
 
-  test("mxStop cancels animation frame and clears the live text stream", () => {
+  test("mxStop cancels animation frame and resets ring buffer", () => {
     expect(displayHtml).toContain("cancelAnimationFrame(MX.raf)");
     expect(displayHtml).toContain("MX.columns=[]");
-    expect(displayHtml).toContain("MX.stream=[]");
-    expect(displayHtml).toContain("MX.streamReadIdx=0");
+    expect(displayHtml).toContain("mxRingW=0;mxRingR=0;mxRingLen=0");
   });
 
   test("mxStart uses requestAnimationFrame", () => {
@@ -820,7 +819,7 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
 
   test("mxFrame caps effective draw cadence for smoother low-overhead animation", () => {
     expect(displayHtml).toContain("lastDrawT");
-    expect(displayHtml).toContain("frameMs:1000/32");
+    expect(displayHtml).toContain("frameMs:1000/24");
     expect(displayHtml).toContain("ts-MX.lastDrawT<MX.frameMs");
   });
 
@@ -830,21 +829,23 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("for(var chi=visibleStart;chi<=visibleEnd;chi++)");
   });
 
-  test("head bloom stays on whole pixels instead of subpixel blur", () => {
-    expect(displayHtml).toContain("col.x+1");
+  test("head character uses distinct bright color", () => {
+    expect(displayHtml).toContain("#d8ffd8");
     expect(displayHtml).not.toContain("col.x-0.5");
   });
 
-  test("matrix consumes a real text stream with random fallback when stream is empty", () => {
-    expect(displayHtml).toContain("streamReadIdx");
+  test("matrix uses ring buffer for stream with random fallback when empty", () => {
+    expect(displayHtml).toContain("mxRingR");
+    expect(displayHtml).toContain("mxRingW");
     expect(displayHtml).toContain("var mxPool=");
     expect(displayHtml).toContain("mxPool.charAt");
   });
 
-  test("matrix advances characters by row steps rather than random mutation", () => {
+  test("matrix advances characters via ring index rather than array mutation", () => {
     expect(displayHtml).toContain("stepCarry:0");
     expect(displayHtml).toContain("while(col.stepCarry>=col.lineH)");
-    expect(displayHtml).not.toContain("mutRate");
+    expect(displayHtml).toContain("col.head=(col.head+1)%col.len");
+    expect(displayHtml).not.toContain("chars.shift()");
   });
 
   test("matrix ignores idle state snapshots and only feeds live work events", () => {

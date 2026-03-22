@@ -3343,7 +3343,7 @@ export function getDisplayHtml(): string {
     }
 
     var pending=(data.auto&&data.auto.pendingCount)||0,completed=(data.auto&&data.auto.completedCount)||0,targetPending=(data.auto&&data.auto.desiredPendingDepth)||0;
-    el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
+    el('dqfrac').textContent=pending+' pending'+(targetPending>0?' (target '+targetPending+')':'')+' \u00b7 '+fmt(completed)+' done';
     var barPct=targetPending>0?Math.min(100,Math.round(pending/targetPending*100)):(pending>0?Math.min(100,pending*10):0);
     el('dqfill').style.width=barPct+'%';
     var pctEl=el('dqpct');if(pctEl)pctEl.textContent=barPct>0?barPct+'%':'';
@@ -3743,7 +3743,7 @@ export function getDisplayHtml(): string {
     }
 
     var pending=Number(auto.pendingCount||0),completed=Number(auto.completedCount||0),targetPending=Number(auto.desiredPendingDepth||0);
-    el('dqfrac').textContent=(targetPending>0?pending+'/'+targetPending:pending)+' pending \u00b7 '+fmt(completed)+' done';
+    el('dqfrac').textContent=pending+' pending'+(targetPending>0?' (target '+targetPending+')':'')+' \u00b7 '+fmt(completed)+' done';
     var barPct2=targetPending>0?Math.min(100,Math.round(pending/targetPending*100)):(pending>0?Math.min(100,pending*10):0);
     el('dqfill').style.width=barPct2+'%';
     var pctEl2=el('dqpct');if(pctEl2)pctEl2.textContent=barPct2>0?barPct2+'%':'';
@@ -3998,12 +3998,16 @@ export function getDisplayHtml(): string {
   // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
   // Crisp digital rain: snapped glyph grid, bounded frame cadence, and
   // visible-row rendering only so the overlay stays sharp at any DPI.
-  var MX={on:false,stream:[],streamReadIdx:0,maxStream:12000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/32};
+  var MX={on:false,maxStream:12000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/24};
   var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
   MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false,desynchronized:true}):null;
   MX.closeEl=document.getElementById('mx-close');
+
+  // Ring buffer for stream text — avoids splice/shift overhead entirely.
+  var mxRing=new Array(MX.maxStream);
+  var mxRingW=0,mxRingR=0,mxRingLen=0;
 
   function mxFeedText(t){
     if(!t||typeof t!=='string')return;
@@ -4011,23 +4015,18 @@ export function getDisplayHtml(): string {
       var c=t.charAt(i);
       if(c==='\\r')continue;
       if(c==='\\n'||c==='\\t')c=' ';
-      MX.stream.push(c);
-      if(MX.stream.length>MX.maxStream){
-        var trim=MX.stream.length-MX.maxStream;
-        MX.stream.splice(0,trim);
-        MX.streamReadIdx=Math.max(0,MX.streamReadIdx-trim);
-      }
+      mxRing[mxRingW]=c;
+      mxRingW=(mxRingW+1)%MX.maxStream;
+      if(mxRingLen<MX.maxStream)mxRingLen++;
+      else mxRingR=(mxRingR+1)%MX.maxStream; // overwrite oldest
     }
   }
 
   function mxGetChar(){
-    if(MX.streamReadIdx>=MX.stream.length)return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
-    var c=MX.stream[MX.streamReadIdx];
-    MX.streamReadIdx++;
-    if(MX.streamReadIdx>2048&&MX.streamReadIdx>=Math.floor(MX.stream.length/2)){
-      MX.stream.splice(0,MX.streamReadIdx);
-      MX.streamReadIdx=0;
-    }
+    if(mxRingLen<=0)return mxPool.charAt(Math.floor(Math.random()*mxPool.length));
+    var c=mxRing[mxRingR];
+    mxRingR=(mxRingR+1)%MX.maxStream;
+    mxRingLen--;
     return c;
   }
 
@@ -4045,7 +4044,7 @@ export function getDisplayHtml(): string {
   }
 
   function mxBuildColumns(w,h){
-    var numCols=Math.max(24,Math.min(Math.floor(w/18),140));
+    var numCols=Math.max(20,Math.min(Math.floor(w/22),100));
     MX.columns=[];
     for(var i=0;i<numCols;i++){
       MX.columns.push(mxMakeCol(w,h,false));
@@ -4054,6 +4053,7 @@ export function getDisplayHtml(): string {
 
   // Create a single column with randomized depth properties.
   // depth 0=far (small, dim, slow), 1=near (large, bright, fast)
+  // Uses a fixed-size char array with a head index (ring) to avoid shift/push overhead.
   function mxMakeCol(w,h,startAbove){
     var depth=Math.random(); // 0..1 continuous
     var d3=depth*depth*depth; // cubic curve: most columns are background
@@ -4063,8 +4063,9 @@ export function getDisplayHtml(): string {
     var lineH=Math.round(fs*1.16);
     var cellW=Math.max(10,Math.round(fs*0.64));
     var len=Math.floor(6+Math.random()*22+d3*10); // near columns are longer
-    var chars=[];
-    for(var i=0;i<len;i++)chars.push(mxGetChar());
+    var chars=new Array(len);
+    for(var i=0;i<len;i++)chars[i]=mxGetChar();
+    var head=0; // ring index: chars[head] is the oldest (top of trail)
     // Speed: 30..200 px/sec, correlated with depth
     var speed=(30+d3*170+Math.random()*40)*vScale;
     // Opacity ceiling: 0.3 (far) to 1.0 (near) — far columns still visible
@@ -4074,14 +4075,14 @@ export function getDisplayHtml(): string {
     var laneCount=Math.max(8,Math.floor(w/cellW));
     var x=Math.min(w-cellW,Math.floor(Math.random()*laneCount)*cellW);
     var y=startAbove? -(len*lineH+Math.random()*h*0.5) : -(len*lineH*Math.random());
-    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,cellW:cellW,alpha:alpha,fontStr:fontStr,stepCarry:0};
+    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,cellW:cellW,alpha:alpha,fontStr:fontStr,stepCarry:0,head:head};
   }
 
   // Respawn a column at the top with new properties
   function mxRespawn(col,w,h){
     var nc=mxMakeCol(w,h,true);
     col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.chars=nc.chars;col.len=nc.len;
-    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.cellW=nc.cellW;col.alpha=nc.alpha;col.fontStr=nc.fontStr;col.stepCarry=0;
+    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.cellW=nc.cellW;col.alpha=nc.alpha;col.fontStr=nc.fontStr;col.stepCarry=0;col.head=nc.head;
   }
 
   function mxFrame(ts){
@@ -4124,8 +4125,9 @@ export function getDisplayHtml(): string {
 
       while(col.stepCarry>=col.lineH){
         col.stepCarry-=col.lineH;
-        if(col.chars.length>0)col.chars.shift();
-        col.chars.push(mxGetChar());
+        // Ring buffer: overwrite oldest character at head, advance head
+        col.chars[col.head]=mxGetChar();
+        col.head=(col.head+1)%col.len;
       }
 
       // Set font only when it changes from previous column
@@ -4135,7 +4137,9 @@ export function getDisplayHtml(): string {
       var visibleStart=Math.max(0,Math.floor((-col.y)/col.lineH)-1);
       var visibleEnd=Math.min(col.len-1,Math.ceil((h-col.y)/col.lineH)+1);
       for(var chi=visibleStart;chi<=visibleEnd;chi++){
-        var ch=col.chars[chi];
+        // Map visual index to ring buffer position: head is oldest (top of trail)
+        var ringIdx=(col.head+chi)%col.len;
+        var ch=col.chars[ringIdx];
         if(!ch)continue;
         var cy=Math.round(col.y+chi*col.lineH);
 
@@ -4146,20 +4150,13 @@ export function getDisplayHtml(): string {
           // Head character: brightest, white-green
           ctx.globalAlpha=Math.min(col.alpha*1.2,1.0);
           ctx.fillStyle='#d8ffd8';
-          ctx.fillText(ch,col.x,cy);
-          // Subtle head bloom only for near columns, kept on whole pixels for sharpness.
-          if(col.depth>0.7){
-            ctx.globalAlpha=col.alpha*0.14;
-            ctx.fillText(ch,col.x+1,cy);
-          }
         }else{
           // Trail: phosphor green, fading toward top
-          // Smooth fade: raised floor keeps characters legible
           var charAlpha=col.alpha*(0.15+trailFrac*trailFrac*0.85);
           ctx.globalAlpha=charAlpha;
           ctx.fillStyle='#00ff41';
-          ctx.fillText(ch,col.x,cy);
         }
+        ctx.fillText(ch,col.x,cy);
       }
     }
     ctx.globalAlpha=1.0;
@@ -4193,7 +4190,7 @@ export function getDisplayHtml(): string {
     MX.overlay.classList.remove('active');
     if(MX.raf){cancelAnimationFrame(MX.raf);MX.raf=null;}
     MX.columns=[];
-    MX.stream=[];MX.streamReadIdx=0;
+    mxRingW=0;mxRingR=0;mxRingLen=0;
     MX.lastT=0;
     MX.lastDrawT=0;
     if(MX.ctx&&MX.cvs){
