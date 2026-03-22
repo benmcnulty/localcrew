@@ -5407,8 +5407,22 @@ export class LocalCrewApp {
       ...this.systemState.auto.completed.slice(-20),
     ];
 
+    // Soft cap: autonomous sources cannot push past 150% of the desired depth.
+    // This allows some agent-spawned follow-ups while preventing unbounded growth.
+    const desiredDepth = this.getDesiredPendingDepth();
+    const softCap = Math.ceil(desiredDepth * 1.5);
+
     for (const task of queuedTasks) {
       if (!task.content.trim()) {
+        continue;
+      }
+
+      // Enforce soft cap for autonomous task sources
+      if (
+        this.isAutonomousTaskSource(createdBy) &&
+        this.systemState.auto.pending.length >= softCap
+      ) {
+        notes.push(`Queue at soft cap (${this.systemState.auto.pending.length}/${desiredDepth}), skipping: ${task.content.slice(0, 80)}`);
         continue;
       }
 
