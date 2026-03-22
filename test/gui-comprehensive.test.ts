@@ -835,10 +835,10 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).not.toContain("col.x-0.5");
   });
 
-  test("matrix consumes a real text stream instead of random filler glyphs", () => {
+  test("matrix consumes a real text stream with random fallback when stream is empty", () => {
     expect(displayHtml).toContain("streamReadIdx");
-    expect(displayHtml).toContain("return ''");
-    expect(displayHtml).not.toContain("var mxPool=");
+    expect(displayHtml).toContain("var mxPool=");
+    expect(displayHtml).toContain("mxPool.charAt");
   });
 
   test("matrix advances characters by row steps rather than random mutation", () => {
