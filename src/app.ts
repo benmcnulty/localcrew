@@ -189,6 +189,7 @@ import {
 import { fetchBenLive, fetchBenLivePortFeed } from "./benlive.ts";
 import { fetchWebsite } from "./website.ts";
 import { formatCurrentDateTime, isNetworkError, titleCase } from "./utils.ts";
+import { clickableUrl } from "./terminal.ts";
 import {
   parseScriptRequests,
   staticAnalyze,
@@ -3169,8 +3170,8 @@ export class LocalCrewApp {
   private getPortStatusLines(): string[] {
     if (!this.portalSession) {
       return [
-        `Port is not connected. Open ${PORTAL_BASE_URL}/port/ in your browser and sign in.`,
-        "Click 'Connect Local Crew' to generate a device token, then run /login <token>.",
+        `Port is not connected. Open ${clickableUrl(`${PORTAL_BASE_URL}/port/`)} in your browser and sign in.`,
+        "Go to the Crew tab and click 'Connect Local Crew' to generate a device token, then run /login <token>.",
         "After that you can browse /port feed and publish with /port post or /port reply.",
       ];
     }
@@ -3178,8 +3179,8 @@ export class LocalCrewApp {
     if (this.isPortalSessionExpired()) {
       return [
         `Port session expired${this.portalSession.expiresAt ? ` at ${this.portalSession.expiresAt}` : ""}.`,
-        `Open ${PORTAL_BASE_URL}/port/ in your browser and sign in again.`,
-        "Generate a fresh device token from Port, then run /login <token>.",
+        `Open ${clickableUrl(`${PORTAL_BASE_URL}/port/`)} in your browser and sign in again.`,
+        "Go to the Crew tab and generate a fresh device token, then run /login <token>.",
       ];
     }
 
@@ -7491,8 +7492,8 @@ export class LocalCrewApp {
         if (!command.token) {
           return {
             lines: [
-              `Open ${PORTAL_BASE_URL}/port/ in your browser and sign in.`,
-              "Click 'Connect Local Crew' to generate a device token.",
+              `Open ${clickableUrl(`${PORTAL_BASE_URL}/port/`)} in your browser and sign in.`,
+              "Go to the Crew tab and click 'Connect Local Crew' to generate a device token.",
               "Then run: /login <token>",
               ...(existingSession
                 ? [
