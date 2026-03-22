@@ -3996,16 +3996,16 @@ export function getDisplayHtml(): string {
   }
 
   // ── Matrix Mode Engine (Canvas 2D) ─────────────────────────────
-  // Crisp digital rain: snapped glyph grid, bounded frame cadence, and
-  // visible-row rendering only so the overlay stays sharp at any DPI.
-  var MX={on:false,maxStream:12000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/24};
-  var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>{}[]|;:.,~^()/_-';
+  // Lightweight digital rain: few columns, single fillText per column,
+  // 16fps cap. Designed to share GPU with inference workloads gracefully.
+  var MX={on:false,maxStream:4000,raf:null,columns:[],lastT:0,lastDrawT:0,frameMs:1000/16};
+  var mxPool='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>|;:.~^/_-';
   MX.overlay=document.getElementById('matrix-overlay');
   MX.cvs=document.getElementById('matrix-canvas');
-  MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false,desynchronized:true}):null;
+  MX.ctx=MX.cvs?MX.cvs.getContext('2d',{alpha:false}):null;
   MX.closeEl=document.getElementById('mx-close');
 
-  // Ring buffer for stream text — avoids splice/shift overhead entirely.
+  // Ring buffer for stream text
   var mxRing=new Array(MX.maxStream);
   var mxRingW=0,mxRingR=0,mxRingLen=0;
 
@@ -4018,7 +4018,7 @@ export function getDisplayHtml(): string {
       mxRing[mxRingW]=c;
       mxRingW=(mxRingW+1)%MX.maxStream;
       if(mxRingLen<MX.maxStream)mxRingLen++;
-      else mxRingR=(mxRingR+1)%MX.maxStream; // overwrite oldest
+      else mxRingR=(mxRingR+1)%MX.maxStream;
     }
   }
 
@@ -4032,65 +4032,73 @@ export function getDisplayHtml(): string {
 
   function mxSizeCanvas(){
     if(!MX.cvs)return;
-    var dpr=Math.min(window.devicePixelRatio||1,2);
+    // Use 1x DPI — no retina scaling needed for this effect
     var w=window.innerWidth;
     var h=window.innerHeight;
     if(!w||!h)return;
     MX.cvs.style.width=w+'px';
     MX.cvs.style.height=h+'px';
-    MX.cvs.width=w*dpr;
-    MX.cvs.height=h*dpr;
-    if(MX.ctx)MX.ctx.setTransform(dpr,0,0,dpr,0,0);
+    MX.cvs.width=w;
+    MX.cvs.height=h;
+    if(MX.ctx)MX.ctx.setTransform(1,0,0,1,0,0);
   }
 
   function mxBuildColumns(w,h){
-    var numCols=Math.max(20,Math.min(Math.floor(w/22),100));
+    // ~30 columns max — sparse, readable rain
+    var numCols=Math.max(12,Math.min(Math.floor(w/48),30));
     MX.columns=[];
     for(var i=0;i<numCols;i++){
       MX.columns.push(mxMakeCol(w,h,false));
     }
   }
 
-  // Create a single column with randomized depth properties.
-  // depth 0=far (small, dim, slow), 1=near (large, bright, fast)
-  // Uses a fixed-size char array with a head index (ring) to avoid shift/push overhead.
+  // Column: a short string of characters that falls as a unit.
+  // One fillText call per column per frame — the key perf win.
   function mxMakeCol(w,h,startAbove){
-    var depth=Math.random(); // 0..1 continuous
-    var d3=depth*depth*depth; // cubic curve: most columns are background
-    // Font sizes stay on a small set of snapped values for sharper glyph rasterization.
-    var vScale=w>=5120?2.0:w>=3840?1.7:w>=1920?1.3:w>=1280?1.1:1.0;
-    var fs=Math.round((14+d3*12)*vScale/2)*2;
-    var lineH=Math.round(fs*1.16);
-    var cellW=Math.max(10,Math.round(fs*0.64));
-    var len=Math.floor(6+Math.random()*22+d3*10); // near columns are longer
-    var chars=new Array(len);
-    for(var i=0;i<len;i++)chars[i]=mxGetChar();
-    var head=0; // ring index: chars[head] is the oldest (top of trail)
-    // Speed: 30..200 px/sec, correlated with depth
-    var speed=(30+d3*170+Math.random()*40)*vScale;
-    // Opacity ceiling: 0.3 (far) to 1.0 (near) — far columns still visible
-    var alpha=0.3+d3*0.7;
-    // Cache font string to avoid rebuilding each frame
-    var fontStr=fs+'px "SFMono-Regular","SF Mono","Menlo","Consolas","Liberation Mono",ui-monospace,monospace';
-    var laneCount=Math.max(8,Math.floor(w/cellW));
-    var x=Math.min(w-cellW,Math.floor(Math.random()*laneCount)*cellW);
-    var y=startAbove? -(len*lineH+Math.random()*h*0.5) : -(len*lineH*Math.random());
-    return {x:x,y:y,speed:speed,chars:chars,len:len,depth:depth,fs:fs,lineH:lineH,cellW:cellW,alpha:alpha,fontStr:fontStr,stepCarry:0,head:head};
+    var fs=16;
+    var lineH=20;
+    var len=Math.floor(8+Math.random()*16);
+    // Build the column string from stream characters
+    var str='';
+    for(var i=0;i<len;i++)str+=mxGetChar()+'\\n';
+    // Speed: 40..160 px/sec
+    var speed=40+Math.random()*120;
+    var alpha=0.3+Math.random()*0.7;
+    var laneCount=Math.max(6,Math.floor(w/20));
+    var x=Math.floor(Math.random()*laneCount)*20;
+    if(x>w-14)x=w-14;
+    var totalH=len*lineH;
+    var y=startAbove? -(totalH+Math.random()*h*0.4) : -(totalH*Math.random());
+    return {x:x,y:y,speed:speed,str:str,len:len,lineH:lineH,fs:fs,alpha:alpha,totalH:totalH,stepCarry:0};
   }
 
-  // Respawn a column at the top with new properties
   function mxRespawn(col,w,h){
     var nc=mxMakeCol(w,h,true);
-    col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.chars=nc.chars;col.len=nc.len;
-    col.depth=nc.depth;col.fs=nc.fs;col.lineH=nc.lineH;col.cellW=nc.cellW;col.alpha=nc.alpha;col.fontStr=nc.fontStr;col.stepCarry=0;col.head=nc.head;
+    col.x=nc.x;col.y=nc.y;col.speed=nc.speed;col.str=nc.str;col.len=nc.len;
+    col.lineH=nc.lineH;col.fs=nc.fs;col.alpha=nc.alpha;col.totalH=nc.totalH;col.stepCarry=0;
   }
+
+  // Pre-build a vertical gradient for trail fade — reused every frame
+  var mxGrad=null;
+  function mxEnsureGrad(ctx,h){
+    if(mxGrad&&MX._gradH===h)return mxGrad;
+    mxGrad=ctx.createLinearGradient(0,0,0,h);
+    mxGrad.addColorStop(0,'rgba(0,255,65,0.08)');
+    mxGrad.addColorStop(0.7,'rgba(0,255,65,0.6)');
+    mxGrad.addColorStop(0.92,'rgba(0,255,65,1)');
+    mxGrad.addColorStop(1,'rgba(220,255,220,1)');
+    MX._gradH=h;
+    return mxGrad;
+  }
+
+  var mxFont='16px monospace';
 
   function mxFrame(ts){
     if(!MX.on){MX.raf=null;return;}
     var ctx=MX.ctx;
     if(!ctx||!MX.cvs){MX.raf=null;return;}
-    var w=MX.cvs.clientWidth||window.innerWidth;
-    var h=MX.cvs.clientHeight||window.innerHeight;
+    var w=MX.cvs.width;
+    var h=MX.cvs.height;
 
     var elapsed=MX.lastT?Math.min(ts-MX.lastT,100):16.67;
     MX.lastT=ts;
@@ -4099,64 +4107,58 @@ export function getDisplayHtml(): string {
       return;
     }
     MX.lastDrawT=ts;
-    // Delta time (capped at 100ms to avoid jumps on tab-switch)
     var dt=elapsed/1000;
 
-    // Fade previous frame — keep phosphor trails crisp instead of muddy.
-    ctx.fillStyle='rgba(0,0,0,0.18)';
+    // Fade previous frame
+    ctx.fillStyle='rgba(0,0,0,0.12)';
     ctx.fillRect(0,0,w,h);
 
+    ctx.font=mxFont;
     ctx.textBaseline='top';
-    ctx.imageSmoothingEnabled=false;
 
     var cols=MX.columns;
-    var lastFont='';
     for(var ci=0;ci<cols.length;ci++){
       var col=cols[ci];
-      // Move by delta time
       col.y+=col.speed*dt;
       col.stepCarry+=col.speed*dt;
 
-      // Respawn if fully past viewport
       if(col.y>h+10){
         mxRespawn(col,w,h);
         continue;
       }
 
+      // Rotate characters as they advance a full row
       while(col.stepCarry>=col.lineH){
         col.stepCarry-=col.lineH;
-        // Ring buffer: overwrite oldest character at head, advance head
-        col.chars[col.head]=mxGetChar();
-        col.head=(col.head+1)%col.len;
+        // Drop oldest char, add new one at bottom
+        col.str=col.str.substring(col.str.indexOf('\\n')+1)+mxGetChar()+'\\n';
       }
 
-      // Set font only when it changes from previous column
-      if(col.fontStr!==lastFont){ctx.font=col.fontStr;lastFont=col.fontStr;}
+      // Skip columns entirely above viewport
+      if(col.y+col.totalH<0)continue;
 
-      // Draw only visible rows to reduce overdraw on large displays.
-      var visibleStart=Math.max(0,Math.floor((-col.y)/col.lineH)-1);
-      var visibleEnd=Math.min(col.len-1,Math.ceil((h-col.y)/col.lineH)+1);
-      for(var chi=visibleStart;chi<=visibleEnd;chi++){
-        // Map visual index to ring buffer position: head is oldest (top of trail)
-        var ringIdx=(col.head+chi)%col.len;
-        var ch=col.chars[ringIdx];
-        if(!ch)continue;
-        var cy=Math.round(col.y+chi*col.lineH);
-
-        var trailFrac=chi/(col.len-1||1); // 0=top, 1=head
-        var isHead=chi===col.len-1;
-
-        if(isHead){
-          // Head character: brightest, white-green
-          ctx.globalAlpha=Math.min(col.alpha*1.2,1.0);
+      // Draw the column — one fillText per visible character
+      // but batch into 2 draws: trail (green) + head (white)
+      ctx.globalAlpha=col.alpha;
+      ctx.fillStyle='#00ff41';
+      var lines=col.str.split('\\n');
+      var headIdx=lines.length-2; // last non-empty line
+      for(var li=0;li<lines.length;li++){
+        if(!lines[li])continue;
+        var cy=Math.round(col.y+li*col.lineH);
+        if(cy<-col.lineH||cy>h)continue;
+        if(li===headIdx){
+          ctx.globalAlpha=Math.min(col.alpha*1.3,1);
           ctx.fillStyle='#d8ffd8';
-        }else{
-          // Trail: phosphor green, fading toward top
-          var charAlpha=col.alpha*(0.15+trailFrac*trailFrac*0.85);
-          ctx.globalAlpha=charAlpha;
+          ctx.fillText(lines[li],col.x,cy);
           ctx.fillStyle='#00ff41';
+          ctx.globalAlpha=col.alpha;
+        }else{
+          // Fade: top chars dimmer
+          var fade=li/Math.max(headIdx,1);
+          ctx.globalAlpha=col.alpha*(0.1+fade*0.9);
+          ctx.fillText(lines[li],col.x,cy);
         }
-        ctx.fillText(ch,col.x,cy);
       }
     }
     ctx.globalAlpha=1.0;
@@ -4172,11 +4174,8 @@ export function getDisplayHtml(): string {
     requestAnimationFrame(function(){
       mxSizeCanvas();
       if(MX.ctx&&MX.cvs){
-        // Clear to solid black
-        MX.ctx.setTransform(1,0,0,1,0,0);
         MX.ctx.fillStyle='#000';
         MX.ctx.fillRect(0,0,MX.cvs.width,MX.cvs.height);
-        MX.ctx.setTransform(Math.min(window.devicePixelRatio||1,2),0,0,Math.min(window.devicePixelRatio||1,2),0,0);
       }
       var w=MX.cvs?MX.cvs.clientWidth:window.innerWidth;
       var h=MX.cvs?MX.cvs.clientHeight:window.innerHeight;
