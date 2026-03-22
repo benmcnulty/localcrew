@@ -407,10 +407,8 @@ describe("Display CSS: 5K breakpoint values", () => {
     );
   });
 
-  test("5K has scaled Matrix depth sizes", () => {
-    // Canvas renderer scales depth sizes dynamically via mxSizeCanvas
+  test("5K has mxSizeCanvas for canvas resizing", () => {
     expect(displayHtml).toContain("mxSizeCanvas");
-    expect(displayHtml).toContain("w>=5120?2.0");
   });
 
   test("5K has scaled Daily content", () => {
@@ -812,26 +810,22 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("ctx.fillRect");
   });
 
-  test("mxSizeCanvas handles device pixel ratio", () => {
-    expect(displayHtml).toContain("devicePixelRatio");
-    expect(displayHtml).toContain("setTransform");
+  test("mxSizeCanvas uses 1x DPI for performance", () => {
+    expect(displayHtml).toContain("setTransform(1,0,0,1,0,0)");
   });
 
-  test("mxFrame caps effective draw cadence for smoother low-overhead animation", () => {
+  test("mxFrame caps draw cadence at 16fps for GPU efficiency", () => {
     expect(displayHtml).toContain("lastDrawT");
-    expect(displayHtml).toContain("frameMs:1000/24");
+    expect(displayHtml).toContain("frameMs:1000/16");
     expect(displayHtml).toContain("ts-MX.lastDrawT<MX.frameMs");
   });
 
-  test("mxFrame renders only visible rows for each column", () => {
-    expect(displayHtml).toContain("visibleStart");
-    expect(displayHtml).toContain("visibleEnd");
-    expect(displayHtml).toContain("for(var chi=visibleStart;chi<=visibleEnd;chi++)");
+  test("mxFrame skips columns above viewport", () => {
+    expect(displayHtml).toContain("col.y+col.totalH<0");
   });
 
   test("head character uses distinct bright color", () => {
     expect(displayHtml).toContain("#d8ffd8");
-    expect(displayHtml).not.toContain("col.x-0.5");
   });
 
   test("matrix uses ring buffer for stream with random fallback when empty", () => {
@@ -841,11 +835,10 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("mxPool.charAt");
   });
 
-  test("matrix advances characters via ring index rather than array mutation", () => {
+  test("matrix advances characters via string rotation", () => {
     expect(displayHtml).toContain("stepCarry:0");
     expect(displayHtml).toContain("while(col.stepCarry>=col.lineH)");
-    expect(displayHtml).toContain("col.head=(col.head+1)%col.len");
-    expect(displayHtml).not.toContain("chars.shift()");
+    expect(displayHtml).toContain("mxGetChar()");
   });
 
   test("matrix ignores idle state snapshots and only feeds live work events", () => {
