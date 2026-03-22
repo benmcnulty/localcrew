@@ -25,6 +25,7 @@ import { getEnvNumber } from "./env.ts";
 import {
   PORTAL_BASE_URL,
   fetchPortLogs,
+  acknowledgeRemoteTask,
   fetchPublicFeed,
   loadPortalSession,
   publishPortLog,
@@ -32,7 +33,7 @@ import {
   validateDeviceToken,
   pushSnapshot,
 } from "./portal.ts";
-import type { PortFeedResult, PortalSession, PortalSnapshot, PortLogEntry } from "./portal.ts";
+import type { PortFeedResult, PortalSession, PortalSnapshot, PortLogEntry, RemoteTask } from "./portal.ts";
 import {
   appendChangelogEntry,
   createAgent,
@@ -1046,6 +1047,12 @@ export class LocalCrewApp {
   private static readonly QUEUE_FILL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — queue fill prompts are large
   /** Timestamp of the last failed queue fill attempt (used for cooldown). */
   private lastFillFailedAt = 0;
+  /** Timestamp of the last portal snapshot push. */
+  private lastPortalPushAt = 0;
+  /** Interval between portal snapshot pushes (30 seconds). */
+  private static readonly PORTAL_PUSH_INTERVAL_MS = 30 * 1000;
+  /** Set of remote task IDs already ingested — prevents duplicate queuing. */
+  private readonly ingestedRemoteTaskIds = new Set<string>();
   /** Consecutive idle cycles with no work — used for pulse backoff. */
   private consecutiveIdleCycles = 0;
   /** Script sandbox session tracker for rate-limiting rejected purpose-slugs. */
@@ -2050,6 +2057,65 @@ export class LocalCrewApp {
       tps: this.getSystemTps(),
       dailySession,
     };
+  }
+
+  /**
+   * Push a snapshot to the portal and ingest any pending remote tasks.
+   * Called periodically from runIdleCycle when a portal session is active.
+   * Returns lines describing any ingested remote tasks.
+   */
+  async syncWithPortal(): Promise<string[]> {
+    if (!this.portalSession || this.isPortalSessionExpired()) return [];
+    if (Date.now() - this.lastPortalPushAt < LocalCrewApp.PORTAL_PUSH_INTERVAL_MS) return [];
+
+    const lines: string[] = [];
+    try {
+      const result = await pushSnapshot(
+        this.portalSession,
+        this.buildPortalSnapshot(),
+        this.fetchFn ?? fetch
+      );
+      this.lastPortalPushAt = Date.now();
+
+      // Ingest any pending remote tasks submitted via the portal web UI.
+      if (result.pendingTasks && result.pendingTasks.length > 0) {
+        for (const remoteTask of result.pendingTasks) {
+          if (this.ingestedRemoteTaskIds.has(remoteTask.taskId)) continue;
+
+          // Acknowledge receipt so the portal UI updates the task status.
+          try {
+            await acknowledgeRemoteTask(
+              this.portalSession,
+              remoteTask.taskId,
+              this.fetchFn ?? fetch
+            );
+          } catch {
+            // If ack fails, skip this task — we'll retry next cycle.
+            continue;
+          }
+
+          this.ingestedRemoteTaskIds.add(remoteTask.taskId);
+
+          // Queue the task locally.
+          const priority = ["high", "medium", "low"].includes(remoteTask.priority)
+            ? remoteTask.priority as "high" | "medium" | "low"
+            : "medium";
+          const queued = await this.queueParsedTasks(
+            [{ priority, content: remoteTask.content, requestedResource: undefined }],
+            `portal:${remoteTask.taskId}`
+          );
+          if (queued.tasks.length > 0) {
+            lines.push(
+              `Ingested remote task from portal: #${queued.tasks[0].id} [${priority}] ${remoteTask.content.slice(0, 80)}`
+            );
+          }
+        }
+      }
+    } catch {
+      // Portal sync is best-effort — never block the pulse cycle.
+    }
+
+    return lines;
   }
 
   private speechUnavailableLine(): string {
@@ -7081,6 +7147,9 @@ export class LocalCrewApp {
       }
     }
 
+    // Portal sync — push snapshot and ingest remote tasks.
+    const portalLines = await this.syncWithPortal();
+
     try {
       return await this.runAutoCycleLocked(async () => {
         // Front-load daily work generation when the document is stale or missing.
@@ -7163,12 +7232,12 @@ export class LocalCrewApp {
         }
 
         // Nothing happened — no tasks processed and no top-up occurred.
-        if (processedLines.length === 0 && topUpLines.length === 0) {
+        if (processedLines.length === 0 && topUpLines.length === 0 && portalLines.length === 0) {
           return { lines: [], errors: processedErrors, shouldExit: false };
         }
 
         return {
-          lines: [...topUpLines, ...processedLines],
+          lines: [...portalLines, ...topUpLines, ...processedLines],
           errors: processedErrors,
           shouldExit: false
         };
