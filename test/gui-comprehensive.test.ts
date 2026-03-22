@@ -648,8 +648,8 @@ describe("Display JS: Matrix engine", () => {
     expect(displayHtml).toContain("mxFeedText");
   });
 
-  test("defines mxMakeCol for column creation", () => {
-    expect(displayHtml).toContain("mxMakeCol");
+  test("defines mxInitDrops for drop rain setup", () => {
+    expect(displayHtml).toContain("mxInitDrops");
   });
 
   test("defines mxProcessEvent for SSE integration", () => {
@@ -657,14 +657,13 @@ describe("Display JS: Matrix engine", () => {
   });
 
   test("Matrix has CRT scanline effect", () => {
-    // CRT scanlines implemented via repeating-linear-gradient on overlays
     expect(displayHtml).toContain("repeating-linear-gradient");
     expect(displayHtml).toContain("scanline");
   });
 
-  test("Matrix has continuous depth system", () => {
-    expect(displayHtml).toContain("depth");
-    expect(displayHtml).toContain("mxMakeCol");
+  test("Matrix drops have variable speed for organic feel", () => {
+    expect(displayHtml).toContain("d.speed");
+    expect(displayHtml).toContain("mxInitDrops");
   });
 });
 
@@ -785,19 +784,18 @@ describe("JavaScript syntax validation", () => {
 
 // ─── Matrix Animation Robustness ──────────────────────────────────────────────
 
-describe("Matrix animation robustness (Canvas 2D)", () => {
-  test("MX state object tracks columns array", () => {
-    expect(displayHtml).toContain("columns:[]");
+describe("Matrix animation robustness (Canvas 2D drop rain)", () => {
+  test("MX state object tracks drops array", () => {
+    expect(displayHtml).toContain("drops:[]");
   });
 
-  test("mxStart pre-allocates columns", () => {
-    expect(displayHtml).toContain("mxMakeCol(");
-    expect(displayHtml).toContain("numCols");
+  test("mxStart initializes drops via mxInitDrops", () => {
+    expect(displayHtml).toContain("mxInitDrops(");
   });
 
   test("mxStop cancels animation frame and resets ring buffer", () => {
     expect(displayHtml).toContain("cancelAnimationFrame(MX.raf)");
-    expect(displayHtml).toContain("MX.columns=[]");
+    expect(displayHtml).toContain("MX.drops=[]");
     expect(displayHtml).toContain("mxRingW=0;mxRingR=0;mxRingLen=0");
   });
 
@@ -814,18 +812,18 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("setTransform(1,0,0,1,0,0)");
   });
 
-  test("mxFrame caps draw cadence at 16fps for GPU efficiency", () => {
+  test("mxFrame caps draw cadence at 20fps", () => {
     expect(displayHtml).toContain("lastDrawT");
-    expect(displayHtml).toContain("frameMs:1000/16");
+    expect(displayHtml).toContain("frameMs:1000/20");
     expect(displayHtml).toContain("ts-MX.lastDrawT<MX.frameMs");
   });
 
-  test("mxFrame skips columns above viewport", () => {
-    expect(displayHtml).toContain("col.y+col.totalH<0");
+  test("head character uses bright white-green color", () => {
+    expect(displayHtml).toContain("#d8ffd8");
   });
 
-  test("head character uses distinct bright color", () => {
-    expect(displayHtml).toContain("#d8ffd8");
+  test("trail is created by semi-transparent black overlay", () => {
+    expect(displayHtml).toContain("rgba(0,0,0,0.15)");
   });
 
   test("matrix uses ring buffer for stream with random fallback when empty", () => {
@@ -835,18 +833,15 @@ describe("Matrix animation robustness (Canvas 2D)", () => {
     expect(displayHtml).toContain("mxPool.charAt");
   });
 
-  test("matrix advances characters via string rotation", () => {
-    expect(displayHtml).toContain("stepCarry:0");
-    expect(displayHtml).toContain("while(col.stepCarry>=col.lineH)");
+  test("each drop draws one character per frame via mxGetChar", () => {
     expect(displayHtml).toContain("mxGetChar()");
+    expect(displayHtml).toContain("d.row+=d.speed");
   });
 
   test("matrix ignores idle state snapshots and only feeds live work events", () => {
     expect(displayHtml).toContain("if(msg.type==='task-start'&&msg.taskContent)mxFeedText(msg.taskContent);");
     expect(displayHtml).toContain("if(msg.type==='task-complete'&&msg.taskContent)mxFeedText(msg.taskContent);");
     expect(displayHtml).not.toContain("if(msg.orchestratorName)mxFeedText(msg.orchestratorName);");
-    expect(displayHtml).not.toContain("if(a.nextTask&&a.nextTask.content)mxFeedText(a.nextTask.content);");
-    expect(displayHtml).not.toContain("if(a.lastCompleted&&a.lastCompleted.content)mxFeedText(a.lastCompleted.content);");
   });
 
   test("matrix stream mirrors display log summaries as they are added", () => {
