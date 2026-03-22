@@ -178,11 +178,27 @@ export async function validateDeviceToken(
   };
 }
 
+export interface RemoteTask {
+  taskId: string;
+  orchestratorId: string;
+  content: string;
+  priority: string;
+  status: string;
+  submittedBy: string;
+  submittedAt: number;
+}
+
+export interface SnapshotPushResult {
+  accepted: boolean;
+  heartbeat: number;
+  pendingTasks: RemoteTask[];
+}
+
 export async function pushSnapshot(
   session: PortalSession,
   snapshot: PortalSnapshot,
   fetchFn: FetchFn
-): Promise<void> {
+): Promise<SnapshotPushResult> {
   const url = `${PORTAL_BASE_URL}/api/crew/snapshot`;
   const response = await fetchFn(url, {
     method: "POST",
@@ -196,6 +212,52 @@ export async function pushSnapshot(
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`Portal snapshot push failed (${response.status}): ${text}`);
+  }
+
+  const data = await response.json() as SnapshotPushResult;
+  return data;
+}
+
+export async function acknowledgeRemoteTask(
+  session: PortalSession,
+  taskId: string,
+  fetchFn: FetchFn
+): Promise<void> {
+  const url = `${PORTAL_BASE_URL}/api/crew/task-ack`;
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${session.sessionToken}`,
+    },
+    body: JSON.stringify({ taskId }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Portal task-ack failed (${response.status}): ${text}`);
+  }
+}
+
+export async function completeRemoteTask(
+  session: PortalSession,
+  taskId: string,
+  summary: string,
+  fetchFn: FetchFn
+): Promise<void> {
+  const url = `${PORTAL_BASE_URL}/api/crew/task-complete`;
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${session.sessionToken}`,
+    },
+    body: JSON.stringify({ taskId, summary }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Portal task-complete failed (${response.status}): ${text}`);
   }
 }
 
