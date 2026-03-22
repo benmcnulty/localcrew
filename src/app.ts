@@ -1043,7 +1043,7 @@ export class LocalCrewApp {
   /** Interval between background health polls (5 minutes). */
   private static readonly HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
   /** Cooldown (ms) after a queue fill failure before retrying — prevents fill-fail loops. */
-  private static readonly FILL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly FILL_COOLDOWN_MS = 60 * 1000; // 60 seconds
   private static readonly QUEUE_FILL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — queue fill prompts are large
   /** Timestamp of the last failed queue fill attempt (used for cooldown). */
   private lastFillFailedAt = 0;
@@ -1728,7 +1728,7 @@ export class LocalCrewApp {
    */
   getEffectivePulseIntervalMs(): number {
     const base = this.getAutoPulseIntervalMs();
-    const MAX_MULTIPLIER = 7;
+    const MAX_MULTIPLIER = 3;
     const multiplier = Math.min(
       MAX_MULTIPLIER,
       Math.pow(2, Math.floor(this.consecutiveIdleCycles / 3))
@@ -7097,6 +7097,20 @@ export class LocalCrewApp {
         durationMs: completedTask.durationMs ?? 0,
         tokenCount: modelEvalCount
       });
+
+      // Notify the portal when a remotely submitted task completes.
+      if (completedTask.createdBy?.startsWith("portal:") && this.portalSession) {
+        const remoteTaskId = completedTask.createdBy.slice("portal:".length);
+        const summary = verification.passed
+          ? (replyText || "").slice(0, 500)
+          : `Task failed: ${verification.reason}`;
+        try {
+          const { completeRemoteTask } = await import("./portal.ts");
+          await completeRemoteTask(this.portalSession, remoteTaskId, summary, this.fetchFn ?? fetch);
+        } catch {
+          // Best-effort — portal status will be stale but local processing continues.
+        }
+      }
 
       return {
         lines: [
