@@ -44,7 +44,7 @@ Local Crew is designed to get better the more you use it. The system generates a
 
 ### Prerequisites
 
-- **Node.js** 22.18.0+ and **npm**. `npm start` executes TypeScript directly using Node's built-in type stripping; Node 20 and older Node 22 releases do not support this command without additional tooling. See [Node's TypeScript documentation](https://nodejs.org/api/typescript.html).
+- **Node.js** 22.18.0 or newer within the 22.x line, or Node 24+, and **npm** (`^22.18.0 || >=24.0.0`). `npm start` executes TypeScript directly using Node's built-in type stripping. Node 20, older Node 22 releases, and Node 23 are outside the declared support range. See [Node's TypeScript documentation](https://nodejs.org/api/typescript.html).
 - **Ollama** (recommended) — install from [ollama.com](https://ollama.com). Or any OpenAI-compatible / Anthropic endpoint.
 - **Bun** (required for the test suite and `npm run validate`; optional for running the app) - install from [bun.sh](https://bun.sh)
 

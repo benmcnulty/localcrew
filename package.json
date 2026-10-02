@@ -21,7 +21,7 @@
     "repl"
   ],
   "engines": {
-    "node": ">=22.18.0"
+    "node": "^22.18.0 || >=24.0.0"
   },
   "scripts": {
     "setup:crew": "node scripts/setup-orchestrator.js",
