@@ -1,5 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import { compactConversation } from "./compact.ts";
 import {
@@ -5166,7 +5166,7 @@ export class LocalCrewApp {
     const safeRelativePath = ensureSafeGeneratedRelativePath(filename);
     const targetPath = resolve(join(paths.orchestratorGeneratedDir, safeRelativePath));
     const allowedRoot = resolve(paths.orchestratorGeneratedDir);
-    if (!targetPath.startsWith(`${allowedRoot}/`) && targetPath !== allowedRoot) {
+    if (!targetPath.startsWith(`${allowedRoot}${sep}`) && targetPath !== allowedRoot) {
       throw new Error("Internal write path must stay inside the orchestrator generated directory.");
     }
 
@@ -5186,7 +5186,7 @@ export class LocalCrewApp {
     const safeRelativePath = ensureSafeGeneratedRelativePath(filename);
     const targetRoot = resolve(stage === "active" ? paths.activeDir : paths.outboxDir);
     const targetPath = resolve(join(targetRoot, safeRelativePath));
-    if (!targetPath.startsWith(`${targetRoot}/`) && targetPath !== targetRoot) {
+    if (!targetPath.startsWith(`${targetRoot}${sep}`) && targetPath !== targetRoot) {
       throw new Error("Dropbox write path must stay inside the requested stage.");
     }
     return {
@@ -5651,7 +5651,7 @@ export class LocalCrewApp {
                 const safeRelativePath = ensureSafeGeneratedRelativePath(safeFilename);
                 const targetPath = resolve(join(paths.orchestratorGeneratedDir, safeRelativePath));
                 const allowedRoot = resolve(paths.orchestratorGeneratedDir);
-                if (!targetPath.startsWith(`${allowedRoot}/`) && targetPath !== allowedRoot) {
+                if (!targetPath.startsWith(`${allowedRoot}${sep}`) && targetPath !== allowedRoot) {
                   throw new Error("Internal write path must stay inside the orchestrator generated directory.");
                 }
                 return {

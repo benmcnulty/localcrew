@@ -2,9 +2,11 @@
 
 **A local-first orchestration harness for multi-device AI inference networks.**
 
+**Status:** experimental application, version 0.1.0. This repository contains the CLI, HTTP API, browser UI, and tests; it is not a claim of production certification. Use it to inspect and coordinate a trusted set of inference endpoints, starting with interactive commands before enabling autonomous work.
+
 Local Crew turns every machine on your network into a coordinated inference node — your laptop, a desktop GPU rig, a spare mini PC, a cloud endpoint. You name each device, assign it a tier, and the orchestrator handles routing, delegation, quality verification, and memory. No cloud accounts required. No API keys unless you want them. Your models, your hardware, your data.
 
-The system provides a dynamic and secure foundation for AI experimental building through agentic orchestration of local resources. It abstracts physical hardware behind **virtual agent identities** — named participants with their own instructions, model preferences, and voice — while a **resource delegation** layer routes work to the best available device based on capability, availability, and memory headroom.
+The system abstracts physical hardware behind **virtual agent identities** - named participants with their own instructions, model preferences, and voice - while a **resource delegation** layer routes work by capability, availability, and memory headroom. Agent instructions, routing decisions, and persisted state remain inspectable in the source and local files.
 
 The local HTTP surface is built for LAN use out of the box. `/ui` and `/display` stay unauthenticated on the local network for ready-to-run collaboration, while the server rejects non-local clients by default. Remote authenticated access belongs to the separate Ben Live portal layer.
 
@@ -32,7 +34,7 @@ The local HTTP surface is built for LAN use out of the box. `/ui` and `/display`
 - **Remote Port bridge** — authenticate this orchestrator with Ben Live Port, browse shared logs from the CLI, and publish Captain-authored updates with `/port`
 - **Hierarchical topology** — sub-orchestrators coordinate their own agents for complex multi-step delegation
 - **Telemetry** — transactional audit logging, per-model token/duration tracking, daily session digests
-- **Zero dependencies** — the entire application runs on Node.js built-ins. No npm packages. No supply chain risk.
+- **Zero third-party runtime packages** - application code uses Node.js built-ins. Development still depends on Bun and downloaded TypeScript tooling; runtimes, model files, and external providers require their own trust decisions.
 
 ### How it improves over time
 
@@ -42,9 +44,9 @@ Local Crew is designed to get better the more you use it. The system generates a
 
 ### Prerequisites
 
-- **Node.js** 20+ and **npm**
+- **Node.js** 22.18.0+ and **npm**. `npm start` executes TypeScript directly using Node's built-in type stripping; Node 20 and older Node 22 releases do not support this command without additional tooling. See [Node's TypeScript documentation](https://nodejs.org/api/typescript.html).
 - **Ollama** (recommended) — install from [ollama.com](https://ollama.com). Or any OpenAI-compatible / Anthropic endpoint.
-- **Bun** (optional, for development/testing) — install from [bun.sh](https://bun.sh)
+- **Bun** (required for the test suite and `npm run validate`; optional for running the app) - install from [bun.sh](https://bun.sh)
 
 ### 1. Clone and install
 
@@ -316,7 +318,7 @@ Nothing machine-specific is committed. Local node addresses, model assignments, 
 
 ## Local API
 
-The HTTP API runs on port 4310 (configurable) and serves the browser UI, billboard display, and all read/write operations. When `LOCALCREW_API_TOKEN` is set, all endpoints except health and static assets require Bearer token authentication.
+The HTTP API runs on port 4310 (configurable) and serves the browser UI, billboard display, and read/write operations. When `LOCALCREW_API_TOKEN` is set, mutations require a Bearer token, including `POST` and `DELETE /api/resources`. Public exceptions apply only to `GET`: `/`, `/ui`, `/ui/app.js`, `/ui/styles.css`, `/display`, `/api/health`, `/api/daily-work`, `/api/events`, `/api/status`, `/api/queue`, `/api/resources`, and `/api/audit`. Other reads require the token as well. Public display data can include task text, resource addresses, and audit details; use a trusted network.
 
 <details>
 <summary>API Endpoints</summary>
@@ -439,6 +441,7 @@ Tests TCP ports (Ollama 11434, Crew API 4310, Agent Gateway 4311) and HTTP endpo
 npm install             # install (0 runtime dependencies)
 npm run validate        # typecheck + full test suite
 npm test                # tests only (bun test)
+npm run test:startup    # Node CLI + loopback HTTP/auth smoke test, then /exit
 bunx tsc --noEmit       # typecheck only
 npm run start           # start with Node
 npm run start:bun       # start with Bun
@@ -446,15 +449,15 @@ npm run start:bun       # start with Bun
 
 The project enforces **zero runtime dependencies** — this is a deliberate policy. Use Node built-ins only. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow.
 
-## Security
+## Security and known limitations
 
-- `.localcrew/` is private-by-default — never exposed wholesale via any API
-- File access validated by path containment checks (`readInternalFile`, `ensureSafeRelativePath`, `ensureSafeGeneratedRelativePath`)
-- API authentication enforced when `LOCALCREW_API_TOKEN` is set
-- Agent memory is isolated — agents receive only their own spec and memory
-- Autonomous writes are sandboxed and cannot traverse directories
-- Audit log writes use file locking to prevent corruption
-- No hardcoded secrets or machine-specific values in source
+- The network-address check accepts private and loopback addresses; it is not user authentication. With no `LOCALCREW_API_TOKEN`, network-allowed callers can issue commands and mutate state. Set a token and use `LOCALCREW_API_BIND_HOST=127.0.0.1` for a single-machine session. Keep LAN deployments on a trusted network; do not expose this API directly to the internet.
+- The public UI and display reads intentionally remain accessible when a token is configured. CORS controls browser behavior; it does not authenticate callers or hide public state. This API does not provide TLS itself.
+- Path containment checks guard file APIs and generated write paths. File locking and atomic writes reduce state corruption. These controls do not isolate the whole application from its operating-system account.
+- Script execution applies static deny-lists, time/output limits, and a JavaScript VM wrapper. Python restrictions and memory limits differ by platform. Node explicitly states that [the VM module is not a security mechanism](https://nodejs.org/api/vm.html). These are defense-in-depth checks, not an OS sandbox or a proven network-isolation boundary. Review generated scripts and run untrusted workloads in a separately isolated environment.
+- Agent prompts receive the assigned spec and memory; this is application-level context separation, not a separate process or OS identity for each agent.
+- Inference quality, provider availability, and tool response formats vary. Web tools send queries to their upstream services; local inference does not make every workflow offline or private.
+- Automated tests exercise mocked inference and temporary state. They do not establish live-model quality, every LAN topology, or unattended-run safety. See [release readiness](docs/release-readiness.md) before extended autonomous sessions.
 
 ## License
 
