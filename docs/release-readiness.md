@@ -12,6 +12,7 @@ Fast path command:
    - `bunx tsc --noEmit`
 2. Regression suite
    - `npm test`
+   - `npm run test:startup` (native Node CLI, loopback HTTP authorization, clean exit)
 3. Security baseline
    - local-network boundary validated (`LOCALCREW_API_NETWORK_SCOPE=local` rejects non-local clients)
    - API token behavior validated when `LOCALCREW_API_TOKEN` is set
@@ -56,6 +57,10 @@ Track at minimum:
 - audit stream continuity and write integrity
 
 ## Known Limitations (Current)
+
+- Supported Node startup uses `^22.18.0 || >=24.0.0`; Node 23 is excluded. Bun unit tests using the in-process transport do not validate the real HTTP worker. CI runs native startup separately, and the API regression suite also exercises a required socket transport.
+- Network-local is a trust boundary for addresses, not users. Without an API token, allowed clients can mutate state. Even with a token, display GETs expose task, resource, and audit information.
+- Script deny-lists, VM execution, and process limits do not provide an OS security boundary. Platform-specific Python restrictions do not prove complete filesystem or network isolation. Review scripts and isolate untrusted workloads separately.
 
 - Web search relies on upstream DuckDuckGo HTML layout and may require parser adjustments if the provider changes markup.
 - Dedicated always-active billboard mode intentionally uses persistent live updates and is higher resource usage than default auto-pause mode.

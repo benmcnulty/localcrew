@@ -11,7 +11,7 @@ Thank you for your interest in contributing to Local Crew. This document covers 
 
 ### Prerequisites
 
-- **Node.js** >= 20.0.0
+- **Node.js** `^22.18.0 || >=24.0.0` (native TypeScript entrypoint; CI checks 22.18.0 and 24)
 - **Bun** (for running tests): install from [bun.sh](https://bun.sh)
 - **Ollama** (optional, for local inference): install from [ollama.com](https://ollama.com)
 
@@ -28,6 +28,7 @@ bun run src/index.ts   # Start with Bun directly
 
 ```bash
 npm test                          # Run all tests
+npm run test:startup               # Verify Node CLI/API startup and shutdown in temporary state
 bun test test/commands.test.ts    # Run a single test file
 ```
 

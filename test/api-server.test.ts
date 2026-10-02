@@ -119,6 +119,127 @@ afterEach(() => {
 });
 
 describe("API server", () => {
+  test("serves Bun worker requests over real HTTP and limits public SSE to GET", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-worker-token";
+      await seedResourceInventory(rootDir);
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("No inference"),
+        speakFn: () => {}
+      });
+      const api = await startApiServer(app, { rootDir, requireSocket: true });
+      expect(api).not.toBeNull();
+      expect(api!.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      const request = (path: string, init: RequestInit = {}) =>
+        fetch(`${api!.url}${path}`, { ...init, signal: AbortSignal.timeout(1000) });
+      try {
+        // These responses require IPC after the worker has announced readiness.
+        expect((await request("/api/health")).status).toBe(200);
+        expect((await request("/api/status")).status).toBe(200);
+        expect((await request("/api/resources")).status).toBe(200);
+        const events = await request("/api/events");
+        expect(events.status).toBe(200);
+        expect(events.headers.get("content-type")).toContain("text/event-stream");
+        const reader = events.body!.getReader();
+        try {
+          const connected = await reader.read();
+          expect(new TextDecoder().decode(connected.value)).toContain('"connected"');
+          api!.pushDisplayEvent({ type: "state", proof: "worker-event-delivered" });
+          const update = await reader.read();
+          expect(new TextDecoder().decode(update.value)).toContain("worker-event-delivered");
+        } finally {
+          await reader.cancel();
+        }
+        for (const method of ["POST", "DELETE"]) {
+          for (const path of ["/api/events", "/api/resources"]) {
+            const response = await request(path, { method });
+            const status = response.status;
+            await response.body?.cancel();
+            expect(status).toBe(401);
+          }
+          const unsupported = await request("/api/events", {
+            method, headers: { authorization: "Bearer test-worker-token" }
+          });
+          expect(unsupported.status).toBe(404);
+        }
+        expect((await request("/api/events", { method: "OPTIONS" })).status).toBe(204);
+      } finally {
+        await api?.close();
+      }
+      await expect(request("/api/health")).rejects.toThrow();
+    });
+  }, 8000);
+
+  test("keeps resource reads public but authenticates every resource mutation", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-resource-token";
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("No external inference"),
+        speakFn: () => {}
+      });
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        const before = await app.getResourcesSnapshot();
+        expect((await fetch(`${api!.url}/api/resources`)).status).toBe(200);
+
+        for (const authorization of [undefined, "Bearer wrong-token"]) {
+          const headers: Record<string, string> = { "content-type": "application/json" };
+          if (authorization) headers.authorization = authorization;
+          const add = await fetch(`${api!.url}/api/resources`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              alias: "unauthorized",
+              label: "Unauthorized resource",
+              baseUrl: "http://127.0.0.1:11437"
+            })
+          });
+          expect(add.status).toBe(401);
+          const remove = await fetch(`${api!.url}/api/resources?alias=helper`, {
+            method: "DELETE",
+            headers
+          });
+          expect(remove.status).toBe(401);
+          expect(await app.getResourcesSnapshot()).toEqual(before);
+        }
+
+        const headers = {
+          "content-type": "application/json",
+          authorization: "Bearer test-resource-token"
+        };
+        const add = await fetch(`${api!.url}/api/resources`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            alias: "authorized",
+            label: "Authorized resource",
+            baseUrl: "http://127.0.0.1:11437"
+          })
+        });
+        expect(add.status).toBe(200);
+        expect((await app.getResourcesSnapshot()).some((resource) => resource.alias === "authorized")).toBe(true);
+        const remove = await fetch(`${api!.url}/api/resources?alias=authorized`, {
+          method: "DELETE",
+          headers
+        });
+        expect(remove.status).toBe(200);
+        expect((await app.getResourcesSnapshot()).some((resource) => resource.alias === "authorized")).toBe(false);
+      } finally {
+        await api?.close();
+      }
+    });
+  });
+
   test("classifies local-network client addresses conservatively", () => {
     expect(isLocalApiClientAddress("127.0.0.1")).toBe(true);
     expect(isLocalApiClientAddress("::1")).toBe(true);

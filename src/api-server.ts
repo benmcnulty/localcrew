@@ -238,7 +238,7 @@ async function buildApiResponse(
   if (requiredToken) {
     // Skip auth for static UI assets, health check, and read-only display data
     const publicPaths = ["/", "/ui", "/ui/app.js", "/ui/styles.css", "/api/health", "/display", "/api/daily-work", "/api/events", "/api/status", "/api/queue", "/api/resources", "/api/audit"];
-    if (!publicPaths.includes(request.url.pathname)) {
+    if (request.method !== "GET" || !publicPaths.includes(request.url.pathname)) {
       if (getRequestApiToken(request) !== requiredToken) {
         return jsonResponse(401, { error: "Unauthorized. Provide a valid Bearer token." });
       }
@@ -679,7 +679,11 @@ async function startNodeWorkerApi(
         return;
       }
       settled = true;
-      cleanup();
+      // Successful startup keeps the IPC request handler alive for the worker.
+      if (!handle) {
+        cleanup();
+        child.kill();
+      }
       resolveHandle(handle);
     };
 
@@ -745,6 +749,7 @@ async function startNodeWorkerApi(
                   clearTimeout(timeout);
                 }
                 child.off("exit", handleExit);
+                cleanup();
                 resolveClose();
               };
 
@@ -772,6 +777,7 @@ async function startNodeWorkerApi(
 
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) {
+        cleanup();
         return;
       }
 
@@ -863,6 +869,7 @@ export async function startApiServer(
   options: {
     rootDir?: string;
     warn?: (message: string) => void;
+    requireSocket?: boolean;
   } = {}
 ): Promise<ApiServerHandle | null> {
   const rootDir = options.rootDir ?? process.cwd();
@@ -879,7 +886,7 @@ export async function startApiServer(
   const requestedPort = getEnvNumber("LOCALCREW_API_PORT", 4310);
   const bunRuntime = (globalThis as { Bun?: object }).Bun;
   if (bunRuntime) {
-    if (requestedPort === 0) {
+    if (requestedPort === 0 && !options.requireSocket) {
       return startVirtualApiServer(app, warn);
     }
 
@@ -888,7 +895,7 @@ export async function startApiServer(
       return handle;
     }
 
-    return startVirtualApiServer(app, warn);
+    return options.requireSocket ? null : startVirtualApiServer(app, warn);
   }
 
   const server = createServer(async (request, response) => {
