@@ -59,7 +59,7 @@ const server = createServer((request, response) => {
 
   // SSE connections are handled locally — no IPC round-trip needed.
   const reqUrl = new URL(request.url ?? "/", "http://localhost");
-  if (reqUrl.pathname === "/api/events") {
+  if (request.method === "GET" && reqUrl.pathname === "/api/events") {
     // No auth check — SSE events are public for unauthenticated billboard access.
     response.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",

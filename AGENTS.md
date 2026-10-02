@@ -101,7 +101,7 @@ Tests use `bun:test` (`import { describe, expect, test } from "bun:test"`). Ever
 - `loadSeedFile()` validates the resolved path stays within the external-memory directory
 - Agents receive only their own spec and memory in prompts — not the full orchestrator state
 - Autonomous writes are redirected away from external dropbox by `shouldPreferInternalWrite()`
-- Sandboxed script execution (`sandbox.ts`) enforces static analysis deny-lists (forbidden imports, builtins, globals), CPU time limits (30s), memory limits (512MB), output caps (64KB), and temp-file cleanup. Scripts run as child processes with no network access. Session tracking blocks agents after repeated rejections.
+- Script execution (`sandbox.ts`) applies static deny-lists, wall-clock timeouts, output caps, temporary-file cleanup, and platform-specific memory/Python restrictions. JavaScript runs through a VM wrapper in a child process. These checks do not provide an OS security boundary or prove network isolation. Review generated scripts and isolate untrusted workloads separately. Session tracking blocks agents after repeated rejections.
 - Display UI markdown rendering validates URL protocols (only `http:`, `https:`, `mailto:`) to prevent `javascript:` XSS in generated content
 - Display page lifecycle (`pagehide`) cleans up SSE connections and overlay timers to prevent resource leaks
 

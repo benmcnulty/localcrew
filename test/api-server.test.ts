@@ -119,6 +119,60 @@ afterEach(() => {
 });
 
 describe("API server", () => {
+  test("serves Bun worker requests over real HTTP and limits public SSE to GET", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-worker-token";
+      await seedResourceInventory(rootDir);
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("No inference"),
+        speakFn: () => {}
+      });
+      const api = await startApiServer(app, { rootDir, requireSocket: true });
+      expect(api).not.toBeNull();
+      expect(api!.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      const request = (path: string, init: RequestInit = {}) =>
+        fetch(`${api!.url}${path}`, { ...init, signal: AbortSignal.timeout(1000) });
+      try {
+        // These responses require IPC after the worker has announced readiness.
+        expect((await request("/api/health")).status).toBe(200);
+        expect((await request("/api/status")).status).toBe(200);
+        expect((await request("/api/resources")).status).toBe(200);
+        const events = await request("/api/events");
+        expect(events.status).toBe(200);
+        expect(events.headers.get("content-type")).toContain("text/event-stream");
+        const reader = events.body!.getReader();
+        try {
+          const connected = await reader.read();
+          expect(new TextDecoder().decode(connected.value)).toContain('"connected"');
+          api!.pushDisplayEvent({ type: "state", proof: "worker-event-delivered" });
+          const update = await reader.read();
+          expect(new TextDecoder().decode(update.value)).toContain("worker-event-delivered");
+        } finally {
+          await reader.cancel();
+        }
+        for (const method of ["POST", "DELETE"]) {
+          for (const path of ["/api/events", "/api/resources"]) {
+            const response = await request(path, { method });
+            const status = response.status;
+            await response.body?.cancel();
+            expect(status).toBe(401);
+          }
+          const unsupported = await request("/api/events", {
+            method, headers: { authorization: "Bearer test-worker-token" }
+          });
+          expect(unsupported.status).toBe(404);
+        }
+        expect((await request("/api/events", { method: "OPTIONS" })).status).toBe(204);
+      } finally {
+        await api?.close();
+      }
+      await expect(request("/api/health")).rejects.toThrow();
+    });
+  }, 8000);
+
   test("keeps resource reads public but authenticates every resource mutation", async () => {
     await withTempDir(async (rootDir) => {
       process.env.LOCALCREW_API_PORT = "0";

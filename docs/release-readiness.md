@@ -58,7 +58,7 @@ Track at minimum:
 
 ## Known Limitations (Current)
 
-- Supported Node startup requires 22.18.0 or newer; Bun tests alone do not validate Node startup. CI runs the native startup smoke test separately.
+- Supported Node startup uses `^22.18.0 || >=24.0.0`; Node 23 is excluded. Bun unit tests using the in-process transport do not validate the real HTTP worker. CI runs native startup separately, and the API regression suite also exercises a required socket transport.
 - Network-local is a trust boundary for addresses, not users. Without an API token, allowed clients can mutate state. Even with a token, display GETs expose task, resource, and audit information.
 - Script deny-lists, VM execution, and process limits do not provide an OS security boundary. Platform-specific Python restrictions do not prove complete filesystem or network isolation. Review scripts and isolate untrusted workloads separately.
 
