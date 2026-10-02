@@ -119,6 +119,73 @@ afterEach(() => {
 });
 
 describe("API server", () => {
+  test("keeps resource reads public but authenticates every resource mutation", async () => {
+    await withTempDir(async (rootDir) => {
+      process.env.LOCALCREW_API_PORT = "0";
+      process.env.LOCALCREW_API_BIND_HOST = "127.0.0.1";
+      process.env.LOCALCREW_API_TOKEN = "test-resource-token";
+      await seedResourceInventory(rootDir);
+
+      const app = await LocalCrewApp.create({
+        rootDir,
+        fetchFn: async () => makeChatResponse("No external inference"),
+        speakFn: () => {}
+      });
+      const api = await startApiServer(app, { rootDir });
+      expect(api).not.toBeNull();
+
+      try {
+        const before = await app.getResourcesSnapshot();
+        expect((await fetch(`${api!.url}/api/resources`)).status).toBe(200);
+
+        for (const authorization of [undefined, "Bearer wrong-token"]) {
+          const headers: Record<string, string> = { "content-type": "application/json" };
+          if (authorization) headers.authorization = authorization;
+          const add = await fetch(`${api!.url}/api/resources`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              alias: "unauthorized",
+              label: "Unauthorized resource",
+              baseUrl: "http://127.0.0.1:11437"
+            })
+          });
+          expect(add.status).toBe(401);
+          const remove = await fetch(`${api!.url}/api/resources?alias=helper`, {
+            method: "DELETE",
+            headers
+          });
+          expect(remove.status).toBe(401);
+          expect(await app.getResourcesSnapshot()).toEqual(before);
+        }
+
+        const headers = {
+          "content-type": "application/json",
+          authorization: "Bearer test-resource-token"
+        };
+        const add = await fetch(`${api!.url}/api/resources`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            alias: "authorized",
+            label: "Authorized resource",
+            baseUrl: "http://127.0.0.1:11437"
+          })
+        });
+        expect(add.status).toBe(200);
+        expect((await app.getResourcesSnapshot()).some((resource) => resource.alias === "authorized")).toBe(true);
+        const remove = await fetch(`${api!.url}/api/resources?alias=authorized`, {
+          method: "DELETE",
+          headers
+        });
+        expect(remove.status).toBe(200);
+        expect((await app.getResourcesSnapshot()).some((resource) => resource.alias === "authorized")).toBe(false);
+      } finally {
+        await api?.close();
+      }
+    });
+  });
+
   test("classifies local-network client addresses conservatively", () => {
     expect(isLocalApiClientAddress("127.0.0.1")).toBe(true);
     expect(isLocalApiClientAddress("::1")).toBe(true);

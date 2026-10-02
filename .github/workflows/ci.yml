@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20, 22]
+        node-version: [22.18.0, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +32,6 @@ jobs:
 
       - name: Validate (typecheck + tests)
         run: npm run validate
+
+      - name: Smoke test Node startup and shutdown
+        run: npm run test:startup

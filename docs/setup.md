@@ -1,5 +1,7 @@
 # Setup
 
+Use Node.js 22.18.0 or newer for `npm start` and the setup scripts. The app runs `.ts` files directly through native type stripping. Bun is required for tests and validation; it can also run the app through `npm run start:bun`.
+
 ## Minimal Step-by-Step (Recommended)
 
 1. Install and validate:
