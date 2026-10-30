@@ -510,10 +510,10 @@ async function resolveSetupOptions(setup) {
   }
 
   console.log("");
-  console.log("Job opportunity surfacing — the autonomous network will search for aligned roles each session.");
+  console.log("Job opportunity surfacing — your answer is saved as a preference. The runtime does not check it yet.");
   const jobDefault = existingPrefs.jobSearchEnabled !== undefined
     ? existingPrefs.jobSearchEnabled
-    : true;
+    : false;
   const jobSearchEnabled = await promptYesNo("Include job search in daily autonomous sessions?", jobDefault);
 
   // --- Web Tool Authorization ---

@@ -87,7 +87,7 @@ npm run setup:crew
 This prompts for:
 - **Orchestrator name** — displayed in the CLI, browser UI, and future remote views
 - **Weather location** — zip code or city for the autonomous weather tool
-- **Job search** — whether to include job opportunity surfacing in daily sessions
+- **Job search** — whether to include job opportunity surfacing in daily sessions (default: no). The answer is saved as a preference, but the runtime does not check it yet. The seed instructions ask agents to run role research only when you ask for it; that is guidance to the model, not an enforced setting.
 
 The script discovers your local models, writes the managed `.env.local`, registers the primary resource, and starts Local Crew in the same terminal.
 

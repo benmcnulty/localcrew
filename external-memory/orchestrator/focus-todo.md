@@ -6,9 +6,9 @@
 - [high] Phase 1 Reflect: consult the performance summary in context — identify which resources or models are underperforming and why. Capture any new patterns in learnings.md before planning.
 - [high] Phase 2 Plan: produce a sequenced, coordinated 3–6 item task set informed by the reflection summary. Each task concrete, distinct, proportionate.
 - [high] Phase 3 Implement: check confidence level (HIGH / MEDIUM / LOW) before starting each task. Emit LOW_CONFIDENCE: reason when uncertain. After each task, write a brief retrospective to summary.md.
-- [high] Phase 4 Benefit: dedicate real cycles to proactive user value — career research, knowledge enrichment, goal exploration. This phase is not optional.
+- [high] Phase 4 Benefit: dedicate real cycles to proactive user value — knowledge enrichment, goal exploration, and user research when asked. This phase is not optional.
 - [high] Rotate focus areas across cycles: routing → memory → observability → queue hygiene → recovery → user research. Check audit log to avoid fixation.
-- [high] Every cycle must produce at least one externally useful deliverable (job research, digest content, feature request, or actionable finding).
+- [high] Every cycle must produce at least one externally useful deliverable (a research finding, digest content, feature request, or actionable finding).
 
 ## Introspection and Learning
 
@@ -18,7 +18,7 @@
 
 ## Standing Objectives
 
-- [high] Surface job opportunities aligned with the user's skills (AI eng, LLM infra, agent orchestration): run SEARCH[jobs] and SEARCH[news] each autonomous session; log findings with scope=job-research; store curated summaries in .localcrew/system/job-opportunities.md.
+- [medium] If the user asks for role research, surface opportunities aligned with the profile's stated skills; log findings with scope=job-research and keep summaries in internal memory only.
 - [high] Keep canonical resource naming, routing, and queue delegation resistant to context drift.
 - [high] Leverage daily work sessions to bound autonomous work into coherent deliverable cycles.
 - [high] Use canonical memory updates (WRITE[internal]) to keep summaries, focus, and roadmap current during long /auto runs.

@@ -139,7 +139,7 @@ Purpose: Apply the same Reflect → Plan → Implement rigor, but focused outwar
 - Read the `user-profile.md` to understand who the user is, what they need, and what their goals are.
 - Consider what the agents have been doing and what the system's tools are organized around. Ask: "What opportunities exist to help this user that they haven't explicitly asked for?"
 - Categories of proactive benefit include (but are not limited to):
-  - **Career advancement**: job research, compensation benchmarking, skills gap analysis, networking opportunities.
+  - **Career advancement** (only when the user asks for it): role research, skills gap analysis, networking opportunities.
   - **Knowledge enrichment**: surfacing relevant industry news, technical developments, learning resources aligned with user interests.
   - **Process optimization**: identifying patterns in the user's workflow that could be improved, preparing actionable suggestions.
   - **Goal exploration**: connecting the user's stated interests with adjacent opportunities they may not have considered.
@@ -181,7 +181,7 @@ Accurate self-assessment is a first-order capability. When confidence is low, pr
 
 - Agents accumulate private memory by domain. Orchestrator reflection is responsible for **cross-pollinating** high-value learnings between agents.
 - During Phase 1 Reflect, check agent notes for recent domain discoveries worth broadcasting:
-  - Research agent learnings about user career context → update `user-profile.md` benchmarks
+  - Research agent learnings about the user's stated goals → note them in the research agent's memory; `user-profile.md` is edited by the user
   - Synthesis agent failure-mode patterns → update routing heuristics in `summary.md`
   - System agent routing observations → update directives or resource notes
   - Knowledge agent documentation gaps → add to `learnings.md` or roadmap
@@ -192,8 +192,8 @@ Accurate self-assessment is a first-order capability. When confidence is low, pr
 
 - Self-improvement work must produce **measurable, distinct outcomes** each cycle — not restated versions of the same improvement.
 - Before queuing a self-improvement task, check the audit log for the last 5 completed tasks. If the proposed task substantially overlaps with a recently completed one, skip it or narrow it to the delta.
-- Rotate focus areas across cycles: routing → memory → observability → queue hygiene → recovery → job research. Do not fixate on one area for multiple consecutive cycles.
-- Each autonomous cycle should include at least one **externally useful deliverable** (job research, digest content, feature request ticket, or a concrete measurement) alongside any internal process work.
+- Rotate focus areas across cycles: routing → memory → observability → queue hygiene → recovery → user research. Do not fixate on one area for multiple consecutive cycles.
+- Each autonomous cycle should include at least one **externally useful deliverable** (a research finding, digest content, feature request ticket, or a concrete measurement) alongside any internal process work.
 - If you find yourself rewriting the same summary, index, or process document more than twice in a session, stop. The document is stable enough. Move on to a different category of work.
 - Periodically review and prune completed tasks from state. Carrying a long completed-task history wastes context and encourages re-proposing similar work.
 - When generating queue-fill tasks, enforce a diversity constraint: no two tasks in the same batch should target the same file, document, or process area.
@@ -243,17 +243,13 @@ Accurate self-assessment is a first-order capability. When confidence is low, pr
 - Resource redistribution is dynamic: agents can be reassigned between orchestrators as workload shifts.
 - Sub-orchestrators should coordinate with their subordinate agents, not bypass them by performing all work directly.
 
-## User Research & Job Opportunity Surfacing
+## User Research (On Request)
 
-- A `user-profile.md` file in this directory describes the current primary user's skills, compensation benchmarks, and ideal role characteristics. Read it at the start of each autonomous session.
-- Job opportunity surfacing is a **primary daily autonomous objective** alongside self-improvement work. It is not optional.
-- During each open or research daily session, run at least one job research cycle using `SEARCH[jobs]:` and `SEARCH[news]:` markers with skill-aligned queries from the user profile.
-- Prioritize roles that match the user's core strengths: autonomous agent systems, LLM infrastructure, multi-device orchestration, TypeScript/Bun backend, developer tooling.
-- Cross-reference discovered roles against the compensation benchmarks in `user-profile.md`. Surface roles at or above the midpoint for their tier.
-- Log findings as audit events with scope `job-research` so they appear in `/status` and can be reviewed in the audit log.
-- Store curated opportunity summaries in `.localcrew/system/job-opportunities.md` — internal memory, not committed. Update this file incrementally rather than overwriting.
-- Promote only stable compensation benchmark updates back to `user-profile.md` after multiple confirming data points across sessions.
-- This directive is **user-scoped**: the `user-profile.md` file is the single source of truth for who the current user is and what they need. Other installations should maintain their own `user-profile.md` with their own skills and targets.
+- A `user-profile.md` file in this directory may describe the current user's skills, interests, and goals. It is gitignored and maintained by the user; `user-profile.example.md` is the committed template. Read it at the start of each autonomous session if it exists.
+- Research on the user's behalf is off by default. Only run role or opportunity research when the user asks for it directly. A profile section alone is not a request, and the saved job-search preference is not checked at runtime yet. Otherwise, spend Benefit-phase cycles on knowledge enrichment, process optimization, or goal exploration.
+- When research is enabled, use `SEARCH[jobs]:` and `SEARCH[news]:` markers with queries drawn from the profile, log findings as audit events with scope `job-research`, and keep curated summaries in internal memory under `.localcrew/system/` (never committed).
+- Do not write findings, targets, or pay figures back into committed files. Personal data stays in the gitignored profile and internal memory.
+- This directive is **user-scoped**: each installation maintains its own `user-profile.md`.
 
 ## Recovery Discipline
 
