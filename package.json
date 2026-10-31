@@ -21,7 +21,7 @@
     "repl"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": "^22.18.0 || >=24.0.0"
   },
   "scripts": {
     "setup:crew": "node scripts/setup-orchestrator.js",
@@ -30,7 +30,8 @@
     "start:bun": "bun run src/index.ts",
     "start:node": "node src/index.ts",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test ./test/*.test.ts",
+    "test": "bun test ./test",
+    "test:startup": "node scripts/test-node-startup.js",
     "validate": "npm run typecheck && npm test"
   }
 }
